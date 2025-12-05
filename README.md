@@ -2,7 +2,7 @@
 
 **專業的 Revit 工具集 - 提升 BIM 工作效率**
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/YourUsername/YD_BIM_Tools/releases)
+[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/QOORST/YD_BIM_Tools/releases)
 [![Revit](https://img.shields.io/badge/Revit-2024%20|%202025%20|%202026-orange.svg)](https://www.autodesk.com/products/revit)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -47,7 +47,7 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 ### 安裝步驟
 
 1. **下載安裝程式**
-   - 前往 [Releases](https://github.com/YourUsername/YD_BIM_Tools/releases) 頁面
+   - 前往 [Releases](https://github.com/QOORST/YD_BIM_Tools/releases) 頁面
    - 下載最新版本的 `YD_BIM_Tools_vX.X_Setup.exe`
 
 2. **執行安裝**
@@ -93,7 +93,7 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 ## 📚 文檔
 
-- [完整使用手冊](https://github.com/YourUsername/YD_BIM_Tools/wiki)
+- [完整使用手冊](https://github.com/QOORST/YD_BIM_Tools/wiki)
 - [自動更新功能說明](docs/auto-update.md)
 - [管線避讓工具指南](docs/pipe-avoid.md)
 - [常見問題 FAQ](docs/FAQ.md)
@@ -139,7 +139,7 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 - **Email**: qoorst123@yesdir.com.tw
 - **網站**: www.ydbim.com
-- **Issues**: [GitHub Issues](https://github.com/YourUsername/YD_BIM_Tools/issues)
+- **Issues**: [GitHub Issues](https://github.com/QOORST/YD_BIM_Tools/issues)
 
 ---
 
