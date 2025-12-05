@@ -2,7 +2,7 @@
 
 **專業的 Revit 工具集 - 提升 BIM 工作效率**
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/QOORST/YD_BIM_Tools/releases)
+[![Version](https://img.shields.io/badge/version-2.2.3-blue.svg)](https://github.com/QOORST/YD_BIM_Tools/releases)
 [![Revit](https://img.shields.io/badge/Revit-2024%20|%202025%20|%202026-orange.svg)](https://www.autodesk.com/products/revit)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
