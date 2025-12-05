@@ -1,9 +1,8 @@
 {
-  "version": "2.2.0",
-  "downloadUrl": "https://github.com/QOORST/YD_BIM_Tools/releases/download/v2.2.0/YD_BIM_Tools_v2.2_Setup.exe",
-  "releaseNotes": "新功能：\n• 新增自動更新功能\n• 新增管線避讓工具\n\n改進：\n• 優化性能\n• 修復已知問題",
-  "releaseDate": "2025-12-05T00:00:00Z",
-  "isCritical": false,
+  "version": "2.2.3",
+  "downloadUrl": "https://github.com/QOORST/YD_BIM_Tools/releases/download/v2.2.3/YD_BIM_Tools_v2.2.3_Setup.exe",
+  "releaseNotes": "修復：\n• 修復自動更新功能依賴項缺失問題\n• 修復「值不能為 null」錯誤\n• 改進錯誤處理和診斷資訊\n• 添加 System.Text.Json 及其依賴項\n\n改進：\n• 提供更詳細的錯誤訊息\n• 添加多層防禦性檢查\n• 改進網路連線錯誤提示\n• 優化異常分類處理",
+  "releaseDate": "2025-12-05T13:00:00Z",
+  "isCritical": true,
   "minimumVersion": "2.0.0"
 }
-
