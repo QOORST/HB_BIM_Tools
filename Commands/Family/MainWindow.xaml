@@ -1,0 +1,28 @@
+<Window x:Class="YD_RevitTools.LicenseManager.Commands.Family.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Family Parameter Slider Tool" Height="550" Width="400"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize"
+        Topmost="True"
+        ShowInTaskbar="True">
+    <DockPanel Margin="15">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,15">
+            <TextBlock Name="TypeLabel" Text="當前類型:" FontSize="16" FontWeight="Bold"/>
+            <TextBlock Text="使用滑桿或直接輸入數值後按 Enter 更新參數" 
+                       FontSize="11" Foreground="Gray" Margin="0,5,0,0"/>
+        </StackPanel>
+        
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+            <Button Name="RefreshButton" Content="刷新當前類型" Click="Refresh_Click" 
+                    Padding="10,5" Margin="0,0,10,0"/>
+            <Button Click="OpenSettings_Click" Content="⚙ 設定" Padding="10,5"/>
+        </StackPanel>
+        
+        <Border BorderBrush="LightGray" BorderThickness="1" CornerRadius="3" Padding="10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Name="MainStack" />
+            </ScrollViewer>
+        </Border>
+    </DockPanel>
+</Window>

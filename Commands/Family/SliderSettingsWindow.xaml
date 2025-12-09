@@ -1,0 +1,33 @@
+<Window x:Class="YD_RevitTools.LicenseManager.Commands.Family.SliderSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Slider Settings" Height="250" Width="350"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <TextBlock Grid.Row="0" Text="滑桿最小值 (mm)" Margin="0,0,0,5"/>
+        <TextBox Grid.Row="1" Name="MinBox" Margin="0,0,0,10"/>
+        
+        <TextBlock Grid.Row="2" Text="滑桿最大值 (mm)" Margin="0,0,0,5"/>
+        <TextBox Grid.Row="3" Name="MaxBox" Margin="0,0,0,10"/>
+        
+        <TextBlock Grid.Row="4" Text="滑桿步進單位 (mm)" Margin="0,0,0,5"/>
+        <TextBox Grid.Row="5" Name="StepBox" Margin="0,0,0,10"/>
+        
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="確定" Click="Apply_Click" Width="80" Margin="0,0,10,0" IsDefault="True"/>
+            <Button Content="取消" Click="Cancel_Click" Width="80" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

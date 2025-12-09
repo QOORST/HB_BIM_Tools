@@ -1,0 +1,9 @@
+{
+  "version": "2.3.0",
+  "downloadUrl": "https://download.ydbim.com/YD_BIM_Tools_v2.3_Setup.exe",
+  "releaseNotes": "新功能：\n• 新增管線避讓工具\n• 優化 COBie 匯出性能\n• 修復已知問題\n\n改進：\n• 提升授權驗證速度\n• 優化 UI 響應性能",
+  "releaseDate": "2025-12-10T00:00:00Z",
+  "isCritical": false,
+  "minimumVersion": "2.0.0"
+}
+

@@ -1,0 +1,83 @@
+<Window x:Class="YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="管線套管工具" Height="600" Width="500"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="True">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 標題 -->
+        <TextBlock Grid.Row="0" Text="自動套管放置"
+                   FontSize="16" FontWeight="Bold" Margin="0,0,0,15"/>
+
+        <!-- 套管族群選擇 -->
+        <GroupBox Grid.Row="1" Header="套管族群設定" Margin="0,0,0,10">
+            <StackPanel Margin="5">
+                <TextBlock Text="牆套管族群:" Margin="0,5,0,5"/>
+                <ComboBox x:Name="cmbWallSleeveFamily" Height="25" Margin="0,0,0,10"/>
+
+                <TextBlock Text="樓板/樑套管族群:" Margin="0,5,0,5"/>
+                <ComboBox x:Name="cmbFloorSleeveFamily" Height="25" Margin="0,0,0,10"/>
+
+                <CheckBox x:Name="chkIncludeLinks" Content="包含連結模型中的結構元素"
+                          IsChecked="True" Margin="0,10,0,5"
+                          ToolTip="勾選此項以檢測連結模型（如建築模型、結構模型）中的牆、樓板和樑"/>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- 套管參數設定 -->
+        <GroupBox Grid.Row="2" Header="套管參數" Margin="0,0,0,10">
+            <StackPanel Margin="5">
+                <CheckBox x:Name="chkAutoSize" Content="根據管徑自動調整套管尺寸"
+                          IsChecked="True" Margin="0,5,0,10"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                    <TextBlock Text="間隙距離 (mm):" Width="120" VerticalAlignment="Center"/>
+                    <TextBox x:Name="txtClearance" Width="100" Height="25" Text="50"/>
+                </StackPanel>
+
+                <CheckBox x:Name="chkUpdateExisting" Content="更新現有套管"
+                          IsChecked="False" Margin="0,10,0,5"/>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- 編號與測量 -->
+        <GroupBox Grid.Row="3" Header="編號與測量" Margin="0,0,0,10">
+            <StackPanel Margin="5">
+                <CheckBox x:Name="chkAutoNumber" Content="自動編號套管"
+                          IsChecked="True" Margin="0,5,0,10"/>
+
+                <CheckBox x:Name="chkMeasureDistance" Content="計算與結構體的距離"
+                          IsChecked="True" Margin="0,0,0,5"/>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- 預覽資訊 -->
+        <GroupBox Grid.Row="4" Header="預覽資訊" Margin="0,0,0,10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <TextBlock x:Name="txtPreview" TextWrapping="Wrap" Padding="5"
+                           Background="#F5F5F5" FontFamily="Microsoft JhengHei UI" FontSize="11"/>
+            </ScrollViewer>
+        </GroupBox>
+
+        <!-- 按鈕 -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="btnAnalyze" Content="分析" Width="100" Height="30"
+                    Margin="0,0,10,0" Click="BtnAnalyze_Click"/>
+            <Button x:Name="btnExecute" Content="執行" Width="100" Height="30"
+                    Margin="0,0,10,0" Click="BtnExecute_Click" IsEnabled="False"/>
+            <Button x:Name="btnCancel" Content="取消" Width="100" Height="30"
+                    Click="BtnCancel_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
+

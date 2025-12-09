@@ -1,0 +1,91 @@
+<Window x:Class="YD_RevitTools.LicenseManager.UI.Finishings.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AR 裝修工具" Height="400" Width="550" ResizeMode="NoResize" WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 房間範圍 -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="房間範圍:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <RadioButton x:Name="rbAllRooms" Content="所有房間" IsChecked="True" Margin="0,0,12,0"/>
+            <RadioButton x:Name="rbPickRooms" Content="選擇房間"/>
+            <Button x:Name="btnPickRooms" Content="選取..." Margin="8,0,0,0"/>
+            <TextBlock x:Name="txtPickedCount" Margin="8,0,0,0" Foreground="Gray" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Vertical">
+            <!-- 地板 -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" VerticalAlignment="Center">
+                <Label Content="地板" Width="80"/>
+                <ComboBox x:Name="cmbFloors" Width="200" Margin="0,0,6,0">
+                    <ComboBox.Style>
+                        <Style TargetType="ComboBox">
+                            <Style.Triggers>
+                                <Trigger Property="SelectedItem" Value="{x:Null}">
+                                    <Setter Property="Background" Value="LightGray"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ComboBox.Style>
+                </ComboBox>
+                <ComboBox x:Name="cmbBoundary" Width="120">
+                    <ComboBoxItem Content="內緣"  Tag="InnerFinish"/>
+                    <ComboBoxItem Content="中心線" Tag="Centerline"/>
+                    <ComboBoxItem Content="外緣"  Tag="OuterFinish"/>
+                </ComboBox>
+            </StackPanel>
+
+            <!-- 天花板 -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <Label Content="天花板" Width="80"/>
+                <ComboBox x:Name="cmbCeilings" Width="200" Margin="0,0,6,0"/>
+                <Label Content="高度(mm)" Width="60"/>
+                <TextBox x:Name="txtCeilingHeight" Width="80" Text="3000"/>
+            </StackPanel>
+
+            <!-- 牆面 -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <Label Content="牆面" Width="80"/>
+                <ComboBox x:Name="cmbWalls" Width="200" Margin="0,0,6,0"/>
+                <Label Content="偏移(mm)" Width="60"/>
+                <TextBox x:Name="txtWallOffset" Width="80" Text="300"/>
+            </StackPanel>
+            
+            <!-- 牆面切割選項 -->
+            <StackPanel Orientation="Horizontal" Margin="80,0,0,6">
+                <CheckBox x:Name="chkSkipOpeningsForWalls" Content="避開門窗開口" IsChecked="True" Margin="0,0,12,0"/>
+                <Button x:Name="btnAutoJoinWalls" Content="自動接合牆面" Margin="12,0,0,0" Height="24"/>
+            </StackPanel>
+
+            <!-- 踢腳板 -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <Label Content="踢腳板" Width="80"/>
+                <ComboBox x:Name="cmbSkirtings" Width="200" Margin="0,0,6,0"/>
+                <Label Content="高度(mm)" Width="60"/>
+                <TextBox x:Name="txtSkirtingHeight" Width="80" Text="100"/>
+            </StackPanel>
+            
+            <!-- 踢腳板切割選項 -->
+            <StackPanel Orientation="Horizontal" Margin="80,0,0,6">
+                <CheckBox x:Name="chkSkipDoor" Content="跳過門口" IsChecked="True" Margin="0,0,12,0"/>
+                <CheckBox x:Name="chkSkipWindow" Content="跳過窗戶" IsChecked="True" Margin="0,0,12,0"/>
+            </StackPanel>
+
+            <Button x:Name="btnGenerate" Content="產生幾何元素" Height="36" Margin="0,8,0,0" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                <CheckBox x:Name="chkSetValuesGeom"  Content="設定幾何元素參數" IsChecked="True" Margin="0,0,16,0"/>
+                <CheckBox x:Name="chkSetValuesRooms" Content="設定房間參數"    IsChecked="True"/>
+            </StackPanel>
+
+            <Button x:Name="btnUpdateValues" Content="更新元素參數" Height="36" Margin="0,6,0,0" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="2" x:Name="txtStatus" Margin="0,10,0,0" Foreground="Gray" />
+    </Grid>
+</Window>

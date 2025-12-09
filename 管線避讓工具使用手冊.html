@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管線避讓工具使用手冊 - YD_BIM Tools</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft JhengHei', 'Segoe UI', Arial, sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .header .subtitle {
+            font-size: 1.2em;
+            opacity: 0.95;
+        }
+
+        .version-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+
+        .nav {
+            background: #f8f9fa;
+            padding: 20px 40px;
+            border-bottom: 3px solid #667eea;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .nav a {
+            color: #667eea;
+            text-decoration: none;
+            margin-right: 25px;
+            font-weight: 600;
+            transition: color 0.3s;
+        }
+
+        .nav a:hover {
+            color: #764ba2;
+            text-decoration: underline;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 50px;
+        }
+
+        .section h2 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .section h3 {
+            color: #764ba2;
+            font-size: 1.5em;
+            margin: 25px 0 15px 0;
+        }
+
+        .section h4 {
+            color: #555;
+            font-size: 1.2em;
+            margin: 20px 0 10px 0;
+        }
+
+        .card {
+            background: #f8f9fa;
+            border-left: 5px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin: 25px 0;
+        }
+
+        .feature-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 25px;
+            text-align: center;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+            border-color: #667eea;
+        }
+
+        .feature-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+
+        .feature-card h4 {
+            color: #667eea;
+            margin: 10px 0;
+        }
+
+        .step-container {
+            counter-reset: step-counter;
+        }
+
+        .step {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 25px;
+            margin: 20px 0;
+            position: relative;
+            padding-left: 80px;
+            transition: all 0.3s;
+        }
+
+        .step:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+        }
+
+        .step::before {
+            counter-increment: step-counter;
+            content: counter(step-counter);
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.4);
+        }
+
+        .step h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .parameter-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .parameter-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .parameter-table td {
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .parameter-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .parameter-table tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        .tip-box {
+            background: #e3f2fd;
+            border-left: 5px solid #2196F3;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .tip-box::before {
+            content: "💡 ";
+            font-size: 1.5em;
+            margin-right: 10px;
+        }
+
+        .warning-box {
+            background: #fff3e0;
+            border-left: 5px solid #ff9800;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .warning-box::before {
+            content: "⚠️ ";
+            font-size: 1.5em;
+            margin-right: 10px;
+        }
+
+        .success-box {
+            background: #e8f5e9;
+            border-left: 5px solid #4caf50;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .success-box::before {
+            content: "✅ ";
+            font-size: 1.5em;
+            margin-right: 10px;
+        }
+
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+
+        .ui-mockup {
+            background: #f5f5f5;
+            border: 2px solid #ccc;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            font-family: 'Consolas', monospace;
+        }
+
+        .button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 30px;
+            border-radius: 25px;
+            text-decoration: none;
+            margin: 10px 5px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .checklist {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .checklist li {
+            padding: 10px 0;
+            padding-left: 35px;
+            position: relative;
+        }
+
+        .checklist li::before {
+            content: "✅";
+            position: absolute;
+            left: 0;
+            font-size: 1.2em;
+        }
+
+        .footer {
+            background: #2d3748;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        ul, ol {
+            margin-left: 25px;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        strong {
+            color: #667eea;
+        }
+
+        .workflow-diagram {
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            padding: 30px;
+            margin: 25px 0;
+            text-align: center;
+        }
+
+        .workflow-step {
+            display: inline-block;
+            background: #f8f9fa;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 15px 25px;
+            margin: 10px;
+            position: relative;
+        }
+
+        .workflow-arrow {
+            display: inline-block;
+            color: #667eea;
+            font-size: 2em;
+            margin: 0 10px;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .nav {
+                padding: 15px 20px;
+            }
+
+            .nav a {
+                display: block;
+                margin: 10px 0;
+            }
+
+            .feature-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .step {
+                padding-left: 20px;
+                padding-top: 60px;
+            }
+
+            .step::before {
+                left: 50%;
+                top: 20px;
+                transform: translateX(-50%);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 頁首 -->
+        <div class="header">
+            <h1>🔧 管線避讓工具使用手冊</h1>
+            <p class="subtitle">自動生成管線避讓路徑，智能規避障礙物</p>
+            <div class="version-badge">YD_BIM Tools v2.2 | MEP 工具集</div>
+        </div>
+
+        <!-- 導航欄 -->
+        <div class="nav">
+            <a href="#overview">功能概述</a>
+            <a href="#features">功能特色</a>
+            <a href="#quickstart">快速開始</a>
+            <a href="#parameters">參數設定</a>
+            <a href="#workflow">操作流程</a>
+            <a href="#advanced">進階應用</a>
+            <a href="#troubleshooting">疑難排解</a>
+            <a href="#faq">常見問題</a>
+        </div>
+
+        <!-- 內容區 -->
+        <div class="content">
+            <!-- 功能概述 -->
+            <section id="overview" class="section">
+                <h2>📋 功能概述</h2>
+
+                <div class="card">
+                    <h3>什麼是管線避讓工具？</h3>
+                    <p>管線避讓工具是 YD_BIM Tools 中的 MEP 專業工具，專為解決管線與障礙物衝突而設計。工具能夠自動計算並生成最佳的避讓路徑，將直線管線轉換為帶有翻彎的繞行路徑，有效避開障礙物。</p>
+                </div>
+
+                <h3>支援的元素類型</h3>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">🔵</div>
+                        <h4>Pipe（管道）</h4>
+                        <p>給排水管道、消防管道等</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🟦</div>
+                        <h4>Duct（風管）</h4>
+                        <p>空調風管、排煙風管等</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">⚡</div>
+                        <h4>Conduit（線管）</h4>
+                        <p>電氣線管、弱電線管等</p>
+                    </div>
+                </div>
+
+                <div class="success-box">
+                    <strong>適用場景：</strong>管線需要避開梁、柱、設備或其他管線時，工具可自動生成符合規範的翻彎路徑，大幅提升建模效率。
+                </div>
+            </section>
+
+            <!-- 功能特色 -->
+            <section id="features" class="section">
+                <h2>✨ 功能特色</h2>
+
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">🎯</div>
+                        <h4>精確計算</h4>
+                        <p>基於幾何算法精確計算 6 點翻彎路徑，確保路徑平滑合理</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">⚙️</div>
+                        <h4>參數可調</h4>
+                        <p>彎角、偏移量、方向均可自訂，滿足不同設計需求</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">📦</div>
+                        <h4>批量處理</h4>
+                        <p>支援一次選擇多條管線進行批量避讓處理</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🔄</div>
+                        <h4>循環模式</h4>
+                        <p>完成一組後可繼續處理下一組，無需重啟工具</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">📝</div>
+                        <h4>日誌記錄</h4>
+                        <p>詳細記錄操作過程，便於問題追蹤和排查</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🎨</div>
+                        <h4>直觀界面</h4>
+                        <p>簡潔友好的 WPF 界面，參數設定一目了然</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 快速開始 -->
+            <section id="quickstart" class="section">
+                <h2>🚀 快速開始</h2>
+
+                <div class="tip-box">
+                    <strong>5 分鐘快速上手！</strong>跟隨以下步驟，快速掌握管線避讓工具的基本使用方法。
+                </div>
+
+                <div class="step-container">
+                    <div class="step">
+                        <h4>啟動工具</h4>
+                        <p>在 Revit 中打開 <strong>MEP</strong> 面板，點擊 <strong>「管線避讓」</strong> 按鈕。</p>
+                        <div class="code-block">
+                        Revit 功能區 → YD_BIM Tools → MEP 面板 → 管線避讓
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <h4>設定參數</h4>
+                        <p>在彈出的設定視窗中配置避讓參數：</p>
+                        <ul>
+                            <li><strong>彎角角度：</strong>建議使用 45° 或 60°</li>
+                            <li><strong>偏移量：</strong>根據障礙物高度設定（單位：mm）</li>
+                            <li><strong>避讓方向：</strong>選擇向上、向下或自動</li>
+                        </ul>
+                        <p>設定完成後點擊 <strong>「確定」</strong> 按鈕。</p>
+                    </div>
+
+                    <div class="step">
+                        <h4>選擇管線</h4>
+                        <p>有兩種選擇方式：</p>
+                        <ul>
+                            <li><strong>方式 1：</strong>先在視圖中選擇管線，再啟動工具（推薦）</li>
+                            <li><strong>方式 2：</strong>啟動工具後，在提示時選擇管線（可多選）</li>
+                        </ul>
+                        <div class="tip-box">
+                            <strong>提示：</strong>按住 Ctrl 鍵可多選管線，完成選擇後按 Finish 或右鍵。
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <h4>定義避讓範圍</h4>
+                        <p>在管線上點擊兩個點來定義避讓區域：</p>
+                        <ol>
+                            <li>在管線上點擊 <strong>避讓起點</strong>（障礙物前方）</li>
+                            <li>在管線上點擊 <strong>避讓終點</strong>（障礙物後方）</li>
+                        </ol>
+                        <div class="warning-box">
+                            <strong>注意：</strong>確保兩個點之間包含需要避讓的障礙物區域。
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <h4>自動生成路徑</h4>
+                        <p>工具會自動：</p>
+                        <ul>
+                            <li>計算 6 點翻彎路徑（p1 → p2 → p3 → p4 → p5 → p6）</li>
+                            <li>根據彎角計算水平偏移量</li>
+                            <li>替換原始直線管線為避讓路徑</li>
+                        </ul>
+                    </div>
+
+                    <div class="step">
+                        <h4>查看結果</h4>
+                        <p>處理完成後會顯示統計結果：</p>
+                        <ul>
+                            <li>✅ 成功處理的管線數量</li>
+                            <li>❌ 失敗的管線數量</li>
+                            <li>📝 詳細日誌文件路徑（如有失敗）</li>
+                        </ul>
+                        <div class="success-box">
+                            <strong>完成！</strong>您可以繼續處理下一組管線，或按 ESC 退出工具。
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 參數設定 -->
+            <section id="parameters" class="section">
+                <h2>⚙️ 參數設定詳解</h2>
+
+                <h3>設定視窗介面</h3>
+                <div class="ui-mockup">
+┌─────────────────────────────────────────┐
+│  管線避讓工具 - YD_BIM Tools            │
+│  設定完成後將進行管線點選                │
+├─────────────────────────────────────────┤
+│                                         │
+│  翻彎參數設定                            │
+│  ┌───────────────────────────────────┐  │
+│  │ 彎角角度 (度)：  [45    ] °      │  │
+│  │ 偏移量 (mm)：    [500   ] mm     │  │
+│  │ 避讓方向：       ○ 向上           │  │
+│  │                  ○ 向下           │  │
+│  │                  ● 自動           │  │
+│  └───────────────────────────────────┘  │
+│                                         │
+│         [確定]         [取消]           │
+└─────────────────────────────────────────┘
+                </div>
+
+                <h3>參數說明</h3>
+                <table class="parameter-table">
+                    <thead>
+                        <tr>
+                            <th>參數名稱</th>
+                            <th>說明</th>
+                            <th>建議值</th>
+                            <th>影響</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>彎角角度</strong></td>
+                            <td>管線翻彎時的傾斜角度</td>
+                            <td>30° ~ 60°<br>（預設 45°）</td>
+                            <td>
+                                • 角度越大，水平偏移越小<br>
+                                • 角度越小，路徑越平緩<br>
+                                • 影響水平空間佔用
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>偏移量</strong></td>
+                            <td>管線向上/向下偏移的垂直距離（mm）</td>
+                            <td>300 ~ 1000 mm<br>（預設 500 mm）</td>
+                            <td>
+                                • 必須大於障礙物高度<br>
+                                • 需考慮管線直徑<br>
+                                • 建議預留安全距離
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>避讓方向</strong></td>
+                            <td>管線翻彎的方向選擇</td>
+                            <td>
+                                • 向上：管線向上翻彎<br>
+                                • 向下：管線向下翻彎<br>
+                                • 自動：工具自動判斷
+                            </td>
+                            <td>
+                                • 影響最終路徑位置<br>
+                                • 需考慮上下空間限制<br>
+                                • 自動模式預設向上
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>參數計算公式</h3>
+                <div class="card">
+                    <h4>水平偏移量計算</h4>
+                    <div class="code-block">
+水平偏移量 = 垂直偏移量 / tan(彎角角度)
+
+範例：
+  彎角 = 45°，偏移 = 500mm
+  水平偏移 = 500 / tan(45°) = 500 / 1 = 500mm
+
+  彎角 = 60°，偏移 = 500mm
+  水平偏移 = 500 / tan(60°) = 500 / 1.732 ≈ 289mm
+
+  彎角 = 30°，偏移 = 500mm
+  水平偏移 = 500 / tan(30°) = 500 / 0.577 ≈ 866mm
+                    </div>
+                </div>
+
+                <div class="tip-box">
+                    <strong>選擇建議：</strong>
+                    <ul>
+                        <li>空間充足時：使用 30° ~ 45°，路徑更平緩</li>
+                        <li>空間緊張時：使用 60°，減少水平佔用</li>
+                        <li>標準情況：使用預設 45°，平衡美觀與空間</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 操作流程 -->
+            <section id="workflow" class="section">
+                <h2>📊 操作流程圖</h2>
+
+                <div class="workflow-diagram">
+                    <div class="workflow-step">啟動工具</div>
+                    <span class="workflow-arrow">→</span>
+                    <div class="workflow-step">設定參數</div>
+                    <span class="workflow-arrow">→</span>
+                    <div class="workflow-step">選擇管線</div>
+                    <br><br>
+                    <span class="workflow-arrow">↓</span>
+                    <br><br>
+                    <div class="workflow-step">定義起點</div>
+                    <span class="workflow-arrow">→</span>
+                    <div class="workflow-step">定義終點</div>
+                    <span class="workflow-arrow">→</span>
+                    <div class="workflow-step">生成路徑</div>
+                    <br><br>
+                    <span class="workflow-arrow">↓</span>
+                    <br><br>
+                    <div class="workflow-step">查看結果</div>
+                    <span class="workflow-arrow">→</span>
+                    <div class="workflow-step">繼續/退出</div>
+                </div>
+
+                <h3>詳細操作步驟</h3>
+
+                <h4>步驟 1：準備工作</h4>
+                <div class="card">
+                    <ul class="checklist">
+                        <li>確認 Revit 中已建立需要避讓的管線</li>
+                        <li>確認管線為直線（工具僅支援直線管線）</li>
+                        <li>確認障礙物位置和尺寸</li>
+                        <li>規劃避讓方向（向上或向下）</li>
+                    </ul>
+                </div>
+
+                <h4>步驟 2：啟動與設定</h4>
+                <div class="card">
+                    <ol>
+                        <li>點擊 MEP 面板的「管線避讓」按鈕</li>
+                        <li>在設定視窗中輸入彎角角度（如 45）</li>
+                        <li>輸入偏移量（如 500，單位 mm）</li>
+                        <li>選擇避讓方向（向上/向下/自動）</li>
+                        <li>點擊「確定」按鈕</li>
+                    </ol>
+                </div>
+
+                <h4>步驟 3：選擇管線</h4>
+                <div class="card">
+                    <p><strong>方式 A：預選模式（推薦）</strong></p>
+                    <ol>
+                        <li>在啟動工具前，先在視圖中選擇管線</li>
+                        <li>可按住 Ctrl 鍵多選</li>
+                        <li>啟動工具後會自動使用預選的管線</li>
+                    </ol>
+
+                    <p><strong>方式 B：手動選擇模式</strong></p>
+                    <ol>
+                        <li>啟動工具後，會提示「請選擇要避讓的管線」</li>
+                        <li>在視圖中點擊管線（可多選）</li>
+                        <li>完成選擇後按 Finish 或右鍵</li>
+                    </ol>
+                </div>
+
+                <h4>步驟 4：定義避讓範圍</h4>
+                <div class="card">
+                    <ol>
+                        <li>提示「請選擇避讓起點（在管線上點擊）」</li>
+                        <li>在管線上點擊第一個點（障礙物前方）</li>
+                        <li>提示「請選擇避讓終點（在管線上點擊）」</li>
+                        <li>在管線上點擊第二個點（障礙物後方）</li>
+                    </ol>
+                    <div class="warning-box">
+                        <strong>重要：</strong>兩個點必須在同一條管線上，且起點應在終點之前（沿管線方向）。工具會自動調整順序。
+                    </div>
+                </div>
+
+                <h4>步驟 5：路徑生成</h4>
+                <div class="card">
+                    <p>工具會自動執行以下操作：</p>
+                    <ol>
+                        <li>將點擊的點投影到管線上</li>
+                        <li>計算 6 點路徑座標（p1 ~ p6）</li>
+                        <li>根據彎角計算水平偏移</li>
+                        <li>創建新的管線路徑</li>
+                        <li>刪除原始直線管線</li>
+                        <li>記錄操作日誌</li>
+                    </ol>
+                </div>
+
+                <h4>步驟 6：結果確認</h4>
+                <div class="card">
+                    <p>處理完成後會顯示對話框：</p>
+                    <div class="ui-mockup">
+┌─────────────────────────────┐
+│  管線避讓                    │
+├─────────────────────────────┤
+│  避讓完成：                  │
+│                             │
+│  成功: 3 個                 │
+│  失敗: 0 個                 │
+│                             │
+│         [確定]              │
+└─────────────────────────────┘
+                    </div>
+                    <p>如有失敗，會顯示日誌文件路徑供查看詳細錯誤資訊。</p>
+                </div>
+            </section>
+
+            <!-- 進階應用 -->
+            <section id="advanced" class="section">
+                <h2>🎓 進階應用</h2>
+
+                <h3>批量處理技巧</h3>
+                <div class="card">
+                    <h4>場景：需要為多條平行管線統一避讓</h4>
+                    <ol>
+                        <li>在視圖中框選所有需要避讓的管線</li>
+                        <li>啟動工具並設定統一的參數</li>
+                        <li>對每條管線依次定義避讓範圍</li>
+                        <li>工具會自動處理所有選中的管線</li>
+                    </ol>
+                    <div class="tip-box">
+                        <strong>效率提升：</strong>使用批量模式可以避免重複設定參數，大幅提升工作效率。
+                    </div>
+                </div>
+
+                <h3>循環處理模式</h3>
+                <div class="card">
+                    <h4>場景：需要處理多組不同位置的管線</h4>
+                    <p>工具支援循環處理模式，完成一組後可繼續處理下一組：</p>
+                    <ol>
+                        <li>完成第一組管線的避讓</li>
+                        <li>查看結果對話框後點擊「確定」</li>
+                        <li>工具會提示選擇下一組管線</li>
+                        <li>重複步驟 3-6，直到完成所有管線</li>
+                        <li>按 ESC 鍵退出工具</li>
+                    </ol>
+                    <div class="success-box">
+                        <strong>優勢：</strong>無需重啟工具，參數保持不變，適合大量管線的連續處理。
+                    </div>
+                </div>
+
+                <h3>不同彎角的應用場景</h3>
+                <table class="parameter-table">
+                    <thead>
+                        <tr>
+                            <th>彎角</th>
+                            <th>水平偏移</th>
+                            <th>適用場景</th>
+                            <th>優缺點</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>30°</strong></td>
+                            <td>較大<br>（約 1.73 倍偏移量）</td>
+                            <td>
+                                • 空間充足的區域<br>
+                                • 需要平緩過渡<br>
+                                • 美觀要求高
+                            </td>
+                            <td>
+                                ✅ 路徑平緩美觀<br>
+                                ❌ 佔用水平空間大
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>45°</strong></td>
+                            <td>中等<br>（等於偏移量）</td>
+                            <td>
+                                • 標準應用場景<br>
+                                • 平衡美觀與空間<br>
+                                • 大多數情況
+                            </td>
+                            <td>
+                                ✅ 平衡性好<br>
+                                ✅ 適用範圍廣
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>60°</strong></td>
+                            <td>較小<br>（約 0.58 倍偏移量）</td>
+                            <td>
+                                • 空間緊張的區域<br>
+                                • 需要節省空間<br>
+                                • 快速翻彎
+                            </td>
+                            <td>
+                                ✅ 節省水平空間<br>
+                                ❌ 路徑較陡峭
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>複雜場景處理</h3>
+                <div class="card">
+                    <h4>場景 1：多層障礙物</h4>
+                    <p>當需要避讓多個高度不同的障礙物時：</p>
+                    <ol>
+                        <li>分段處理，每段避讓一個障礙物</li>
+                        <li>根據障礙物高度調整偏移量</li>
+                        <li>確保每段的起點和終點正確銜接</li>
+                    </ol>
+                </div>
+
+                <div class="card">
+                    <h4>場景 2：狹窄空間</h4>
+                    <p>當上下空間都有限制時：</p>
+                    <ol>
+                        <li>精確測量可用空間高度</li>
+                        <li>設定最小必要的偏移量</li>
+                        <li>使用 60° 彎角減少水平佔用</li>
+                        <li>必要時考慮水平繞行方案</li>
+                    </ol>
+                </div>
+
+                <h3>路徑計算原理</h3>
+                <div class="card">
+                    <h4>6 點路徑構成</h4>
+                    <div class="code-block">
+p1 (起點) ─────→ p2 (避讓起點)
+                    ↗ (向上/向下 + 水平延伸)
+                  p3 (第一彎點)
+                    ─────→ (水平段)
+                           p4 (第二彎點)
+                             ↘ (向下/向上 - 水平延伸)
+                           p5 (避讓終點) ─────→ p6 (終點)
+
+計算公式：
+  p1 = 管線原始起點
+  p2 = 避讓起點（投影到管線上）
+  p3 = p2 + 垂直偏移 + 水平延伸
+  p4 = p5 + 垂直偏移 - 水平延伸
+  p5 = 避讓終點（投影到管線上）
+  p6 = 管線原始終點
+
+其中：
+  垂直偏移 = (0, 0, ±偏移量)
+  水平延伸 = 管線方向 × (偏移量 / tan(彎角))
+                    </div>
+                </div>
+            </section>
+
+            <!-- 疑難排解 -->
+            <section id="troubleshooting" class="section">
+                <h2>🔧 疑難排解</h2>
+
+                <h3>常見錯誤與解決方案</h3>
+
+                <div class="card">
+                    <h4>❌ 錯誤：「選擇的元素沒有位置曲線」</h4>
+                    <p><strong>原因：</strong>選擇的元素不是管線類型，或管線沒有幾何資訊。</p>
+                    <p><strong>解決方案：</strong></p>
+                    <ul>
+                        <li>確認選擇的是 Pipe、Duct 或 Conduit 元素</li>
+                        <li>檢查管線是否正確建立</li>
+                        <li>嘗試重新建立管線</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h4>❌ 錯誤：「僅支援直線管線」</h4>
+                    <p><strong>原因：</strong>選擇的管線不是直線，可能是彎管或多段管線。</p>
+                    <p><strong>解決方案：</strong></p>
+                    <ul>
+                        <li>確認管線為單一直線段</li>
+                        <li>如果是多段管線，需分段處理</li>
+                        <li>使用 Revit 的「拆分元素」功能將管線拆分為直線段</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h4>⚠️ 問題：生成的路徑不符合預期</h4>
+                    <p><strong>可能原因：</strong></p>
+                    <ul>
+                        <li>起點和終點選擇位置不當</li>
+                        <li>偏移量設定過大或過小</li>
+                        <li>彎角角度不合適</li>
+                    </ul>
+                    <p><strong>解決方案：</strong></p>
+                    <ul>
+                        <li>使用 Ctrl+Z 撤銷操作</li>
+                        <li>重新調整參數設定</li>
+                        <li>更精確地選擇起點和終點位置</li>
+                        <li>檢查避讓方向是否正確</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h4>⚠️ 問題：批量處理時部分管線失敗</h4>
+                    <p><strong>原因：</strong>不同管線可能有不同的問題。</p>
+                    <p><strong>解決方案：</strong></p>
+                    <ul>
+                        <li>查看日誌文件了解具體失敗原因</li>
+                        <li>對失敗的管線單獨處理</li>
+                        <li>檢查失敗管線的特殊屬性</li>
+                    </ul>
+                    <div class="tip-box">
+                        <strong>日誌位置：</strong>錯誤對話框中會顯示日誌文件的完整路徑，可用記事本打開查看。
+                    </div>
+                </div>
+
+                <h3>性能優化建議</h3>
+                <div class="card">
+                    <ul class="checklist">
+                        <li>處理大量管線時，建議分批處理（每批 10-20 條）</li>
+                        <li>關閉不必要的視圖以提升性能</li>
+                        <li>在 3D 視圖中操作可更直觀地選擇點位</li>
+                        <li>定期保存項目，避免意外丟失工作</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 常見問題 -->
+            <section id="faq" class="section">
+                <h2>❓ 常見問題 FAQ</h2>
+
+                <div class="card">
+                    <h4>Q1: 工具支援哪些 Revit 版本？</h4>
+                    <p><strong>A:</strong> 支援 Revit 2024、2025、2026 版本。</p>
+                </div>
+
+                <div class="card">
+                    <h4>Q2: 可以避讓曲線管線嗎？</h4>
+                    <p><strong>A:</strong> 目前僅支援直線管線。如需處理曲線管線，請先使用 Revit 的「拆分元素」功能將其拆分為多段直線。</p>
+                </div>
+
+                <div class="card">
+                    <h4>Q3: 偏移量應該設定多少？</h4>
+                    <p><strong>A:</strong> 建議偏移量 = 障礙物高度 + 管線直徑 + 安全距離（100-200mm）。例如，障礙物高 300mm，管線直徑 100mm，則偏移量建議設定為 500-600mm。</p>
+                </div>
+
+                <div class="card">
+                    <h4>Q4: 可以撤銷避讓操作嗎？</h4>
+                    <p><strong>A:</strong> 可以。使用 Revit 的撤銷功能（Ctrl+Z）即可恢復原始管線。</p>
+                </div>
+
+                <div class="card">
+                    <h4>Q5: 為什麼有時會提示「ReplaceWithDetour 返回 false」？</h4>
+                    <p><strong>A:</strong> 這通常是因為：</p>
+                    <ul>
+                        <li>管線系統類型不支援該操作</li>
+                        <li>管線被鎖定或受約束</li>
+                        <li>路徑計算結果不合理</li>
+                    </ul>
+                    <p>建議檢查管線屬性，或嘗試調整參數後重試。</p>
+                </div>
+
+                <div class="card">
+                    <h4>Q6: 批量處理時如何提高成功率？</h4>
+                    <p><strong>A:</strong> 建議：</p>
+                    <ul>
+                        <li>確保所有管線都是直線</li>
+                        <li>使用統一的參數設定</li>
+                        <li>在同一視圖中操作</li>
+                        <li>避免選擇被鎖定的管線</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h4>Q7: 工具會自動處理管線連接嗎？</h4>
+                    <p><strong>A:</strong> 工具會保持管線的起點和終點位置不變，中間生成避讓路徑。如果原管線有連接件，建議在避讓後檢查並調整連接。</p>
+                </div>
+
+                <div class="card">
+                    <h4>Q8: 日誌文件保存在哪裡？</h4>
+                    <p><strong>A:</strong> 日誌文件保存在用戶的臨時目錄中，具體路徑會在錯誤對話框中顯示。可以使用記事本或其他文本編輯器打開查看。</p>
+                </div>
+
+                <div class="card">
+                    <h4>Q9: 可以自訂更多參數嗎？</h4>
+                    <p><strong>A:</strong> 目前提供的參數（彎角、偏移量、方向）已能滿足大多數應用場景。如有特殊需求，請聯繫技術支援。</p>
+                </div>
+
+                <div class="card">
+                    <h4>Q10: 工具需要授權嗎？</h4>
+                    <p><strong>A:</strong> 管線避讓工具包含在 YD_BIM Tools 中，需要 Trial 或以上授權等級。請在「授權管理」中查看您的授權狀態。</p>
+                </div>
+            </section>
+
+            <!-- 技術支援 -->
+            <section id="support" class="section">
+                <h2>📞 技術支援</h2>
+
+                <div class="card">
+                    <h3>需要幫助？</h3>
+                    <p>如果您在使用過程中遇到問題，可以通過以下方式獲取支援：</p>
+
+                    <div class="feature-grid">
+                        <div class="feature-card">
+                            <div class="feature-icon">📧</div>
+                            <h4>電子郵件</h4>
+                            <p>發送問題描述和截圖至技術支援信箱</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">📝</div>
+                            <h4>日誌文件</h4>
+                            <p>附上日誌文件以便快速定位問題</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">🎥</div>
+                            <h4>操作錄影</h4>
+                            <p>錄製操作過程有助於重現問題</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="success-box">
+                    <strong>提交問題時請包含：</strong>
+                    <ul>
+                        <li>Revit 版本號</li>
+                        <li>YD_BIM Tools 版本號</li>
+                        <li>問題的詳細描述</li>
+                        <li>錯誤訊息截圖</li>
+                        <li>日誌文件（如有）</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 版本資訊 -->
+            <section id="version" class="section">
+                <h2>📌 版本資訊</h2>
+
+                <table class="parameter-table">
+                    <thead>
+                        <tr>
+                            <th>項目</th>
+                            <th>資訊</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>工具名稱</strong></td>
+                            <td>管線避讓工具 (Auto Avoid)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>所屬套件</strong></td>
+                            <td>YD_BIM Tools v2.2</td>
+                        </tr>
+                        <tr>
+                            <td><strong>工具類別</strong></td>
+                            <td>MEP 工具集</td>
+                        </tr>
+                        <tr>
+                            <td><strong>支援版本</strong></td>
+                            <td>Revit 2024 / 2025 / 2026</td>
+                        </tr>
+                        <tr>
+                            <td><strong>授權要求</strong></td>
+                            <td>Trial 或以上</td>
+                        </tr>
+                        <tr>
+                            <td><strong>更新日期</strong></td>
+                            <td>2025-12-05</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="tip-box">
+                    <strong>更新記錄：</strong>
+                    <ul>
+                        <li><strong>v2.2 (2025-12-05)：</strong>首次發布管線避讓工具</li>
+                        <li>支援 Pipe、Duct、Conduit 三種元素類型</li>
+                        <li>提供彎角、偏移量、方向三個可調參數</li>
+                        <li>支援批量處理和循環處理模式</li>
+                        <li>完整的日誌記錄功能</li>
+                    </ul>
+                </div>
+            </section>
+        </div>
+
+        <!-- 頁尾 -->
+        <div class="footer">
+            <p><strong>YD_BIM Tools</strong> - 專業的 Revit 工具集</p>
+            <p>管線避讓工具使用手冊 | 版本 2.2 | 更新日期：2025-12-05</p>
+            <p style="margin-top: 15px;">
+                <a href="index.html">← 返回文檔中心</a> |
+                <a href="#overview">回到頂部 ↑</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+

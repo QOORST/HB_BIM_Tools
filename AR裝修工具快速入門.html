@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR 裝修工具 - 快速入門指南</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft JhengHei', 'Segoe UI', Arial, sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 60px 40px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        header .subtitle {
+            font-size: 1.5em;
+            margin: 10px 0;
+        }
+
+        header .time {
+            font-size: 1.2em;
+            background: rgba(255, 255, 255, 0.2);
+            display: inline-block;
+            padding: 10px 20px;
+            border-radius: 20px;
+            margin-top: 15px;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .checklist {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+        }
+
+        .checklist h3 {
+            color: #f5576c;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+
+        .checklist-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin: 10px 0;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s;
+        }
+
+        .checklist-item:hover {
+            transform: translateX(10px);
+        }
+
+        .checklist-item::before {
+            content: "✅";
+            font-size: 1.5em;
+            margin-right: 15px;
+        }
+
+        .step-container {
+            margin: 40px 0;
+        }
+
+        .step {
+            background: white;
+            border: 3px solid #f093fb;
+            border-radius: 20px;
+            padding: 30px;
+            margin: 30px 0;
+            position: relative;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .step-number {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.8em;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            margin-right: 20px;
+        }
+
+        .step-title {
+            font-size: 1.8em;
+            color: #f5576c;
+        }
+
+        .step-time {
+            background: #fff3cd;
+            color: #856404;
+            padding: 5px 15px;
+            border-radius: 15px;
+            font-size: 0.9em;
+            margin-left: auto;
+        }
+
+        .code-box {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+            font-family: 'Consolas', monospace;
+            overflow-x: auto;
+        }
+
+        .ui-mockup {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            font-family: 'Consolas', monospace;
+            white-space: pre;
+        }
+
+        .option-box {
+            background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .option-box h4 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        th {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .tip {
+            background: #d1ecf1;
+            border-left: 5px solid #0c5460;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .tip::before {
+            content: "💡 ";
+            font-size: 1.2em;
+        }
+
+        .example {
+            background: #d4edda;
+            border-left: 5px solid #28a745;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 10px;
+        }
+
+        .example h4 {
+            color: #155724;
+            margin-bottom: 15px;
+        }
+
+        .result {
+            background: #d4edda;
+            border: 2px solid #28a745;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+            text-align: center;
+        }
+
+        .result::before {
+            content: "✅ ";
+            font-size: 1.5em;
+        }
+
+        .faq {
+            background: #fff3cd;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+
+        .faq h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 15px 40px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.2em;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        footer {
+            background: #2d2d2d;
+            color: white;
+            text-align: center;
+            padding: 30px;
+        }
+
+        h2 {
+            color: #f5576c;
+            font-size: 2.5em;
+            margin: 40px 0 20px;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2em;
+            }
+
+            .step-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .step-time {
+                margin-left: 0;
+                margin-top: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 快速入門指南</h1>
+            <p class="subtitle">AR 裝修工具</p>
+            <div class="time">⏱️ 5 分鐘快速上手</div>
+        </header>
+
+        <div class="content">
+            <h2>📋 開始前的準備</h2>
+
+            <div class="checklist">
+                <h3>1. 確認授權</h3>
+                <div class="checklist-item">確保已安裝 YD_BIM Tools</div>
+                <div class="checklist-item">確認授權狀態（試用版/標準版/專業版皆可使用）</div>
+            </div>
+
+            <div class="checklist">
+                <h3>2. 檢查模型</h3>
+                <div class="checklist-item">確認房間已正確放置</div>
+                <div class="checklist-item">確認房間邊界完整（面積 > 0）</div>
+                <div class="checklist-item">確認房間有編號和名稱</div>
+            </div>
+
+            <div class="checklist">
+                <h3>3. 準備裝修類型</h3>
+                <div class="checklist-item">在 Revit 中建立所需的地板類型</div>
+                <div class="checklist-item">在 Revit 中建立所需的天花板類型</div>
+                <div class="checklist-item">在 Revit 中建立所需的牆面類型（薄牆）</div>
+                <div class="checklist-item">在 Revit 中建立所需的踢腳板類型（薄牆）</div>
+            </div>
+
+            <h2>🎯 快速操作步驟</h2>
+
+            <div class="step-container">
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-title">啟動工具</div>
+                        <div class="step-time">⏱️ 10 秒</div>
+                    </div>
+
+                    <div class="code-box">Revit 頂部功能區 → YD_BIM 頁籤 → AR 面板 → 裝修工具</div>
+
+                    <p style="margin-top: 20px;"><strong>界面說明：</strong></p>
+                    <div class="ui-mockup">┌─────────────────────────────────────────────┐
+│ AR 裝修工具                                  │
+├─────────────────────────────────────────────┤
+│ 房間範圍: ⦿ 所有房間  ○ 選擇房間 [選取...] │
+├─────────────────────────────────────────────┤
+│ 地板      [選擇類型▼]  [內緣▼]              │
+│ 天花板    [選擇類型▼]  高度(mm) [3000]      │
+│ 牆面      [選擇類型▼]  偏移(mm) [300]       │
+│           ☑ 避開門窗開口  [自動接合牆面]    │
+│ 踢腳板    [選擇類型▼]  高度(mm) [100]       │
+│           ☑ 跳過門口  ☑ 跳過窗戶            │
+├─────────────────────────────────────────────┤
+│           [產生幾何元素]                     │
+│ ☑ 設定幾何元素參數  ☑ 設定房間參數         │
+│           [更新元素參數]                     │
+└─────────────────────────────────────────────┘</div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-title">選擇房間範圍</div>
+                        <div class="step-time">⏱️ 20 秒</div>
+                    </div>
+
+                    <div class="option-box">
+                        <h4>選項 A：處理所有房間</h4>
+                        <div class="code-box">勾選 ⦿ 所有房間</div>
+                        <p>→ 工具會處理模型中所有有效房間</p>
+                    </div>
+
+                    <div class="option-box">
+                        <h4>選項 B：處理特定房間（推薦新手使用）</h4>
+                        <ol style="padding-left: 20px;">
+                            <li>勾選 ⦿ 選擇房間</li>
+                            <li>點擊 [選取...] 按鈕</li>
+                            <li>在 Revit 中點選要處理的房間（可多選）</li>
+                            <li>按 Enter 或右鍵完成選擇</li>
+                            <li>界面會顯示：已選擇 X 個房間</li>
+                        </ol>
+                    </div>
+
+                    <div class="tip">
+                        <strong>新手建議</strong>：第一次使用時，建議先選擇 1-2 個房間測試。
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-title">設定裝修類型</div>
+                        <div class="step-time">⏱️ 1 分鐘</div>
+                    </div>
+
+                    <h4>地板設定</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>設定</th>
+                                <th>說明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>類型</td>
+                                <td>選擇地板類型（例如：木地板、磁磚地板）</td>
+                            </tr>
+                            <tr>
+                                <td>邊界</td>
+                                <td><strong>內緣</strong>：裝修面（推薦）<br><strong>中心線</strong>：牆中心<br><strong>外緣</strong>：結構面</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h4 style="margin-top: 30px;">天花板設定</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>設定</th>
+                                <th>說明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>類型</td>
+                                <td>選擇天花板類型</td>
+                            </tr>
+                            <tr>
+                                <td>高度</td>
+                                <td>天花板距離樓層的高度（單位：mm）</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="tip">
+                        <strong>常用高度</strong>：住宅 2800-3000mm，辦公室 3600-4200mm
+                    </div>
+
+                    <h4 style="margin-top: 30px;">牆面設定</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>設定</th>
+                                <th>說明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>類型</td>
+                                <td>選擇牆面類型（建議使用薄牆，10-20mm）</td>
+                            </tr>
+                            <tr>
+                                <td>偏移</td>
+                                <td>牆面距離樓層底部的距離（避開踢腳板）</td>
+                            </tr>
+                            <tr>
+                                <td>避開門窗</td>
+                                <td>勾選後牆面會自動避開門窗位置</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h4 style="margin-top: 30px;">踢腳板設定</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>設定</th>
+                                <th>說明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>類型</td>
+                                <td>選擇踢腳板類型（建議使用薄牆）</td>
+                            </tr>
+                            <tr>
+                                <td>高度</td>
+                                <td>踢腳板高度（單位：mm）</td>
+                            </tr>
+                            <tr>
+                                <td>跳過門口</td>
+                                <td>勾選後踢腳板會跳過門的位置</td>
+                            </tr>
+                            <tr>
+                                <td>跳過窗戶</td>
+                                <td>勾選後踢腳板會跳過窗的位置</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="tip">
+                        <strong>提示</strong>：如果不需要某項裝修，將類型保持為空白即可。
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">4</div>
+                        <div class="step-title">產生裝修元素</div>
+                        <div class="step-time">⏱️ 10 秒 - 2 分鐘</div>
+                    </div>
+
+                    <div class="code-box">點擊 [產生幾何元素] 按鈕</div>
+
+                    <p style="margin-top: 20px;"><strong>執行過程：</strong></p>
+                    <ol style="padding-left: 20px;">
+                        <li>工具開始分析房間</li>
+                        <li>依序生成地板、天花板、牆面、踢腳板</li>
+                        <li>顯示進度（視房間數量而定）</li>
+                        <li>完成後顯示結果</li>
+                    </ol>
+
+                    <div class="result">
+                        成功: 地板 5 個, 天花板 5 個, 牆面 5 個, 踢腳板 5 個
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">5</div>
+                        <div class="step-title">檢查結果</div>
+                        <div class="step-time">⏱️ 1 分鐘</div>
+                    </div>
+
+                    <h4>視覺檢查</h4>
+                    <ol style="padding-left: 20px;">
+                        <li><strong>切換到 3D 視圖</strong>：快捷鍵 F7 或點擊 3D 視圖</li>
+                        <li><strong>檢查項目</strong>：
+                            <ul style="padding-left: 20px; margin-top: 10px;">
+                                <li>✅ 地板是否正確生成</li>
+                                <li>✅ 天花板是否在正確高度</li>
+                                <li>✅ 牆面是否避開門窗</li>
+                                <li>✅ 踢腳板是否跳過門口</li>
+                            </ul>
+                        </li>
+                        <li><strong>調整視圖</strong>：
+                            <ul style="padding-left: 20px; margin-top: 10px;">
+                                <li>旋轉視圖：按住 Shift + 滑鼠中鍵拖曳</li>
+                                <li>縮放：滾動滑鼠滾輪</li>
+                                <li>平移：按住滑鼠中鍵拖曳</li>
+                            </ul>
+                        </li>
+                    </ol>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">6</div>
+                        <div class="step-title">更新參數（可選）</div>
+                        <div class="step-time">⏱️ 30 秒</div>
+                    </div>
+
+                    <p>如果需要在元素和房間中記錄裝修資訊：</p>
+
+                    <ol style="padding-left: 20px; margin-top: 15px;">
+                        <li>☑ 勾選「設定幾何元素參數」</li>
+                        <li>☑ 勾選「設定房間參數」</li>
+                        <li>點擊 [更新元素參數] 按鈕</li>
+                    </ol>
+
+                    <h4 style="margin-top: 20px;">設定的參數</h4>
+
+                    <div class="option-box">
+                        <h4>幾何元素參數（寫入地板、天花板、牆面）</h4>
+                        <ul style="padding-left: 20px;">
+                            <li>房間編號_地板</li>
+                            <li>房間名稱_地板</li>
+                            <li>房間編號_天花板</li>
+                            <li>房間名稱_天花板</li>
+                            <li>房間編號_牆面</li>
+                            <li>房間名稱_牆面</li>
+                        </ul>
+                    </div>
+
+                    <div class="option-box">
+                        <h4>房間參數（寫入房間）</h4>
+                        <ul style="padding-left: 20px;">
+                            <li>地板面積</li>
+                            <li>天花板面積</li>
+                            <li>牆面面積</li>
+                            <li>踢腳板長度</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="result" style="font-size: 1.5em; margin: 40px 0;">
+                完成！您已經成功使用 AR 裝修工具生成裝修元素 🎉
+            </div>
+
+            <h2>🎓 實戰範例</h2>
+
+            <div class="example">
+                <h4>範例：為單一房間生成完整裝修</h4>
+                <p><strong>情境</strong>：為一個 4m × 5m 的臥室生成完整裝修</p>
+
+                <p style="margin-top: 15px;"><strong>操作步驟：</strong></p>
+                <ol style="padding-left: 20px;">
+                    <li>啟動工具：YD_BIM → AR → 裝修工具</li>
+                    <li>選擇房間：⦿ 選擇房間 → [選取...] → 點選臥室 → Enter</li>
+                    <li>設定裝修：
+                        <ul style="padding-left: 20px; margin-top: 10px;">
+                            <li>地板：[木地板▼] 邊界: [內緣▼]</li>
+                            <li>天花板：[輕鋼架▼] 高度: [2800] mm</li>
+                            <li>牆面：[油漆牆面▼] 偏移: [300] mm ☑ 避開門窗開口</li>
+                            <li>踢腳板：[木踢腳板▼] 高度: [100] mm ☑ 跳過門口</li>
+                        </ul>
+                    </li>
+                    <li>執行生成：點擊 [產生幾何元素]，等待 5-10 秒</li>
+                    <li>查看結果：切換到 3D 視圖，檢查裝修元素</li>
+                    <li>更新參數：☑ 設定幾何元素參數 ☑ 設定房間參數，點擊 [更新元素參數]</li>
+                </ol>
+
+                <p style="margin-top: 15px;"><strong>預期結果：</strong></p>
+                <ul style="padding-left: 20px;">
+                    <li>✅ 地板：1 個（20 m²）</li>
+                    <li>✅ 天花板：1 個（20 m²）</li>
+                    <li>✅ 牆面：4 個（總面積約 50 m²）</li>
+                    <li>✅ 踢腳板：4 個（總長度約 18 m）</li>
+                </ul>
+            </div>
+
+            <h2>💡 新手常見問題</h2>
+
+            <div class="faq">
+                <h4>Q：為什麼我的下拉選單是空的？</h4>
+                <p><strong>A</strong>：需要先在 Revit 中建立對應的類型。</p>
+                <p style="margin-top: 10px;"><strong>解決方法：</strong></p>
+                <ol style="padding-left: 20px;">
+                    <li>關閉工具視窗</li>
+                    <li>在 Revit 中建立所需類型（專案瀏覽器 → 族群 → 右鍵 → 複製 → 重新命名）</li>
+                    <li>重新開啟工具</li>
+                </ol>
+            </div>
+
+            <div class="faq">
+                <h4>Q：生成的元素位置不對怎麼辦？</h4>
+                <p><strong>A</strong>：檢查高度和偏移設定。</p>
+                <ul style="padding-left: 20px; margin-top: 10px;">
+                    <li>天花板太高/太低 → 調整「高度」參數</li>
+                    <li>牆面與踢腳板重疊 → 調整「偏移」參數（建議 300mm）</li>
+                </ul>
+            </div>
+
+            <div class="faq">
+                <h4>Q：可以只生成其中一種裝修嗎？</h4>
+                <p><strong>A</strong>：可以！只需設定您需要的類型，其他保持空白。</p>
+                <p style="margin-top: 10px;"><strong>範例</strong>：只生成天花板</p>
+                <ul style="padding-left: 20px;">
+                    <li>地板：[空白]</li>
+                    <li>天花板：[輕鋼架天花板▼] 高度: [3000]</li>
+                    <li>牆面：[空白]</li>
+                    <li>踢腳板：[空白]</li>
+                </ul>
+            </div>
+
+            <h2>📚 下一步</h2>
+
+            <div style="text-align: center; padding: 40px 0;">
+                <p style="font-size: 1.2em; margin-bottom: 30px;">完成快速入門後，建議：</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                    <div class="option-box">
+                        <h4>📘 閱讀完整手冊</h4>
+                        <p>AR模板工具使用手冊.html</p>
+                    </div>
+                    <div class="option-box">
+                        <h4>🎨 學習進階技巧</h4>
+                        <p>批量處理、參數化管理</p>
+                    </div>
+                    <div class="option-box">
+                        <h4>🔧 探索其他工具</h4>
+                        <p>結構模板、自動接合</p>
+                    </div>
+                </div>
+                <a href="AR模板工具使用手冊.html" class="btn">查看完整手冊</a>
+            </div>
+        </div>
+
+        <footer>
+            <p><strong>YD_BIM Tools v2.2</strong></p>
+            <p>更新日期：2025/11/26</p>
+            <p style="margin-top: 20px;">祝您使用愉快！🎉</p>
+        </footer>
+    </div>
+</body>
+</html>
+

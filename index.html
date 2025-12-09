@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YD_BIM Tools - AR 模板工具文檔中心</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft JhengHei', 'Segoe UI', Arial, sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            padding: 60px 20px;
+            margin-bottom: 40px;
+        }
+
+        header h1 {
+            font-size: 4em;
+            margin-bottom: 20px;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.3);
+            animation: fadeInDown 1s;
+        }
+
+        header p {
+            font-size: 1.5em;
+            opacity: 0.95;
+            animation: fadeInUp 1s;
+        }
+
+        .version {
+            background: rgba(255, 255, 255, 0.2);
+            display: inline-block;
+            padding: 10px 25px;
+            border-radius: 25px;
+            margin-top: 20px;
+            font-size: 1.1em;
+        }
+
+        .doc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .doc-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .doc-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .doc-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .doc-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .doc-card h2 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 15px;
+        }
+
+        .doc-card .subtitle {
+            color: #764ba2;
+            font-size: 1.2em;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .doc-card p {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.8;
+        }
+
+        .doc-card ul {
+            list-style: none;
+            margin: 20px 0;
+            padding: 0;
+        }
+
+        .doc-card li {
+            padding: 8px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+
+        .doc-card li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .meta {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            font-size: 0.9em;
+        }
+
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 30px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            margin-top: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .quick-links {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            margin-bottom: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .quick-links h2 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .link-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .link-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .link-item:hover {
+            transform: scale(1.05);
+        }
+
+        .link-item h3 {
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+
+        footer {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        footer h3 {
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2.5em;
+            }
+
+            .doc-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 YD_BIM Tools</h1>
+            <p>專業工具文檔中心</p>
+            <div class="version">版本 v2.2 | 更新日期：2025/12/05</div>
+        </header>
+
+        <div class="quick-links">
+            <h2>🚀 快速開始</h2>
+            <div class="link-grid">
+                <div class="link-item" onclick="window.location.href='AR裝修工具快速入門.html'">
+                    <h3>⚡ AR 模板工具</h3>
+                    <p>5分鐘快速入門</p>
+                </div>
+                <div class="link-item" onclick="window.location.href='管線避讓工具使用手冊.html'">
+                    <h3>🔧 管線避讓工具</h3>
+                    <p>MEP 專業工具</p>
+                </div>
+                <div class="link-item" onclick="window.location.href='AR模板工具使用手冊.html'">
+                    <h3>📖 AR 完整手冊</h3>
+                    <p>詳細功能說明</p>
+                </div>
+                <div class="link-item" onclick="window.location.href='AR裝修工具FAQ.md'">
+                    <h3>❓ 常見問題</h3>
+                    <p>問題解答</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="doc-grid">
+            <!-- 快速入門 -->
+            <div class="doc-card">
+                <span class="doc-icon">🚀</span>
+                <h2>快速入門指南</h2>
+                <p class="subtitle">5 分鐘快速上手</p>
+                <p>專為新手設計的快速入門教程，帶您在 5 分鐘內掌握 AR 裝修工具的基本操作。</p>
+                
+                <ul>
+                    <li>開始前的準備清單</li>
+                    <li>6 個簡單步驟</li>
+                    <li>實戰範例演示</li>
+                    <li>新手常見問題</li>
+                </ul>
+
+                <div class="meta">
+                    <div class="meta-item">
+                        <span>👥</span>
+                        <span>適合：新手使用者</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>⏱️</span>
+                        <span>閱讀：5-10 分鐘</span>
+                    </div>
+                </div>
+
+                <a href="AR裝修工具快速入門.html" class="btn">開始學習</a>
+            </div>
+
+            <!-- 完整手冊 -->
+            <div class="doc-card">
+                <span class="doc-icon">📘</span>
+                <h2>使用手冊</h2>
+                <p class="subtitle">完整功能說明</p>
+                <p>詳細的功能說明和操作步驟，涵蓋 AR 裝修工具、結構模板工具和自動接合工具的所有功能。</p>
+                
+                <ul>
+                    <li>AR 裝修工具詳細說明</li>
+                    <li>結構模板工具說明</li>
+                    <li>進階技巧和工作流程</li>
+                    <li>疑難排解指南</li>
+                </ul>
+
+                <div class="meta">
+                    <div class="meta-item">
+                        <span>👥</span>
+                        <span>適合：所有使用者</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>⏱️</span>
+                        <span>閱讀：30-45 分鐘</span>
+                    </div>
+                </div>
+
+                <a href="AR模板工具使用手冊.html" class="btn">查看手冊</a>
+            </div>
+
+            <!-- 管線避讓工具 -->
+            <div class="doc-card">
+                <span class="doc-icon">🔧</span>
+                <h2>管線避讓工具</h2>
+                <p class="subtitle">MEP 專業工具</p>
+                <p>自動生成管線避讓路徑，智能規避障礙物。支援 Pipe、Duct、Conduit 三種元素類型。</p>
+
+                <ul>
+                    <li>精確的 6 點路徑計算</li>
+                    <li>可調彎角和偏移量</li>
+                    <li>批量處理與循環模式</li>
+                    <li>完整的操作指南</li>
+                </ul>
+
+                <div class="meta">
+                    <div class="meta-item">
+                        <span>👥</span>
+                        <span>適合：MEP 工程師</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>⏱️</span>
+                        <span>閱讀：20-30 分鐘</span>
+                    </div>
+                </div>
+
+                <a href="管線避讓工具使用手冊.html" class="btn">查看手冊</a>
+            </div>
+
+            <!-- 自動更新功能 -->
+            <div class="doc-card">
+                <span class="doc-icon">🔄</span>
+                <h2>自動更新功能</h2>
+                <p class="subtitle">一鍵更新，輕鬆升級</p>
+                <p>無需手動下載安裝程式，直接透過工具內建功能檢查並安裝最新版本。</p>
+
+                <ul>
+                    <li>自動檢查最新版本</li>
+                    <li>一鍵下載並安裝</li>
+                    <li>查看更新內容和發布日期</li>
+                    <li>伺服器配置指南</li>
+                </ul>
+
+                <div class="meta">
+                    <div class="meta-item">
+                        <span>👥</span>
+                        <span>適合：所有使用者</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>⏱️</span>
+                        <span>閱讀：15-20 分鐘</span>
+                    </div>
+                </div>
+
+                <a href="自動更新功能使用手冊.html" class="btn">查看手冊</a>
+            </div>
+
+            <!-- 操作流程圖 -->
+            <div class="doc-card">
+                <span class="doc-icon">📊</span>
+                <h2>操作流程圖</h2>
+                <p class="subtitle">視覺化操作指南</p>
+                <p>使用 Mermaid 流程圖展示完整的操作流程，幫助您快速理解工具的使用邏輯。</p>
+                
+                <ul>
+                    <li>完整工作流程圖</li>
+                    <li>決策流程圖</li>
+                    <li>錯誤處理流程</li>
+                    <li>批量處理流程</li>
+                </ul>
+
+                <div class="meta">
+                    <div class="meta-item">
+                        <span>👥</span>
+                        <span>適合：視覺化學習者</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>⏱️</span>
+                        <span>閱讀：10-15 分鐘</span>
+                    </div>
+                </div>
+
+                <a href="AR裝修工具操作流程圖.md" class="btn">查看流程圖</a>
+            </div>
+
+            <!-- FAQ -->
+            <div class="doc-card">
+                <span class="doc-icon">❓</span>
+                <h2>常見問題解答</h2>
+                <p class="subtitle">25+ 個問題解答</p>
+                <p>收錄最常見的問題和詳細解答，幫助您快速解決使用過程中遇到的問題。</p>
+                
+                <ul>
+                    <li>安裝與授權問題</li>
+                    <li>基本操作問題</li>
+                    <li>類型設定問題</li>
+                    <li>效能優化建議</li>
+                </ul>
+
+                <div class="meta">
+                    <div class="meta-item">
+                        <span>👥</span>
+                        <span>適合：所有使用者</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>⏱️</span>
+                        <span>閱讀：依需求查閱</span>
+                    </div>
+                </div>
+
+                <a href="AR裝修工具FAQ.md" class="btn">查看 FAQ</a>
+            </div>
+
+            <!-- 文檔總覽 -->
+            <div class="doc-card">
+                <span class="doc-icon">🗂️</span>
+                <h2>文檔總覽</h2>
+                <p class="subtitle">文檔導航中心</p>
+                <p>提供所有文檔的導航和索引，幫助您快速找到需要的資訊。</p>
+                
+                <ul>
+                    <li>文檔列表和說明</li>
+                    <li>快速查找指南</li>
+                    <li>問題分類索引</li>
+                    <li>學習路徑建議</li>
+                </ul>
+
+                <div class="meta">
+                    <div class="meta-item">
+                        <span>👥</span>
+                        <span>適合：所有使用者</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>⏱️</span>
+                        <span>閱讀：10-15 分鐘</span>
+                    </div>
+                </div>
+
+                <a href="AR模板工具文檔總覽.md" class="btn">查看總覽</a>
+            </div>
+        </div>
+
+        <footer>
+            <h3>📞 需要幫助？</h3>
+            <p style="margin: 20px 0;">如果您在使用過程中遇到任何問題，請先查閱相關文檔。</p>
+            <p style="color: #666;">建議閱讀順序：快速入門 → 使用手冊 → FAQ → 流程圖</p>
+            <p style="margin-top: 30px; color: #999;">© 2025 YD_BIM Tools. All rights reserved.</p>
+        </footer>
+    </div>
+</body>
+</html>
+

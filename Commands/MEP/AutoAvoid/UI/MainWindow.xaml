@@ -1,0 +1,75 @@
+<Window x:Class="YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="管線避讓工具 - YD_BIM Tools" Height="500" Width="320"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        Topmost="True"
+        Background="#F5F5F5">
+    <Grid>
+        <StackPanel Margin="20,15,20,15">
+            <!-- 標題說明 -->
+            <Border Background="#2196F3" CornerRadius="5" Padding="12" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="管線翻彎工具" FontSize="16" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                    <TextBlock Text="設定完成後將進行管線點選" FontSize="11" Foreground="White" HorizontalAlignment="Center" Margin="0,4,0,0" Opacity="0.9"/>
+                </StackPanel>
+            </Border>
+
+            <!-- 翻彎參數設定 -->
+            <Border Background="White" CornerRadius="5" Padding="12" Margin="0,0,0,12" 
+                    BorderBrush="#DDD" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="翻彎參數" FontWeight="Bold" FontSize="13" Margin="0,0,0,12"/>
+                    
+                    <!-- 角度設定 -->
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Text="彎頭角度" FontSize="12" Margin="0,0,0,6" Foreground="#666"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <RadioButton Content="22.5°" GroupName="Angle" Margin="0,0,15,0" 
+                                         Tag="22.5" Checked="AngleChanged"/>
+                            <RadioButton Content="45°" GroupName="Angle" IsChecked="True" Margin="0,0,15,0"
+                                         Tag="45" Checked="AngleChanged"/>
+                            <RadioButton Content="90°" GroupName="Angle" 
+                                         Tag="90" Checked="AngleChanged"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- 避讓高度 -->
+                    <Grid Margin="0,0,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="35"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="避讓高度" Grid.Column="0" VerticalAlignment="Center" FontSize="12" Foreground="#666"/>
+                        <TextBox Name="txtExtraOffset" Text="{Binding ExtraOffsetMm}" Grid.Column="1" 
+                                 VerticalAlignment="Center" Padding="8" Height="32" FontSize="13"/>
+                        <TextBlock Text="mm" Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="12" Foreground="#666"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- 翻彎方向選擇 -->
+            <Border Background="White" CornerRadius="5" Padding="12" Margin="0,0,0,12" 
+                    BorderBrush="#DDD" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="翻彎方向" FontWeight="Bold" FontSize="13" Margin="0,0,0,6"/>
+                    <TextBlock Text="選擇管線翻彎的方向" FontSize="11" Foreground="#666" Margin="0,0,0,10"/>
+                    
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,0">
+                        <Button Content="↑ 向上" Width="60" Height="38" Margin="0,0,8,0" 
+                                Tag="Up" Click="DirectionButton_Click" Background="#E3F2FD" FontSize="12"/>
+                        <Button Content="↓ 向下" Width="60" Height="38" Margin="0,0,8,0"
+                                Tag="Down" Click="DirectionButton_Click" Background="#E3F2FD" FontSize="12"/>
+                        <Button Content="🔄 自動" Width="60" Height="38"
+                                Tag="Auto" Click="DirectionButton_Click" Background="#FFF9C4" FontSize="12"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 執行按鈕 -->
+            <Button Name="btnOk" Content="✓ 確定並開始點選" Height="48" 
+                    Background="#4CAF50" Foreground="White" FontWeight="Bold" FontSize="14" Click="Ok_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

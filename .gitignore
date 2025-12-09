@@ -1,0 +1,51 @@
+# Build results
+bin/
+obj/
+Output/
+Installer/2024/
+Installer/2025/
+Installer/2026/
+Installer/Resources/
+Installer/*.dll
+Installer/*.txt
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ReSharper
+_ReSharper*/
+*.DotSettings.user
+
+# User-specific files
+*.rsuser
+
+# Logs
+*.log
+LOG/
+
+# Temporary files
+*.tmp
+*.temp
+
+# NuGet Packages
+*.nupkg
+packages/
+
+# Test Results
+TestResults/
+
+# Build Tools
+.nuget/
+
+# Temporary release preparation files
+COMMIT_MESSAGE_*.txt
+publish_v*.ps1
+setup_git.ps1
+PUSH_TO_GITHUB.md
+GIT_QUICK_START.md
+發布狀態報告.md
+
