@@ -18,7 +18,7 @@ namespace YD_RevitTools.LicenseManager.Services
         private static readonly object _lock = new object();
 
         // 更新伺服器 URL - 使用 GitHub Raw URL
-        private const string VERSION_INFO_URL = "https://raw.githubusercontent.com/QOORST/YD_BIM_Tools/refs/heads/main/version.json";
+        private const string VERSION_INFO_URL = "https://raw.githubusercontent.com/QOORST/YD_BIM_Tools/main/version.json";
 
         // GitHub Releases URL（備用）
         private const string GITHUB_RELEASES_URL = "https://api.github.com/repos/QOORST/YD_BIM_Tools/releases/latest";
