@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>YD BIM Tools</Name>
+    <Assembly>C:\ProgramData\Autodesk\Revit\Addins\2024\YD_BIM\YD_RevitTools.LicenseManager.dll</Assembly>
+    <FullClassName>YD_RevitTools.LicenseManager.App</FullClassName>
+    <ClientId>A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D</ClientId>
+    <VendorId>YD_BIM</VendorId>
+    <VendorDescription>YD BIM Tools</VendorDescription>
+  </AddIn>
+</RevitAddIns>
+
