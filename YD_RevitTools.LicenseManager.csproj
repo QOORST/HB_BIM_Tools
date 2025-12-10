@@ -13,8 +13,9 @@
     <RevitVersion Condition="$(Configuration.Contains('2026'))">2026</RevitVersion>
     <!-- 停用自動產生的 AssemblyInfo -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <!-- 啟用 XAML -->
-    <UseWPF>true</UseWPF>
+    <!-- 啟用 XAML (僅 Revit 2024 及更早版本) -->
+    <UseWPF Condition="'$(RevitVersion)' == '2022' OR '$(RevitVersion)' == '2023' OR '$(RevitVersion)' == '2024'">true</UseWPF>
+    <UseWPF Condition="'$(RevitVersion)' == '2025' OR '$(RevitVersion)' == '2026'">false</UseWPF>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -23,8 +24,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="EPPlus" Version="7.5.2" />
+    <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />
     <PackageReference Include="System.Net.Http" Version="4.3.4" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 
@@ -53,6 +58,57 @@
     <Content Include="Resources\Icons\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 暫時排除有編譯錯誤的功能（缺少實作檔案） -->
+    <Compile Remove="Commands\AR\Finishings\**" />
+    <Compile Remove="Commands\AR\CmdTestImprovedEngine.cs" />
+    <Compile Remove="Commands\LicenseManagementCommand.cs" />
+    <Compile Remove="UI\Finishings\**" />
+    <EmbeddedResource Remove="Commands\AR\Finishings\**" />
+    <EmbeddedResource Remove="UI\Finishings\**" />
+    <None Remove="Commands\AR\Finishings\**" />
+    <None Remove="UI\Finishings\**" />
+    <Page Remove="Commands\AR\Finishings\**" />
+    <Page Remove="UI\Finishings\**" />
+    <Page Remove="LicenseWindow.xaml" />
+  </ItemGroup>
+
+  <!-- Revit 2025/2026: 排除所有 XAML 相關檔案（因為 XAML 編譯器有問題） -->
+  <ItemGroup Condition="'$(RevitVersion)' == '2025' OR '$(RevitVersion)' == '2026'">
+    <!-- 排除 XAML 檔案 -->
+    <Page Remove="Commands\Family\MainWindow.xaml" />
+    <Page Remove="Commands\Family\SliderSettingsWindow.xaml" />
+    <Page Remove="Commands\MEP\PipeSleeveWindow.xaml" />
+    <Page Remove="Commands\MEP\AutoAvoid\UI\MainWindow.xaml" />
+    <Page Remove="Commands\MEP\PipeToISO\MainWindow.xaml" />
+    <Page Remove="UI\AutoJoin\AutoJoinWindow.xaml" />
+    <!-- 排除 XAML.CS 檔案 -->
+    <Compile Remove="Commands\Family\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\Family\SliderSettingsWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\PipeSleeveWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\AutoAvoid\UI\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\PipeToISO\MainWindow.xaml.cs" />
+    <Compile Remove="UI\AutoJoin\AutoJoinWindow.xaml.cs" />
+    <!-- 排除引用 XAML UI 的命令檔案 -->
+    <Compile Remove="Commands\AboutCommand.cs" />
+    <Compile Remove="Commands\AR\AutoJoin\**" />
+    <Compile Remove="Commands\CheckUpdateCommand.cs" />
+    <Compile Remove="Commands\MEP\CmdAutoAvoid.cs" />
+    <Compile Remove="Commands\MEP\CmdPipeSleeve.cs" />
+    <Compile Remove="Commands\MEP\CmdPipeToISO.cs" />
+    <Compile Remove="Commands\MEP\AutoAvoid\**" />
+    <Compile Remove="Commands\MEP\PipeToISO\**" />
+    <Compile Remove="Commands\Family\**" />
+    <EmbeddedResource Remove="Commands\AR\AutoJoin\**" />
+    <EmbeddedResource Remove="Commands\MEP\AutoAvoid\**" />
+    <EmbeddedResource Remove="Commands\MEP\PipeToISO\**" />
+    <EmbeddedResource Remove="Commands\Family\**" />
+    <None Remove="Commands\AR\AutoJoin\**" />
+    <None Remove="Commands\MEP\AutoAvoid\**" />
+    <None Remove="Commands\MEP\PipeToISO\**" />
+    <None Remove="Commands\Family\**" />
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">

@@ -1435,21 +1435,21 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 // 建立最新預設欄位清單（含編號與英文對照）
                 var defaults = new List<CobieFieldConfig>
                 {
-                    new CobieFieldConfig{ DisplayName="01.空間名稱", CobieName="Space.Name", Category="空間資訊", SharedParameterName="COBie_SpaceName", ExportEnabled=true, ImportEnabled=false, DataType="Text", IsRequired=false, IsInstance=true },
-                    new CobieFieldConfig{ DisplayName="02.空間代碼", CobieName="Component.Space", Category="空間資訊", SharedParameterName="COBie_SpaceCode", ExportEnabled=true, ImportEnabled=false, DataType="Text", IsRequired=false, IsInstance=true },
-                    new CobieFieldConfig{ DisplayName="03.系統名稱", CobieName="System.Name", Category="系統資訊", SharedParameterName="COBie_SystemName", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
-                    new CobieFieldConfig{ DisplayName="04.系統代碼", CobieName="System.Identifier", Category="系統資訊", SharedParameterName="COBie_SystemId", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
-                    new CobieFieldConfig{ DisplayName="05.元件名稱", CobieName="Component.Name", Category="基本資訊", SharedParameterName="COBie_Name", ExportEnabled=true, ImportEnabled=true, DataType="Text", IsInstance=true },
-                    new CobieFieldConfig{ DisplayName="06.型號名稱", CobieName="Component.TypeName", Category="維護資訊", SharedParameterName="COBie_TypeName", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
-                    new CobieFieldConfig{ DisplayName="07.型號描述", CobieName="Type.Description", Category="維護資訊", SharedParameterName="COBie_TypeDescription", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
-                    new CobieFieldConfig{ DisplayName="08.序號", CobieName="Component.SerialNumber", Category="維護資訊", SharedParameterName="COBie_SerialNumber", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
-                    new CobieFieldConfig{ DisplayName="09.資產編號", CobieName="Component.TagNumber", Category="基本資訊", IsBuiltIn=true, BuiltInParam=BuiltInParameter.ALL_MODEL_MARK, ExportEnabled=false, ImportEnabled=true, DataType="Text", DefaultValue="", IsInstance=true },
-                    new CobieFieldConfig{ DisplayName="10.安裝/竣工日期", CobieName="Component.InstallationDate", Category="維護資訊", SharedParameterName="COBie_InstallDate", ExportEnabled=true, ImportEnabled=true, DataType="Date" },
-                    new CobieFieldConfig{ DisplayName="11.製造廠商", CobieName="Component.Manufacturer", Category="維護資訊", SharedParameterName="COBie_Manufacturer", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
-                    new CobieFieldConfig{ DisplayName="12.保固時程", CobieName="Component.WarrantyDuration", Category="維護資訊", SharedParameterName="COBie_WarrantyDuration", ExportEnabled=true, ImportEnabled=true, DataType="Number" },
-                    new CobieFieldConfig{ DisplayName="13.保固單位", CobieName="Component.WarrantyDurationUnit", Category="維護資訊", SharedParameterName="COBie_WarrantyUnit", ExportEnabled=true, ImportEnabled=true, DataType="Text", DefaultValue="年" },
-                    new CobieFieldConfig{ DisplayName="14.供應商", CobieName="Component.Supplier", Category="維護資訊", SharedParameterName="COBie_Supplier", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
-                    new CobieFieldConfig{ DisplayName="15.供應商電話", CobieName="Component.SupplierPhone", Category="維護資訊", SharedParameterName="COBie_SupplierPhone", ExportEnabled=true, ImportEnabled=true, DataType="Text" }
+                    new CobieFieldConfig{ DisplayName="01.空間名稱 (Space.Name)", CobieName="Space.Name", Category="空間資訊", SharedParameterName="COBie_SpaceName", ExportEnabled=true, ImportEnabled=false, DataType="Text", IsRequired=false, IsInstance=true },
+                    new CobieFieldConfig{ DisplayName="02.空間代碼 (Component.Space)", CobieName="Component.Space", Category="空間資訊", SharedParameterName="COBie_SpaceCode", ExportEnabled=true, ImportEnabled=false, DataType="Text", IsRequired=false, IsInstance=true },
+                    new CobieFieldConfig{ DisplayName="03.系統名稱 (System.Name)", CobieName="System.Name", Category="系統資訊", SharedParameterName="COBie_SystemName", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
+                    new CobieFieldConfig{ DisplayName="04.系統代碼 (System.Identifier)", CobieName="System.Identifier", Category="系統資訊", SharedParameterName="COBie_SystemId", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
+                    new CobieFieldConfig{ DisplayName="05.元件名稱 (Component.Name)", CobieName="Component.Name", Category="基本資訊", SharedParameterName="COBie_Name", ExportEnabled=true, ImportEnabled=true, DataType="Text", IsInstance=true },
+                    new CobieFieldConfig{ DisplayName="06.型號名稱 (Component.TypeName)", CobieName="Component.TypeName", Category="維護資訊", SharedParameterName="COBie_TypeName", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
+                    new CobieFieldConfig{ DisplayName="07.型號描述 (Type.Description)", CobieName="Type.Description", Category="維護資訊", SharedParameterName="COBie_TypeDescription", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
+                    new CobieFieldConfig{ DisplayName="08.序號 (Component.SerialNumber)", CobieName="Component.SerialNumber", Category="維護資訊", SharedParameterName="COBie_SerialNumber", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
+                    new CobieFieldConfig{ DisplayName="09.資產編號 (Component.TagNumber)", CobieName="Component.TagNumber", Category="基本資訊", IsBuiltIn=true, BuiltInParam=BuiltInParameter.ALL_MODEL_MARK, ExportEnabled=false, ImportEnabled=true, DataType="Text", DefaultValue="", IsInstance=true },
+                    new CobieFieldConfig{ DisplayName="10.安裝/竣工日期 (Component.InstallationDate)", CobieName="Component.InstallationDate", Category="維護資訊", SharedParameterName="COBie_InstallDate", ExportEnabled=true, ImportEnabled=true, DataType="Date" },
+                    new CobieFieldConfig{ DisplayName="11.製造廠商 (Component.Manufacturer)", CobieName="Component.Manufacturer", Category="維護資訊", SharedParameterName="COBie_Manufacturer", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
+                    new CobieFieldConfig{ DisplayName="12.保固時程 (Component.WarrantyDuration)", CobieName="Component.WarrantyDuration", Category="維護資訊", SharedParameterName="COBie_WarrantyDuration", ExportEnabled=true, ImportEnabled=true, DataType="Number" },
+                    new CobieFieldConfig{ DisplayName="13.保固單位 (Component.WarrantyDurationUnit)", CobieName="Component.WarrantyDurationUnit", Category="維護資訊", SharedParameterName="COBie_WarrantyUnit", ExportEnabled=true, ImportEnabled=true, DataType="Text", DefaultValue="年" },
+                    new CobieFieldConfig{ DisplayName="14.供應商 (Component.Supplier)", CobieName="Component.Supplier", Category="維護資訊", SharedParameterName="COBie_Supplier", ExportEnabled=true, ImportEnabled=true, DataType="Text" },
+                    new CobieFieldConfig{ DisplayName="15.供應商電話 (Component.SupplierPhone)", CobieName="Component.SupplierPhone", Category="維護資訊", SharedParameterName="COBie_SupplierPhone", ExportEnabled=true, ImportEnabled=true, DataType="Text" }
                 };
 
                 // 若存在舊設定，執行升級與合併，否則直接使用預設
@@ -1473,17 +1473,15 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                         }
                     }
 
-                    // 若顯示名稱未含編號，套用預設的編號化顯示名稱
+                    // 強制更新所有顯示名稱為最新的中英文對照格式
                     var nameMap = defaults.ToDictionary(d => d.CobieName, d => d.DisplayName);
                     foreach (var c in local)
                     {
                         if (c == null) continue;
                         if (c.CobieName != null && nameMap.TryGetValue(c.CobieName, out var dn))
                         {
-                            if (string.IsNullOrWhiteSpace(c.DisplayName) || !char.IsDigit(c.DisplayName[0]))
-                            {
-                                c.DisplayName = dn;
-                            }
+                            // 強制更新為新的中英文對照格式（即使已有編號）
+                            c.DisplayName = dn;
                         }
                     }
 

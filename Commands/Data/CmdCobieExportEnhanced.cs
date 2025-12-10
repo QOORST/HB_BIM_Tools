@@ -10,6 +10,7 @@ using Autodesk.Revit.DB.Architecture;
 using Autodesk.Revit.UI;
 using YD_RevitTools.LicenseManager;
 using YD_RevitTools.LicenseManager.Helpers.Data;
+using OfficeOpenXml;
 
 namespace YD_RevitTools.LicenseManager.Commands.Data
 {
@@ -198,17 +199,24 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 
                 if (confirmResult != TaskDialogResult.Ok) return Result.Cancelled;
 
-                var sfd = new SaveFileDialog { Filter = "CSV (逗號分隔)|*.csv", FileName = $"COBie_{DateTime.Now:yyyyMMdd_HHmm}.csv" };
+                // 設定 EPPlus 授權模式（非商業用途）
+                ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+
+                var sfd = new SaveFileDialog
+                {
+                    Filter = "Excel 檔案 (*.xlsx)|*.xlsx|CSV 檔案 (*.csv)|*.csv|所有檔案 (*.*)|*.*",
+                    FileName = $"COBie_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+                    DefaultExt = "xlsx"
+                };
                 if (sfd.ShowDialog() != DialogResult.OK) return Result.Cancelled;
 
                 var headers = new List<string> { "UniqueId", "ElementId", "FamilyName", "TypeName" };
                 headers.AddRange(exportFields.Select(f => f.DisplayName?.Trim()).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct());
 
-                using (var fs = new FileStream(sfd.FileName, FileMode.Create, FileAccess.Write, FileShare.None))
-                using (var sw = new StreamWriter(fs, new UTF8Encoding(true)))
-                {
-                    sw.WriteLine(Csv(headers));
-                    foreach (var e in elems)
+                // 收集所有資料列
+                var allRows = new List<List<string>>();
+
+                foreach (var e in elems)
                     {
                         var (fam, typ) = GetFamilyAndType(doc, e);
                         var row = new List<string>
@@ -303,14 +311,34 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                             }
                             else
                                 val = f.DefaultValue ?? "";
-                                
+
                             row.Add(val);
                         }
-                        sw.WriteLine(Csv(row));
+                        allRows.Add(row);
+                    }
+
+                // 根據檔案類型寫入資料
+                string fileExt = Path.GetExtension(sfd.FileName).ToLower();
+                if (fileExt == ".xlsx" || fileExt == ".xls")
+                {
+                    // 寫入 Excel 檔案
+                    WriteExcelFile(sfd.FileName, headers, allRows);
+                }
+                else
+                {
+                    // 寫入 CSV 檔案
+                    using (var fs = new FileStream(sfd.FileName, FileMode.Create, FileAccess.Write, FileShare.None))
+                    using (var sw = new StreamWriter(fs, new UTF8Encoding(true)))
+                    {
+                        sw.WriteLine(Csv(headers));
+                        foreach (var row in allRows)
+                        {
+                            sw.WriteLine(Csv(row));
+                        }
                     }
                 }
 
-                TaskDialog.Show("COBie 匯出", $"已輸出 {elems.Count} 筆。");
+                TaskDialog.Show("COBie 匯出", $"已輸出 {elems.Count} 筆至：\n{Path.GetFileName(sfd.FileName)}");
                 return Result.Succeeded;
             }
             catch (Exception ex) { msg = ex.ToString(); return Result.Failed; }
@@ -446,6 +474,44 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             catch
             {
                 return "";
+            }
+        }
+
+        /// <summary>
+        /// 寫入 Excel 檔案
+        /// </summary>
+        private static void WriteExcelFile(string filePath, List<string> headers, List<List<string>> rows)
+        {
+            var fileInfo = new FileInfo(filePath);
+            using (var package = new ExcelPackage(fileInfo))
+            {
+                // 建立工作表
+                var worksheet = package.Workbook.Worksheets.Add("COBie Data");
+
+                // 寫入標題列
+                for (int col = 0; col < headers.Count; col++)
+                {
+                    worksheet.Cells[1, col + 1].Value = headers[col];
+                    worksheet.Cells[1, col + 1].Style.Font.Bold = true;
+                    worksheet.Cells[1, col + 1].Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+                    worksheet.Cells[1, col + 1].Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightGray);
+                }
+
+                // 寫入資料列
+                for (int row = 0; row < rows.Count; row++)
+                {
+                    var rowData = rows[row];
+                    for (int col = 0; col < rowData.Count; col++)
+                    {
+                        worksheet.Cells[row + 2, col + 1].Value = rowData[col];
+                    }
+                }
+
+                // 自動調整欄寬
+                worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
+
+                // 儲存檔案
+                package.Save();
             }
         }
     }

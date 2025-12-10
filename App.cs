@@ -1,8 +1,9 @@
-// Application.cs (每個工具專案中)
+﻿// Application.cs (每個工具專案中)
 using Autodesk.Revit.UI;
 using System;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Windows.Media.Imaging;
 
 namespace YD_RevitTools.LicenseManager
@@ -20,6 +21,18 @@ namespace YD_RevitTools.LicenseManager
         {
             try
             {
+                // 註冊編碼提供者（修復 GB18030 編碼錯誤）
+                // 這對於 EPPlus 處理某些 Excel 檔案是必要的
+                try
+                {
+                    Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+                }
+                catch (Exception ex)
+                {
+                    // 如果註冊失敗，記錄但不中斷啟動
+                    System.Diagnostics.Debug.WriteLine($"編碼提供者註冊失敗: {ex.Message}");
+                }
+
                 // 驗證授權
                 var validationResult = LicenseManager.Instance.ValidateLicense();
 

@@ -10,6 +10,7 @@ using Autodesk.Revit.DB.Architecture;
 using Autodesk.Revit.UI;
 using YD_RevitTools.LicenseManager;
 using YD_RevitTools.LicenseManager.Helpers.Data;
+using OfficeOpenXml;
 
 namespace YD_RevitTools.LicenseManager.Commands.Data
 {
@@ -41,7 +42,14 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
             try
             {
-                var ofd = new OpenFileDialog { Filter = "CSV (逗號分隔)|*.csv", Title = "選擇 COBie 匯入 CSV" };
+                // 設定 EPPlus 授權模式（非商業用途）
+                ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+
+                var ofd = new OpenFileDialog
+                {
+                    Filter = "COBie 檔案|*.csv;*.xlsx;*.xls|CSV 檔案 (*.csv)|*.csv|Excel 檔案 (*.xlsx;*.xls)|*.xlsx;*.xls|所有檔案 (*.*)|*.*",
+                    Title = "選擇 COBie 匯入檔案 (CSV 或 Excel)"
+                };
                 if (ofd.ShowDialog() != DialogResult.OK) return Result.Cancelled;
 
                 var cfgs = CobieConfigIO.LoadConfig();
@@ -67,14 +75,39 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     }
                 }
 
-                var rawLines = File.ReadAllLines(ofd.FileName, Encoding.UTF8);
-                var lines = rawLines.Where(l => !string.IsNullOrWhiteSpace(l))
-                                    .Where(l => !l.TrimStart().StartsWith("#"))
-                                    .ToList();
-                if (lines.Count == 0) { TaskDialog.Show("COBie 匯入", "CSV 無內容"); return Result.Cancelled; }
+                // 根據檔案類型讀取資料
+                List<string> headers;
+                List<List<string>> rows;
 
-                var headers = SplitCsv(lines[0]).Select(h => h.Trim()).ToList();
-                var rows = lines.Skip(1).Select(SplitCsv).Where(r => r.Count == headers.Count).ToList();
+                string fileExt = Path.GetExtension(ofd.FileName).ToLower();
+                if (fileExt == ".xlsx" || fileExt == ".xls")
+                {
+                    // 讀取 Excel 檔案
+                    var excelData = ReadExcelFile(ofd.FileName);
+                    if (excelData == null || excelData.Count == 0)
+                    {
+                        TaskDialog.Show("COBie 匯入", "Excel 檔案無內容或讀取失敗");
+                        return Result.Cancelled;
+                    }
+                    headers = excelData[0];
+                    rows = excelData.Skip(1).ToList();
+                }
+                else
+                {
+                    // 讀取 CSV 檔案
+                    var rawLines = File.ReadAllLines(ofd.FileName, Encoding.UTF8);
+                    var lines = rawLines.Where(l => !string.IsNullOrWhiteSpace(l))
+                                        .Where(l => !l.TrimStart().StartsWith("#"))
+                                        .ToList();
+                    if (lines.Count == 0)
+                    {
+                        TaskDialog.Show("COBie 匯入", "CSV 無內容");
+                        return Result.Cancelled;
+                    }
+
+                    headers = SplitCsv(lines[0]).Select(h => h.Trim()).ToList();
+                    rows = lines.Skip(1).Select(SplitCsv).Where(r => r.Count == headers.Count).ToList();
+                }
 
                 int idxUnique = headers.FindIndex(h => h.Equals("UniqueId", StringComparison.OrdinalIgnoreCase));
                 int idxElemId = headers.FindIndex(h => h.Equals("ElementId", StringComparison.OrdinalIgnoreCase));
@@ -364,6 +397,72 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 return null;
             }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// 讀取 Excel 檔案並轉換為字串列表
+        /// </summary>
+        private static List<List<string>> ReadExcelFile(string filePath)
+        {
+            var result = new List<List<string>>();
+
+            try
+            {
+                var fileInfo = new FileInfo(filePath);
+                using (var package = new ExcelPackage(fileInfo))
+                {
+                    // 取得第一個工作表
+                    var worksheet = package.Workbook.Worksheets.FirstOrDefault();
+                    if (worksheet == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Excel 檔案中沒有工作表");
+                        return result;
+                    }
+
+                    // 取得使用範圍
+                    if (worksheet.Dimension == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Excel 工作表沒有資料");
+                        return result;
+                    }
+
+                    var start = worksheet.Dimension.Start;
+                    var end = worksheet.Dimension.End;
+
+                    // 讀取每一列
+                    for (int row = start.Row; row <= end.Row; row++)
+                    {
+                        var rowData = new List<string>();
+                        bool hasData = false;
+
+                        // 讀取每一欄
+                        for (int col = start.Column; col <= end.Column; col++)
+                        {
+                            var cell = worksheet.Cells[row, col];
+                            var value = cell.Value?.ToString() ?? "";
+                            rowData.Add(value.Trim());
+
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                hasData = true;
+                            }
+                        }
+
+                        // 只加入有資料的列（跳過空白列）
+                        if (hasData)
+                        {
+                            result.Add(rowData);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"讀取 Excel 檔案失敗: {ex.Message}");
+                return null;
+            }
+
+            return result;
         }
     }
 }
