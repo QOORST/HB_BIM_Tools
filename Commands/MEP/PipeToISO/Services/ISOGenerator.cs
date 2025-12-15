@@ -137,23 +137,23 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
             {
                 Logger.Info("收集要顯示的元件");
 
-                List<ElementId> elementIdsToShow = new List<ElementId>();
+                List<ElementId> elementIds = new List<ElementId>();
 
                 // 從 ISOData 收集元件
                 foreach (var segment in isoData.MainPipeSegments)
                 {
-                    elementIdsToShow.Add(segment.ElementId);
+                    elementIds.Add(segment.ElementId);
                 }
 
                 foreach (var branch in isoData.BranchSegments.Values)
                 {
                     foreach (var segment in branch)
                     {
-                        elementIdsToShow.Add(segment.ElementId);
+                        elementIds.Add(segment.ElementId);
                     }
                 }
 
-                Logger.Info($"ISOData 中共 {elementIdsToShow.Count} 個元件");
+                Logger.Info($"ISOData 中共 {elementIds.Count} 個元件");
 
                 // 從系統直接獲取所有元件
                 if (!string.IsNullOrEmpty(isoData.SystemName))
@@ -176,12 +176,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
                                 {
                                     foreach (Element element in networkElements)
                                     {
-                                        if (element != null && !elementIdsToShow.Contains(element.Id))
+                                        if (element != null && !elementIds.Contains(element.Id))
                                         {
-                                            elementIdsToShow.Add(element.Id);
+                                            elementIds.Add(element.Id);
                                         }
                                     }
-                                    Logger.Info($"總計 {elementIdsToShow.Count} 個元件");
+                                    Logger.Info($"總計 {elementIds.Count} 個元件");
                                 }
                                 break;
                             }
@@ -193,69 +193,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
                     }
                 }
 
-                Logger.Info($"最終顯示 {elementIdsToShow.Count} 個元件");
+                Logger.Info($"最終顯示 {elementIds.Count} 個元件");
 
-                if (elementIdsToShow.Count > 0)
+                if (elementIds.Count > 0)
                 {
-                    // 收集視圖中所有可見元件（只收集當前文件的元件，排除連結模型）
-                    Logger.Info("收集視圖中所有元件（排除連結模型）");
-                    FilteredElementCollector allElementsCollector = new FilteredElementCollector(_doc, view.Id)
-                        .WhereElementIsNotElementType()
-                        .OwnedByView(ElementId.InvalidElementId); // 排除視圖專屬元件（如標註）
-
-                    List<ElementId> allElementIds = new List<ElementId>();
-                    foreach (Element elem in allElementsCollector)
-                    {
-                        // 只收集當前文件的元件，排除連結模型的元件
-                        if (elem != null && elem.Document.Equals(_doc))
-                        {
-                            allElementIds.Add(elem.Id);
-                        }
-                    }
-
-                    Logger.Info($"視圖中共有 {allElementIds.Count} 個當前文件的元件");
-
-                    // 找出需要隱藏的元件（不在管線系統中的元件）
-                    List<ElementId> elementsToHide = new List<ElementId>();
-                    foreach (ElementId id in allElementIds)
-                    {
-                        if (!elementIdsToShow.Contains(id))
-                        {
-                            elementsToHide.Add(id);
-                        }
-                    }
-
-                    Logger.Info($"需要隱藏 {elementsToHide.Count} 個元件");
-
-                    // 永久隱藏不需要的元件（關閉專案後不會重置）
-                    if (elementsToHide.Count > 0)
-                    {
-                        view.HideElements(elementsToHide);
-                        Logger.Info("元件永久隱藏完成（關閉專案後不會重置）");
-                    }
-                    else
-                    {
-                        Logger.Info("沒有需要隱藏的元件");
-                    }
-
-                    // 隱藏連結模型中的所有類別
-                    try
-                    {
-                        Logger.Info("隱藏連結模型");
-                        FilteredElementCollector linkCollector = new FilteredElementCollector(_doc)
-                            .OfClass(typeof(RevitLinkInstance));
-
-                        List<ElementId> linkIds = linkCollector.ToElementIds().ToList();
-                        if (linkIds.Count > 0)
-                        {
-                            view.HideElements(linkIds);
-                            Logger.Info($"已隱藏 {linkIds.Count} 個連結模型");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warning($"隱藏連結模型失敗: {ex.Message}");
-                    }
+                    view.IsolateElementsTemporary(elementIds);
+                    Logger.Info("元件隔離完成");
                 }
             }
             catch (Exception ex)
