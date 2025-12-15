@@ -1,8 +1,8 @@
 ; YD BIM Tools Inno Setup Script
-; 版本: 2.2.5
+; 版本: 2.2.6
 
 #define MyAppName "YD BIM Tools"
-#define MyAppVersion "2.2.5"
+#define MyAppVersion "2.2.6"
 #define MyAppPublisher "YD_BIM Tools Team"
 #define MyAppURL "https://github.com/QOORST/YD_BIM_Tools"
 
