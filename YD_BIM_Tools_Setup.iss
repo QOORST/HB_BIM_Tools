@@ -49,10 +49,12 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 [Code]
 var
   Revit2024Installed, Revit2025Installed: Boolean;
+  TasksInitialized: Boolean;
 
 function InitializeSetup(): Boolean;
 begin
   Result := True;
+  TasksInitialized := False;
 
   // 檢查 Revit 2024 是否安裝
   Revit2024Installed := DirExists(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2024'));
@@ -68,13 +70,20 @@ begin
   end;
 end;
 
-procedure InitializeWizard();
+procedure CurPageChanged(CurPageID: Integer);
 begin
-  // 根據偵測到的 Revit 版本自動勾選
-  if Revit2024Installed then
-    WizardForm.TasksList.Checked[0] := True;
-  if Revit2025Installed then
-    WizardForm.TasksList.Checked[1] := True;
+  // 當進入任務選擇頁面時，自動勾選已安裝的 Revit 版本
+  if (CurPageID = wpSelectTasks) and (not TasksInitialized) then
+  begin
+    if WizardForm.TasksList.Items.Count >= 2 then
+    begin
+      if Revit2024Installed then
+        WizardForm.TasksList.Checked[0] := True;
+      if Revit2025Installed then
+        WizardForm.TasksList.Checked[1] := True;
+      TasksInitialized := True;
+    end;
+  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

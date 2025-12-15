@@ -197,13 +197,23 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
 
                 if (elementIdsToShow.Count > 0)
                 {
-                    // 收集視圖中所有可見元件
-                    Logger.Info("收集視圖中所有元件");
+                    // 收集視圖中所有可見元件（只收集當前文件的元件，排除連結模型）
+                    Logger.Info("收集視圖中所有元件（排除連結模型）");
                     FilteredElementCollector allElementsCollector = new FilteredElementCollector(_doc, view.Id)
-                        .WhereElementIsNotElementType();
+                        .WhereElementIsNotElementType()
+                        .OwnedByView(ElementId.InvalidElementId); // 排除視圖專屬元件（如標註）
 
-                    List<ElementId> allElementIds = allElementsCollector.ToElementIds().ToList();
-                    Logger.Info($"視圖中共有 {allElementIds.Count} 個元件");
+                    List<ElementId> allElementIds = new List<ElementId>();
+                    foreach (Element elem in allElementsCollector)
+                    {
+                        // 只收集當前文件的元件，排除連結模型的元件
+                        if (elem != null && elem.Document.Equals(_doc))
+                        {
+                            allElementIds.Add(elem.Id);
+                        }
+                    }
+
+                    Logger.Info($"視圖中共有 {allElementIds.Count} 個當前文件的元件");
 
                     // 找出需要隱藏的元件（不在管線系統中的元件）
                     List<ElementId> elementsToHide = new List<ElementId>();
@@ -226,6 +236,25 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
                     else
                     {
                         Logger.Info("沒有需要隱藏的元件");
+                    }
+
+                    // 隱藏連結模型中的所有類別
+                    try
+                    {
+                        Logger.Info("隱藏連結模型");
+                        FilteredElementCollector linkCollector = new FilteredElementCollector(_doc)
+                            .OfClass(typeof(RevitLinkInstance));
+
+                        List<ElementId> linkIds = linkCollector.ToElementIds().ToList();
+                        if (linkIds.Count > 0)
+                        {
+                            view.HideElements(linkIds);
+                            Logger.Info($"已隱藏 {linkIds.Count} 個連結模型");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warning($"隱藏連結模型失敗: {ex.Message}");
                     }
                 }
             }
