@@ -47,31 +47,34 @@ Source: "Addins\YD_RevitTools.LicenseManager_2025.addin"; DestDir: "{commonappda
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 
 [Code]
-function InitializeSetup(): Boolean;
 var
   Revit2024Installed, Revit2025Installed: Boolean;
+
+function InitializeSetup(): Boolean;
 begin
   Result := True;
-  
+
   // 檢查 Revit 2024 是否安裝
   Revit2024Installed := DirExists(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2024'));
-  
+
   // 檢查 Revit 2025 是否安裝
   Revit2025Installed := DirExists(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2025'));
-  
+
   if not Revit2024Installed and not Revit2025Installed then
   begin
-    MsgBox('未偵測到 Revit 2024 或 2025。' + #13#10 + 
+    MsgBox('未偵測到 Revit 2024 或 2025。' + #13#10 +
            '請確認已安裝 Autodesk Revit 2024 或 2025。', mbError, MB_OK);
     Result := False;
-  end
-  else
-  begin
-    if Revit2024Installed then
-      WizardForm.TasksList.Checked[0] := True;
-    if Revit2025Installed then
-      WizardForm.TasksList.Checked[1] := True;
   end;
+end;
+
+procedure InitializeWizard();
+begin
+  // 根據偵測到的 Revit 版本自動勾選
+  if Revit2024Installed then
+    WizardForm.TasksList.Checked[0] := True;
+  if Revit2025Installed then
+    WizardForm.TasksList.Checked[1] := True;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
