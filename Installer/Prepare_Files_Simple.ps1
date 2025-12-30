@@ -9,20 +9,42 @@ $projectRoot = Split-Path $installerDir -Parent
 
 # Check source files
 Write-Host "Checking source files..." -ForegroundColor Yellow
-$sourceDll = Join-Path $projectRoot "bin\Release\YD_RevitTools.LicenseManager.dll"
-$sourceNewtonsoftDll = Join-Path $projectRoot "bin\Release\Newtonsoft.Json.dll"
-$sourceSystemTextJsonDll = Join-Path $projectRoot "bin\Release\System.Text.Json.dll"
-$sourceSystemTextEncodingsWebDll = Join-Path $projectRoot "bin\Release\System.Text.Encodings.Web.dll"
-$sourceSystemMemoryDll = Join-Path $projectRoot "bin\Release\System.Memory.dll"
-$sourceSystemBuffersDll = Join-Path $projectRoot "bin\Release\System.Buffers.dll"
-$sourceSystemRuntimeCompilerServicesUnsafeDll = Join-Path $projectRoot "bin\Release\System.Runtime.CompilerServices.Unsafe.dll"
+
+# Use Release2024 as the base for dependency DLLs (they are the same across versions)
+$baseBinDir = Join-Path $projectRoot "bin\Release2024"
+$sourceNewtonsoftDll = Join-Path $baseBinDir "Newtonsoft.Json.dll"
+$sourceSystemTextJsonDll = Join-Path $baseBinDir "System.Text.Json.dll"
+$sourceSystemTextEncodingsWebDll = Join-Path $baseBinDir "System.Text.Encodings.Web.dll"
+$sourceSystemMemoryDll = Join-Path $baseBinDir "System.Memory.dll"
+$sourceSystemBuffersDll = Join-Path $baseBinDir "System.Buffers.dll"
+$sourceSystemRuntimeCompilerServicesUnsafeDll = Join-Path $baseBinDir "System.Runtime.CompilerServices.Unsafe.dll"
 $sourceIcons = Join-Path $projectRoot "Resources\Icons"
 
-if (-not (Test-Path $sourceDll)) {
-    Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll" -ForegroundColor Red
-    Write-Host "Path: $sourceDll" -ForegroundColor Gray
+# Version-specific DLLs
+$sourceDll2024 = Join-Path $projectRoot "bin\Release2024\YD_RevitTools.LicenseManager.dll"
+$sourceDll2025 = Join-Path $projectRoot "bin\Release2025\YD_RevitTools.LicenseManager.dll"
+# Revit 2026 uses the same DLL as 2025 (if Release2026 doesn't exist)
+$sourceDll2026Path = Join-Path $projectRoot "bin\Release2026\YD_RevitTools.LicenseManager.dll"
+if (Test-Path $sourceDll2026Path) {
+    $sourceDll2026 = $sourceDll2026Path
+} else {
+    $sourceDll2026 = $sourceDll2025
+    Write-Host "[INFO] Using Revit 2025 DLL for Revit 2026 (Release2026 not found)" -ForegroundColor Yellow
+}
+
+if (-not (Test-Path $sourceDll2024)) {
+    Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit 2024" -ForegroundColor Red
+    Write-Host "Path: $sourceDll2024" -ForegroundColor Gray
     exit 1
 }
+
+if (-not (Test-Path $sourceDll2025)) {
+    Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit 2025" -ForegroundColor Red
+    Write-Host "Path: $sourceDll2025" -ForegroundColor Gray
+    exit 1
+}
+
+# sourceDll2026 is already set above (either Release2026 or fallback to Release2025)
 
 if (-not (Test-Path $sourceNewtonsoftDll)) {
     Write-Host "[ERROR] Cannot find Newtonsoft.Json.dll" -ForegroundColor Red
@@ -42,7 +64,7 @@ if (-not (Test-Path $sourceIcons)) {
     exit 1
 }
 
-Write-Host "[OK] Main DLL found" -ForegroundColor Green
+Write-Host "[OK] Main DLL found (2024, 2025, 2026)" -ForegroundColor Green
 Write-Host "[OK] Newtonsoft.Json.dll found" -ForegroundColor Green
 Write-Host "[OK] System.Text.Json.dll found" -ForegroundColor Green
 Write-Host "[OK] Icons directory found" -ForegroundColor Green
@@ -93,17 +115,33 @@ Write-Host ""
 
 # Create version directories
 Write-Host "Creating version directories..." -ForegroundColor Yellow
-$versions = @("2024", "2025", "2026")
 
-foreach ($version in $versions) {
-    $versionDir = Join-Path $installerDir $version
-    if (Test-Path $versionDir) {
-        Remove-Item $versionDir -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
-    Copy-Item $sourceDll -Destination $versionDir -Force
-    Write-Host "[OK] Revit $version ready" -ForegroundColor Green
+# Revit 2024
+$versionDir2024 = Join-Path $installerDir "2024"
+if (Test-Path $versionDir2024) {
+    Remove-Item $versionDir2024 -Recurse -Force
 }
+New-Item -ItemType Directory -Path $versionDir2024 -Force | Out-Null
+Copy-Item $sourceDll2024 -Destination $versionDir2024 -Force
+Write-Host "[OK] Revit 2024 ready" -ForegroundColor Green
+
+# Revit 2025
+$versionDir2025 = Join-Path $installerDir "2025"
+if (Test-Path $versionDir2025) {
+    Remove-Item $versionDir2025 -Recurse -Force
+}
+New-Item -ItemType Directory -Path $versionDir2025 -Force | Out-Null
+Copy-Item $sourceDll2025 -Destination $versionDir2025 -Force
+Write-Host "[OK] Revit 2025 ready" -ForegroundColor Green
+
+# Revit 2026
+$versionDir2026 = Join-Path $installerDir "2026"
+if (Test-Path $versionDir2026) {
+    Remove-Item $versionDir2026 -Recurse -Force
+}
+New-Item -ItemType Directory -Path $versionDir2026 -Force | Out-Null
+Copy-Item $sourceDll2026 -Destination $versionDir2026 -Force
+Write-Host "[OK] Revit 2026 ready" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "===============================================================" -ForegroundColor Cyan

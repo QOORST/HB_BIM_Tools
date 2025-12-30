@@ -1,101 +1,466 @@
 <Window x:Class="YD_RevitTools.LicenseManager.UI.AutoJoin.AutoJoinWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="YD_BIM - 自動結構接合設定"
-        Height="550" Width="650"
-        MinHeight="480" MinWidth="540"
+        Title="YD_BIM - 自動結構接合"
+        Height="600" Width="750"
+        MinHeight="550" MinWidth="700"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResize">
+        ResizeMode="CanResize"
+        Background="#F5F5F5">
 
-    <Grid Margin="12">
+    <Window.Resources>
+        <!-- 現代化按鈕樣式 -->
+        <Style x:Key="ModernButton" TargetType="Button">
+            <Setter Property="Background" Value="#0078D4"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#005A9E"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#004578"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 次要按鈕樣式 -->
+        <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Background" Value="#E0E0E0"/>
+            <Setter Property="Foreground" Value="#333333"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#D0D0D0"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 現代化 GroupBox 樣式 -->
+        <Style x:Key="ModernGroupBox" TargetType="GroupBox">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#E0E0E0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GroupBox">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Background="#F8F8F8" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="12,8">
+                                <ContentPresenter ContentSource="Header" TextElement.FontWeight="SemiBold" TextElement.FontSize="14"/>
+                            </Border>
+                            <Border Grid.Row="1" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter/>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 現代化 CheckBox 樣式 -->
+        <Style x:Key="ModernCheckBox" TargetType="CheckBox">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <!-- Tab 樣式 -->
+        <Style x:Key="ModernTabControl" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style x:Key="ModernTabItem" TargetType="TabItem">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="20,10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border Name="Border" Background="#E0E0E0" BorderThickness="0" Padding="{TemplateBinding Padding}" Margin="0,0,4,0">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="White"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#D0D0D0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 內建規則 -->
-        <GroupBox Grid.Row="0" Header="內建規則" Margin="0,0,0,8">
-            <StackPanel Margin="10,8">
-                <CheckBox x:Name="cbWF" Content="牆–樓板（樓板切）" IsChecked="True" Margin="0,0,0,4"/>
-                <CheckBox x:Name="cbWB" Content="牆–梁（梁切）" IsChecked="True" Margin="0,0,0,4"/>
-                <CheckBox x:Name="cbFC" Content="樓板–柱（柱切）" IsChecked="True"/>
-            </StackPanel>
-        </GroupBox>
-
-        <!-- 自訂配對（A 切 B） -->
-        <GroupBox Grid.Row="1" Header="自訂配對（A 切 B）" Margin="0,0,0,8">
-            <StackPanel Margin="10,8">
-                <Grid Margin="0,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <ComboBox x:Name="cbCatA" Grid.Column="0" Margin="0,0,8,0" Height="24"/>
-                    <ComboBox x:Name="cbCatB" Grid.Column="1" Margin="0,0,8,0" Height="24"/>
-                    <Button   x:Name="btnAddPair" Grid.Column="2" Content="加入" Width="68" Height="24" Click="btnAddPair_Click"/>
-                </Grid>
-
-                <ListBox x:Name="lbPairs" Height="100" Margin="0,0,0,8"/>
-
-                <Button x:Name="btnRemovePair" Content="移除選取"
-                HorizontalAlignment="Right" Width="96"
-                Click="btnRemovePair_Click"/>
-            </StackPanel>
-        </GroupBox>
-
-        <!-- 模式 / 範圍 / 搜尋 -->
-        <GroupBox Grid.Row="2" Header="模式 / 範圍 / 搜尋" Margin="0,0,0,8">
-            <Grid Margin="10,8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+        <!-- 標題列 -->
+        <Border Grid.Row="0" Background="#0078D4" Padding="20,16">
+            <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-
-                <CheckBox x:Name="cbDry" Grid.Row="0" Grid.Column="0"
-                  Content="Dry-Run（不動模型）" Margin="0,0,12,4"/>
-                <CheckBox x:Name="cbSwitchOnly" Grid.Row="0" Grid.Column="1"
-                  Content="只切換順序（不做 Join）" Margin="0,0,0,4"/>
-
-                <CheckBox x:Name="cbOnlyView" Grid.Row="1" Grid.Column="0"
-                  Content="只處理目前視圖" Margin="0,0,12,0"/>
-                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
-                    <CheckBox x:Name="cbOnlySel" Content="只處理目前選取" Margin="0,0,8,0"/>
-                    <TextBlock Text="外框膨脹（ft）：" VerticalAlignment="Center" Margin="12,0,6,0"/>
-                    <TextBox x:Name="tbInflate" Width="64" Height="22" Text="1.0"/>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="自動結構接合" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="智慧化接合結構元素，自動調整切割順序" FontSize="12" Foreground="#E0E0E0" Margin="0,4,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="tbElementCount" Text="準備掃描..." FontSize="12" Foreground="White" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <Button x:Name="btnRefresh" Content="🔄 重新掃描" Background="#005A9E" Foreground="White" BorderThickness="0" Padding="12,6" Cursor="Hand" Click="btnRefresh_Click"/>
                 </StackPanel>
             </Grid>
-        </GroupBox>
+        </Border>
 
-        <!-- 記錄 -->
-        <GroupBox Grid.Row="3" Header="記錄" Margin="0,0,0,8">
-            <Grid Margin="10,8">
+        <!-- 主要內容區 -->
+        <TabControl Grid.Row="1" Style="{StaticResource ModernTabControl}" Margin="0">
+            <!-- 快速模式 -->
+            <TabItem Header="⚡ 快速模式" Style="{StaticResource ModernTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20">
+                    <StackPanel>
+                        <!-- 接合規則 -->
+                        <GroupBox Header="📋 接合規則" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <TextBlock Text="選擇要套用的接合規則（依照建築慣例）" FontSize="12" Foreground="#666" Margin="0,0,0,12"/>
+
+                                <Border Background="#F0F8FF" BorderBrush="#0078D4" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,8">
+                                    <CheckBox x:Name="cbWF" Style="{StaticResource ModernCheckBox}" IsChecked="True">
+                                        <StackPanel>
+                                            <TextBlock Text="牆 ↔ 樓板" FontWeight="SemiBold"/>
+                                            <TextBlock Text="樓板切割牆（樓板優先）" FontSize="11" Foreground="#666" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                </Border>
+
+                                <Border Background="#FFF8F0" BorderBrush="#FF8C00" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,8">
+                                    <CheckBox x:Name="cbWB" Style="{StaticResource ModernCheckBox}" IsChecked="True">
+                                        <StackPanel>
+                                            <TextBlock Text="牆 ↔ 梁" FontWeight="SemiBold"/>
+                                            <TextBlock Text="梁切割牆（梁優先）" FontSize="11" Foreground="#666" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                </Border>
+
+                                <Border Background="#FFF0F5" BorderBrush="#FF1493" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,8">
+                                    <CheckBox x:Name="cbWC" Style="{StaticResource ModernCheckBox}" IsChecked="True">
+                                        <StackPanel>
+                                            <TextBlock Text="牆 ↔ 柱" FontWeight="SemiBold"/>
+                                            <TextBlock Text="柱切割牆（柱優先）" FontSize="11" Foreground="#666" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                </Border>
+
+                                <Border Background="#F0FFF0" BorderBrush="#32CD32" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,8">
+                                    <CheckBox x:Name="cbFC" Style="{StaticResource ModernCheckBox}" IsChecked="True">
+                                        <StackPanel>
+                                            <TextBlock Text="樓板 ↔ 柱" FontWeight="SemiBold"/>
+                                            <TextBlock Text="柱切割樓板（柱優先）" FontSize="11" Foreground="#666" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                </Border>
+
+                                <Border Background="#F5F0FF" BorderBrush="#9370DB" BorderThickness="1" CornerRadius="4" Padding="12">
+                                    <CheckBox x:Name="cbFB" Style="{StaticResource ModernCheckBox}" IsChecked="True">
+                                        <StackPanel>
+                                            <TextBlock Text="樓板 ↔ 梁" FontWeight="SemiBold"/>
+                                            <TextBlock Text="梁切割樓板（梁優先）" FontSize="11" Foreground="#666" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                </Border>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <!-- 處理範圍 -->
+                        <GroupBox Header="🎯 處理範圍" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <RadioButton x:Name="rbAllElements" Content="整個專案" IsChecked="True" FontSize="13" Margin="0,0,0,8" GroupName="Scope"/>
+                                <RadioButton x:Name="rbCurrentView" Content="目前視圖" FontSize="13" Margin="0,0,0,8" GroupName="Scope"/>
+                                <RadioButton x:Name="rbSelection" Content="目前選取" FontSize="13" GroupName="Scope"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <!-- 執行選項 -->
+                        <GroupBox Header="⚙️ 執行選項" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <CheckBox x:Name="cbDry" Style="{StaticResource ModernCheckBox}" Content="預覽模式（不修改模型，僅顯示結果）" Margin="0,0,0,8"/>
+                                <CheckBox x:Name="cbSwitchOnly" Style="{StaticResource ModernCheckBox}" Content="只調整切割順序（不建立新接合）"/>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- 進階模式 -->
+            <TabItem Header="🔧 進階模式" Style="{StaticResource ModernTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20">
+                    <StackPanel>
+                        <!-- 優先級說明 -->
+                        <GroupBox Header="📊 切割優先級（數字越小優先級越高）" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Background="#FF4444" CornerRadius="4" Padding="8,4">
+                                        <TextBlock Text="1" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1" Text="結構柱" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="SemiBold"/>
+                                    <TextBlock Grid.Column="2" Text="最高優先級" VerticalAlignment="Center" FontSize="11" Foreground="#666"/>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Background="#FF8C00" CornerRadius="4" Padding="8,4">
+                                        <TextBlock Text="2" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1" Text="結構構架/梁" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="SemiBold"/>
+                                    <TextBlock Grid.Column="2" Text="高優先級" VerticalAlignment="Center" FontSize="11" Foreground="#666"/>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Background="#0078D4" CornerRadius="4" Padding="8,4">
+                                        <TextBlock Text="3" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1" Text="樓板" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="SemiBold"/>
+                                    <TextBlock Grid.Column="2" Text="中優先級" VerticalAlignment="Center" FontSize="11" Foreground="#666"/>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Background="#32CD32" CornerRadius="4" Padding="8,4">
+                                        <TextBlock Text="4" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1" Text="牆" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="SemiBold"/>
+                                    <TextBlock Grid.Column="2" Text="低優先級" VerticalAlignment="Center" FontSize="11" Foreground="#666"/>
+                                </Grid>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Background="#808080" CornerRadius="4" Padding="8,4">
+                                        <TextBlock Text="5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1" Text="結構基礎" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="SemiBold"/>
+                                    <TextBlock Grid.Column="2" Text="最低優先級" VerticalAlignment="Center" FontSize="11" Foreground="#666"/>
+                                </Grid>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <!-- 自訂配對 -->
+                        <GroupBox Header="➕ 自訂接合配對" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <TextBlock Text="建立自訂的接合規則（A 切割 B）" FontSize="12" Foreground="#666" Margin="0,0,0,12"/>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <ComboBox x:Name="cbCatA" Grid.Column="0" Height="32" FontSize="13" Padding="8,4"/>
+                                    <TextBlock Grid.Column="1" Text="→" FontSize="20" FontWeight="Bold" Margin="12,0" VerticalAlignment="Center" Foreground="#0078D4"/>
+                                    <ComboBox x:Name="cbCatB" Grid.Column="2" Height="32" FontSize="13" Padding="8,4"/>
+                                    <Button x:Name="btnAddPair" Grid.Column="3" Content="➕ 加入" Style="{StaticResource ModernButton}" Margin="12,0,0,0" Click="btnAddPair_Click"/>
+                                </Grid>
+
+                                <Border BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Background="White">
+                                    <ListBox x:Name="lbPairs" Height="120" BorderThickness="0" Padding="4"/>
+                                </Border>
+
+                                <Button x:Name="btnRemovePair" Content="🗑️ 移除選取" Style="{StaticResource SecondaryButton}"
+                                        HorizontalAlignment="Right" Margin="0,8,0,0" Click="btnRemovePair_Click"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <!-- 進階選項 -->
+                        <GroupBox Header="⚙️ 進階選項" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="搜尋範圍膨脹（ft）：" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBox x:Name="tbInflate" Grid.Column="1" Height="32" Text="1.0" FontSize="13" Padding="8,4" VerticalContentAlignment="Center"/>
+                                </Grid>
+                                <TextBlock Text="💡 提示：增加此值可以找到更多相鄰元素，但會增加處理時間"
+                                           FontSize="11" Foreground="#666" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                                <!-- 近距離偵測設定 -->
+                                <CheckBox x:Name="cbDetectNearMisses" Style="{StaticResource ModernCheckBox}"
+                                          Content="偵測接近但未相交的元素" IsChecked="True" Margin="0,0,0,12"/>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="容差距離（mm）：" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBox x:Name="tbProximityTolerance" Grid.Column="1" Height="32" Text="5.0" FontSize="13" Padding="8,4" VerticalContentAlignment="Center"/>
+                                </Grid>
+                                <TextBlock Text="💡 提示：偵測距離小於此值的元素，建議值為 5mm"
+                                           FontSize="11" Foreground="#666" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <!-- 記錄選項 -->
+                        <GroupBox Header="📝 記錄選項" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <CheckBox x:Name="cbLog" Style="{StaticResource ModernCheckBox}" Content="輸出詳細記錄到 CSV 檔案" Margin="0,0,0,12"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="檔案路徑：" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBox x:Name="tbCsv" Grid.Column="1" Height="32" Text="C:\Temp\AutoJoinLog.csv" FontSize="13" Padding="8,4" VerticalContentAlignment="Center"/>
+                                    <Button Grid.Column="2" Content="📁 瀏覽" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="btnBrowseCsv_Click"/>
+                                </Grid>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- 說明 -->
+            <TabItem Header="❓ 說明" Style="{StaticResource ModernTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20">
+                    <StackPanel>
+                        <GroupBox Header="📖 功能說明" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <TextBlock TextWrapping="Wrap" FontSize="13" LineHeight="22">
+                                    <Run Text="自動結構接合工具可以智慧化地接合相交的結構元素，並根據建築慣例自動調整切割順序。" FontWeight="SemiBold"/>
+                                    <LineBreak/><LineBreak/>
+                                    <Run Text="主要功能："/>
+                                    <LineBreak/>
+                                    <Run Text="• 自動偵測相交的結構元素"/>
+                                    <LineBreak/>
+                                    <Run Text="• 根據優先級自動調整切割順序"/>
+                                    <LineBreak/>
+                                    <Run Text="• 支援自訂接合規則"/>
+                                    <LineBreak/>
+                                    <Run Text="• 可選擇處理範圍（整個專案/目前視圖/選取元素）"/>
+                                    <LineBreak/>
+                                    <Run Text="• 提供預覽模式，避免誤操作"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="🎯 使用建議" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <TextBlock TextWrapping="Wrap" FontSize="13" LineHeight="22">
+                                    <Run Text="1. 首次使用建議：" FontWeight="SemiBold"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 先使用「預覽模式」查看將要處理的元素數量"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 從小範圍開始（目前視圖或選取元素）"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 確認結果後再處理整個專案"/>
+                                    <LineBreak/><LineBreak/>
+                                    <Run Text="2. 效能優化：" FontWeight="SemiBold"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 大型專案建議分批處理"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 使用「目前視圖」限制處理範圍"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 減少「搜尋範圍膨脹」值可提升速度"/>
+                                    <LineBreak/><LineBreak/>
+                                    <Run Text="3. 常見問題：" FontWeight="SemiBold"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 如果接合失敗，工具會自動解除舊接合後重試"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 「只調整切割順序」適用於已接合但順序錯誤的情況"/>
+                                    <LineBreak/>
+                                    <Run Text="   • 輸出 CSV 記錄可用於追蹤和除錯"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="⚠️ 注意事項" Style="{StaticResource ModernGroupBox}">
+                            <StackPanel>
+                                <TextBlock TextWrapping="Wrap" FontSize="13" LineHeight="22" Foreground="#D32F2F">
+                                    <Run Text="• 執行前請先儲存專案"/>
+                                    <LineBreak/>
+                                    <Run Text="• 大型專案處理時間可能較長，請耐心等待"/>
+                                    <LineBreak/>
+                                    <Run Text="• 建議在非工作時間處理整個專案"/>
+                                    <LineBreak/>
+                                    <Run Text="• 如有疑問，請先使用預覽模式測試"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <!-- 底部按鈕列 -->
+        <Border Grid.Row="2" Background="White" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0" Padding="20,16">
+            <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <CheckBox x:Name="cbLog" Content="輸出 CSV" Grid.Column="0" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                <TextBox x:Name="tbCsv" Grid.Column="1" Text="C:\Temp\AutoJoinLog.csv" Height="22"/>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="tbStatus" Text="準備就緒" FontSize="12" Foreground="#666" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="✅ 開始執行" Width="120" Style="{StaticResource ModernButton}" Click="btnOK_Click" Margin="0,0,12,0"/>
+                    <Button Content="取消" Width="80" Style="{StaticResource SecondaryButton}" Click="btnCancel_Click"/>
+                </StackPanel>
             </Grid>
-        </GroupBox>
-
-        <!-- 占位（讓內容可延展） -->
-        <Border Grid.Row="4" Height="0"/>
-
-        <!-- 動作按鈕 -->
-        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="開始" Width="100" Margin="0,8,8,0" Click="btnOK_Click"/>
-            <Button Content="取消" Width="80" Margin="0,8,0,0" Click="btnCancel_Click"/>
-        </StackPanel>
-
+        </Border>
     </Grid>
 </Window>

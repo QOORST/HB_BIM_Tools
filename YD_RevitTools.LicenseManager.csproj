@@ -23,6 +23,23 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
+  <!-- 條件編譯符號 -->
+  <PropertyGroup Condition="'$(RevitVersion)' == '2022'">
+    <DefineConstants>REVIT2022</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2023'">
+    <DefineConstants>REVIT2023</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2024'">
+    <DefineConstants>REVIT2024</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2025'">
+    <DefineConstants>REVIT2025</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2026'">
+    <DefineConstants>REVIT2026</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="EPPlus" Version="7.5.2" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
@@ -84,6 +101,8 @@
     <Page Remove="Commands\MEP\AutoAvoid\UI\MainWindow.xaml" />
     <Page Remove="Commands\MEP\PipeToISO\MainWindow.xaml" />
     <Page Remove="UI\AutoJoin\AutoJoinWindow.xaml" />
+    <Page Remove="UI\AutoJoin\NearMissResultWindow.xaml" />
+    <Page Remove="UI\AutoJoin\AutoJoinSimpleWindow.xaml" />
     <!-- 排除 XAML.CS 檔案 -->
     <Compile Remove="Commands\Family\MainWindow.xaml.cs" />
     <Compile Remove="Commands\Family\SliderSettingsWindow.xaml.cs" />
@@ -91,9 +110,13 @@
     <Compile Remove="Commands\MEP\AutoAvoid\UI\MainWindow.xaml.cs" />
     <Compile Remove="Commands\MEP\PipeToISO\MainWindow.xaml.cs" />
     <Compile Remove="UI\AutoJoin\AutoJoinWindow.xaml.cs" />
+    <Compile Remove="UI\AutoJoin\NearMissResultWindow.xaml.cs" />
+    <Compile Remove="UI\AutoJoin\AutoJoinSimpleWindow.xaml.cs" />
     <!-- 排除引用 XAML UI 的命令檔案 -->
     <Compile Remove="Commands\AboutCommand.cs" />
-    <Compile Remove="Commands\AR\AutoJoin\**" />
+    <Compile Remove="Commands\AR\AutoJoin\CmdAutoJoin.cs" />
+    <Compile Remove="Commands\AR\AutoJoin\CmdJoinToPicked.cs" />
+    <Compile Remove="Commands\AR\AutoJoin\CmdAutoJoinSimple.cs" />
     <Compile Remove="Commands\CheckUpdateCommand.cs" />
     <Compile Remove="Commands\MEP\CmdAutoAvoid.cs" />
     <Compile Remove="Commands\MEP\CmdPipeSleeve.cs" />
@@ -101,11 +124,9 @@
     <Compile Remove="Commands\MEP\AutoAvoid\**" />
     <Compile Remove="Commands\MEP\PipeToISO\**" />
     <Compile Remove="Commands\Family\**" />
-    <EmbeddedResource Remove="Commands\AR\AutoJoin\**" />
     <EmbeddedResource Remove="Commands\MEP\AutoAvoid\**" />
     <EmbeddedResource Remove="Commands\MEP\PipeToISO\**" />
     <EmbeddedResource Remove="Commands\Family\**" />
-    <None Remove="Commands\AR\AutoJoin\**" />
     <None Remove="Commands\MEP\AutoAvoid\**" />
     <None Remove="Commands\MEP\PipeToISO\**" />
     <None Remove="Commands\Family\**" />

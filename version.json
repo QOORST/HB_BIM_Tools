@@ -1,8 +1,8 @@
 {
-  "version": "2.2.4",
-  "downloadUrl": "https://github.com/QOORST/YD_BIM_Tools/releases/download/v2.2.4/YD_BIM_Tools_v2.2.4_Setup.exe",
-  "releaseNotes": "修復：\n• 修復 Revit 2025/2026 中 BuiltInParameterGroup 已移除導致的 COBie 參數建立失敗\n• 使用反射處理跨版本 API 相容性問題\n• 優先使用新版 API (GroupTypeId.Data)，自動回退到舊版 API\n\n技術改進：\n• 增強 ParamTypeCompat.InsertBinding 方法的版本相容性\n• 支援 Revit 2024+ 的新版 API\n• 完全支援 Revit 2024~2026\n\n測試結果：\n• Revit 2025: 15 個 COBie 參數成功建立\n• 無 'Method not found' 錯誤\n• 無 'Could not load type' 錯誤",
-  "releaseDate": "2025-12-08T13:00:00Z",
-  "isCritical": true,
+  "version": "2.2.9",
+  "downloadUrl": "https://github.com/QOORST/YD_BIM_Tools/releases/download/v2.2.9/YD_BIM_Tools_v2.2.9_Setup.exe",
+  "releaseNotes": "新功能：簡化版自動接合\n• 全新簡化介面，操作更直觀\n• 基於優先順序的智能接合（柱 > 梁 > 版 > 牆）\n• 支援預覽模式，執行前確認結果\n• 自動修正錯誤的接合順序\n• 支援整個專案/目前視圖/選取範圍\n\n優先順序規則：\n• 柱切割所有碰觸的梁、版、牆\n• 梁切割所有碰觸的版、牆\n• 版切割所有碰觸的牆\n• 自動偵測碰觸並建立接合\n\n技術改進：\n• 新增 PriorityBasedJoinProcessor 處理器\n• 優化幾何碰撞檢測\n• 改進錯誤處理和報告\n• 支援 Revit 2024 和 2025",
+  "releaseDate": "2024-12-24T18:00:00Z",
+  "isCritical": false,
   "minimumVersion": "2.0.0"
 }

@@ -1,10 +1,10 @@
 ; YD_BIM 工具安裝腳本 - Inno Setup
-; 版本: 2.2.4
-; 日期: 2025-12-08
+; 版本: 2.2.9
+; 日期: 2024-12-24
 ; 支援: Revit 2024, 2025, 2026
 
 #define MyAppName "YD_BIM Tools"
-#define MyAppVersion "2.2.4"
+#define MyAppVersion "2.2.9"
 #define MyAppPublisher "YD_BIM Owen"
 #define MyAppURL "http://www.ydbim.com"
 #define MyAppExeName "YD_RevitTools.LicenseManager.dll"
@@ -66,10 +66,10 @@ Name: "revit2025"; Description: "Install to Revit 2025"; GroupDescription: "Sele
 Name: "revit2026"; Description: "Install to Revit 2026"; GroupDescription: "Select Revit versions to install:"; Check: IsRevitInstalled('2026')
 
 [Files]
-; 共用圖示資源（所有版本共用）
-Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: revit2024
-Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: revit2025
-Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: revit2026
+; 共用圖示資源（所有版本共用）- 如果不存在則跳過
+Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2024
+Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2025
+Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2026
 
 ; 共用依賴項（所有版本共用）
 Source: "Newtonsoft.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion; Tasks: revit2024
@@ -98,13 +98,13 @@ Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\
 Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
 ; Revit 2024 DLL
-Source: "2024\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion; Tasks: revit2024
+Source: "2024\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2024
 
 ; Revit 2025 DLL
-Source: "2025\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion; Tasks: revit2025
+Source: "2025\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2025
 
 ; Revit 2026 DLL
-Source: "2026\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion; Tasks: revit2026
+Source: "2026\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2026
 
 ; 其他附件 (可選)
 Source: "README.txt"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion; Tasks: revit2024
@@ -205,19 +205,46 @@ begin
   SaveStringToFile(AddinPath, AddinContent, False);
 end;
 
+// 清理舊版本檔案
+procedure CleanOldVersion(Version: String);
+var
+  OldDllPath: String;
+begin
+  OldDllPath := ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\' + Version + '\YD_BIM\YD_RevitTools.LicenseManager.dll');
+
+  // 如果舊版本 DLL 存在，刪除它
+  if FileExists(OldDllPath) then
+  begin
+    DeleteFile(OldDllPath);
+  end;
+end;
+
 // 安裝完成後
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then
+  begin
+    // 安裝前先清理舊版本
+    if WizardIsTaskSelected('revit2024') then
+      CleanOldVersion('2024');
+
+    if WizardIsTaskSelected('revit2025') then
+      CleanOldVersion('2025');
+
+    if WizardIsTaskSelected('revit2026') then
+      CleanOldVersion('2026');
+  end;
+
   if CurStep = ssPostInstall then
   begin
     // 為每個選擇的版本建立 .addin 檔案
-    if IsTaskSelected('revit2024') then
+    if WizardIsTaskSelected('revit2024') then
       CreateAddinFile('2024');
 
-    if IsTaskSelected('revit2025') then
+    if WizardIsTaskSelected('revit2025') then
       CreateAddinFile('2025');
 
-    if IsTaskSelected('revit2026') then
+    if WizardIsTaskSelected('revit2026') then
       CreateAddinFile('2026');
   end;
 end;

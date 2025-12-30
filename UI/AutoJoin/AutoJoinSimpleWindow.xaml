@@ -1,0 +1,139 @@
+<Window x:Class="YD_RevitTools.LicenseManager.UI.AutoJoin.AutoJoinSimpleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="YD_BIM - 自動結構接合"
+        Height="520" Width="480"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#F5F5F5">
+
+    <Window.Resources>
+        <!-- 現代化按鈕樣式 -->
+        <Style x:Key="ModernButton" TargetType="Button">
+            <Setter Property="Background" Value="#0078D4"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="16,10"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#005A9E"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#004578"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 次要按鈕樣式 -->
+        <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Background" Value="#E0E0E0"/>
+            <Setter Property="Foreground" Value="#333333"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#D0D0D0"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 標題列 -->
+        <Border Grid.Row="0" Background="#0078D4" Padding="20,16">
+            <StackPanel>
+                <TextBlock Text="自動結構接合" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                <TextBlock Text="智慧接合模式：依優先順序自動處理（柱 > 梁 > 版 > 牆）" FontSize="12" Foreground="#E0E0E0" Margin="0,4,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- 主要內容區 -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="20">
+            <StackPanel>
+                <!-- 接合模式說明 -->
+                <Border Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="16" Margin="0,0,0,16">
+                    <StackPanel>
+                        <TextBlock Text="📋 智慧接合模式" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#666666" LineHeight="20">
+                            <Run Text="系統會自動偵測所有結構元件（柱、梁、版、牆），"/>
+                            <LineBreak/>
+                            <Run Text="並依照優先順序規則自動接合並調整切割順序："/>
+                            <LineBreak/>
+                            <LineBreak/>
+                            <Run Text="• 柱 切割 梁、版、牆" FontWeight="SemiBold"/>
+                            <LineBreak/>
+                            <Run Text="• 梁 切割 版、牆" FontWeight="SemiBold"/>
+                            <LineBreak/>
+                            <Run Text="• 版 切割 牆" FontWeight="SemiBold"/>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+
+                <!-- 處理範圍 -->
+                <Border Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="16" Margin="0,0,0,16">
+                    <StackPanel>
+                        <TextBlock Text="🎯 處理範圍" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                        
+                        <RadioButton x:Name="rbAllElements" Content="整個專案" IsChecked="True" FontSize="13" Margin="0,0,0,8" GroupName="Scope"/>
+                        <RadioButton x:Name="rbCurrentView" Content="目前視圖" FontSize="13" Margin="0,0,0,8" GroupName="Scope"/>
+                        <RadioButton x:Name="rbSelection" Content="目前選取" FontSize="13" GroupName="Scope"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 執行選項 -->
+                <Border Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="⚙️ 執行選項" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                        
+                        <CheckBox x:Name="cbFixWrongOrder" Content="修正錯誤的接合順序" IsChecked="True" FontSize="13" Margin="0,0,0,8"/>
+                        <CheckBox x:Name="cbDryRun" Content="預覽模式（不修改模型）" FontSize="13"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 說明 -->
+                <Border Background="#FFF9E6" BorderBrush="#FFD700" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,16,0,0">
+                    <StackPanel>
+                        <TextBlock Text="💡 使用說明" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
+                        <TextBlock TextWrapping="Wrap" FontSize="11" LineHeight="18">
+                            <Run Text="1. 選擇處理範圍（整個專案/目前視圖/目前選取）"/>
+                            <LineBreak/>
+                            <Run Text="2. 系統會自動偵測所有碰觸的結構元件"/>
+                            <LineBreak/>
+                            <Run Text="3. 依優先順序規則自動接合並調整切割順序"/>
+                            <LineBreak/>
+                            <Run Text="4. 接觸面積過大（≥0.5m²）的元件會自動跳過"/>
+                            <LineBreak/>
+                            <Run Text="5. 建議先使用「預覽模式」確認結果"/>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- 底部按鈕列 -->
+        <Border Grid.Row="2" Background="White" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0" Padding="20,16">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="✅ 開始執行" Width="120" Style="{StaticResource ModernButton}" Click="btnOK_Click" Margin="0,0,12,0"/>
+                <Button Content="取消" Width="80" Style="{StaticResource SecondaryButton}" Click="btnCancel_Click"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
+

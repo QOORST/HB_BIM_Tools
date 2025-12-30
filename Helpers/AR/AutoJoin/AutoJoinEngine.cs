@@ -9,6 +9,21 @@ using Autodesk.Revit.UI;
 namespace YD_RevitTools.LicenseManager.Helpers.AR.AutoJoin
 {
     /// <summary>
+    /// 近距離元素配對資訊
+    /// </summary>
+    public class NearMissInfo
+    {
+        public ElementId ElementAId { get; set; }
+        public ElementId ElementBId { get; set; }
+        public string ElementAName { get; set; }
+        public string ElementBName { get; set; }
+        public string ElementACategory { get; set; }
+        public string ElementBCategory { get; set; }
+        public double DistanceMm { get; set; }
+        public string Reason { get; set; }
+    }
+
+    /// <summary>
     /// 自動接合執行報告
     /// </summary>
     public class AutoJoinReport
@@ -19,6 +34,10 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.AutoJoin
         public int Switched { get; set; }
         public int Failed { get; set; }
         public int Skipped { get; set; }
+
+        // 近距離偵測（新功能）
+        public int NearMisses { get; set; }
+        public List<NearMissInfo> NearMissList { get; } = new List<NearMissInfo>();
     }
 
     /// <summary>
@@ -128,6 +147,16 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.AutoJoin
                     // 精確檢測是否相交
                     if (!JoinGeometryHelper.AreElementsIntersecting(doc, a, b))
                     {
+                        // 檢查是否為近距離元素（接近但未相交）
+                        if (s.DetectNearMisses)
+                        {
+                            double toleranceFeet = s.ProximityToleranceMm / 304.8; // mm 轉 feet
+                            if (JoinGeometryHelper.AreElementsNearby(doc, a, b, toleranceFeet, out double distanceFeet))
+                            {
+                                RecordNearMiss(a, b, distanceFeet * 304.8, rpt); // feet 轉 mm
+                            }
+                        }
+
                         rpt.Skipped++;
                         continue;
                     }
@@ -196,15 +225,15 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.AutoJoin
         {
             rpt.Already++;
 
-            // 檢查是否需要切換順序
-            if (needACutB && JoinGeometryHelper.NeedSwitch(doc, a, b, true))
+            // 檢查是否需要切換順序（無論 needACutB 是 true 或 false 都要檢查）
+            if (JoinGeometryHelper.NeedSwitch(doc, a, b, needACutB))
             {
                 if (!s.DryRun)
                 {
                     if (JoinGeometryHelper.TrySwitchWithRetry(doc, a, b))
                     {
                         rpt.Switched++;
-                        LogAction(a, b, "Switch", "Success", "Corrected cutting order");
+                        LogAction(a, b, "Switch", "Success", $"Corrected cutting order (A cuts B: {needACutB})");
                     }
                     else
                     {
@@ -285,8 +314,14 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.AutoJoin
             if (s.Rule_Wall_Beam_BeamCuts)
                 list.Add(new Rule { A = BuiltInCategory.OST_StructuralFraming, B = BuiltInCategory.OST_Walls, ACutsB = true });
 
+            if (s.Rule_Wall_Column_ColumnCuts)
+                list.Add(new Rule { A = BuiltInCategory.OST_StructuralColumns, B = BuiltInCategory.OST_Walls, ACutsB = true });
+
             if (s.Rule_Floor_Column_ColumnCuts)
                 list.Add(new Rule { A = BuiltInCategory.OST_StructuralColumns, B = BuiltInCategory.OST_Floors, ACutsB = true });
+
+            if (s.Rule_Floor_Beam_BeamCuts)
+                list.Add(new Rule { A = BuiltInCategory.OST_StructuralFraming, B = BuiltInCategory.OST_Floors, ACutsB = true });
 
             // 自訂規則
             foreach (var (a, b) in s.CustomPairs.Distinct())
@@ -368,6 +403,30 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.AutoJoin
         }
 
         /// <summary>
+        /// 記錄近距離元素（接近但未相交）
+        /// </summary>
+        private void RecordNearMiss(Element a, Element b, double distanceMm, AutoJoinReport rpt)
+        {
+            var nearMiss = new NearMissInfo
+            {
+                ElementAId = a.Id,
+                ElementBId = b.Id,
+                ElementAName = a.Name ?? $"ID:{a.Id.Value}",
+                ElementBName = b.Name ?? $"ID:{b.Id.Value}",
+                ElementACategory = a.Category?.Name ?? "Unknown",
+                ElementBCategory = b.Category?.Name ?? "Unknown",
+                DistanceMm = distanceMm,
+                Reason = $"元素間距 {distanceMm:F1}mm < 容差 {distanceMm:F1}mm"
+            };
+
+            rpt.NearMissList.Add(nearMiss);
+            rpt.NearMisses++;
+
+            // 記錄到 CSV
+            LogAction(a, b, "NearMiss", "Detected", $"Distance: {distanceMm:F2}mm");
+        }
+
+        /// <summary>
         /// 記錄執行摘要
         /// </summary>
         private void LogSummary(AutoJoinReport rpt)
@@ -384,6 +443,7 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.AutoJoin
                 _log.WriteLine($"切換順序,{rpt.Switched}");
                 _log.WriteLine($"略過（未相交）,{rpt.Skipped}");
                 _log.WriteLine($"失敗,{rpt.Failed}");
+                _log.WriteLine($"近距離元素,{rpt.NearMisses}");
                 _log.Flush();
             }
             catch

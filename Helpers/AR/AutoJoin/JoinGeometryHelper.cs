@@ -71,20 +71,114 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.AutoJoin
         public static bool AreElementsIntersecting(Document doc, Element a, Element b)
         {
             if (a == null || b == null || doc == null) return false;
-            
+
             try
             {
                 var filter = new ElementIntersectsElementFilter(a);
                 var result = new FilteredElementCollector(doc, new List<ElementId> { b.Id })
                     .WherePasses(filter)
                     .ToElementIds();
-                
+
                 return result.Count > 0;
             }
             catch
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 計算兩個元素之間的最短距離（英尺）
+        /// </summary>
+        public static double GetMinimumDistance(Element a, Element b)
+        {
+            if (a == null || b == null) return double.MaxValue;
+
+            try
+            {
+                // 使用 BoundingBox 估算距離（簡化版本）
+                var bbA = a.get_BoundingBox(null);
+                var bbB = b.get_BoundingBox(null);
+
+                if (bbA == null || bbB == null) return double.MaxValue;
+
+                return CalculateBoundingBoxDistance(bbA, bbB);
+            }
+            catch
+            {
+                return double.MaxValue;
+            }
+        }
+
+        /// <summary>
+        /// 檢查兩個元素是否接近但未相交（在容差範圍內）
+        /// </summary>
+        public static bool AreElementsNearby(Document doc, Element a, Element b, double toleranceFeet, out double distanceFeet)
+        {
+            distanceFeet = double.MaxValue;
+
+            if (a == null || b == null || doc == null) return false;
+
+            // 先檢查是否相交
+            if (AreElementsIntersecting(doc, a, b))
+            {
+                distanceFeet = 0.0;
+                return false; // 已經相交，不算「接近但未相交」
+            }
+
+            // 計算距離
+            distanceFeet = GetMinimumDistance(a, b);
+
+            // 檢查是否在容差範圍內
+            return distanceFeet > 0 && distanceFeet <= toleranceFeet;
+        }
+
+        #endregion
+
+        #region 私有輔助方法
+
+        /// <summary>
+        /// 從幾何元素中取得最大的實體
+        /// </summary>
+        private static Solid GetLargestSolid(GeometryElement geomElem)
+        {
+            Solid largestSolid = null;
+            double maxVolume = 0;
+
+            foreach (GeometryObject geomObj in geomElem)
+            {
+                if (geomObj is Solid solid && solid.Volume > maxVolume)
+                {
+                    maxVolume = solid.Volume;
+                    largestSolid = solid;
+                }
+                else if (geomObj is GeometryInstance geomInst)
+                {
+                    var instGeom = geomInst.GetInstanceGeometry();
+                    var instSolid = GetLargestSolid(instGeom);
+                    if (instSolid != null && instSolid.Volume > maxVolume)
+                    {
+                        maxVolume = instSolid.Volume;
+                        largestSolid = instSolid;
+                    }
+                }
+            }
+
+            return largestSolid;
+        }
+
+        /// <summary>
+        /// 計算兩個 BoundingBox 之間的最短距離
+        /// </summary>
+        private static double CalculateBoundingBoxDistance(BoundingBoxXYZ bbA, BoundingBoxXYZ bbB)
+        {
+            // 計算每個軸向的距離
+            double dx = Math.Max(0, Math.Max(bbA.Min.X - bbB.Max.X, bbB.Min.X - bbA.Max.X));
+            double dy = Math.Max(0, Math.Max(bbA.Min.Y - bbB.Max.Y, bbB.Min.Y - bbA.Max.Y));
+            double dz = Math.Max(0, Math.Max(bbA.Min.Z - bbB.Max.Z, bbB.Min.Z - bbA.Max.Z));
+
+            // 返回三維空間中的距離
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz);
         }
 
         #endregion
