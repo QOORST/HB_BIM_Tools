@@ -152,16 +152,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         }
         
         /// <summary>
-        /// 設定模板材質和顏色
+        /// 設定模板材質和顏色（所有視圖）
         /// </summary>
         /// <param name="doc">Revit文檔</param>
         /// <param name="elementId">元素ID</param>
         /// <param name="material">材質</param>
-        /// <param name="transparency">透明度</param>
-        public static void SetFormworkMaterialAndColor(Document doc, ElementId elementId, Material material, int transparency = 60)
+        /// <param name="transparency">透明度（0=不透明，100=完全透明）</param>
+        public static void SetFormworkMaterialAndColor(Document doc, ElementId elementId, Material material, int transparency = 0)
         {
             if (material == null) return;
-            
+
             try
             {
                 // 取得所有可列印且非範本的視圖
@@ -170,63 +170,78 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     .Cast<View>()
                     .Where(v => v.CanBePrinted && !v.IsTemplate)
                     .ToList();
-                
+
+                foreach (var view in allViews)
+                {
+                    SetFormworkMaterialAndColorForView(doc, view, elementId, material, transparency);
+                }
+
+                System.Diagnostics.Debug.WriteLine($"✅ 完成為 {allViews.Count} 個視圖設定材質顏色");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ 設定模板材質和顏色失敗: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 設定模板材質和顏色（單一視圖）
+        /// </summary>
+        /// <param name="doc">Revit文檔</param>
+        /// <param name="view">視圖</param>
+        /// <param name="elementId">元素ID</param>
+        /// <param name="material">材質</param>
+        /// <param name="transparency">透明度（0=不透明，100=完全透明）</param>
+        public static void SetFormworkMaterialAndColorForView(Document doc, View view, ElementId elementId, Material material, int transparency = 0)
+        {
+            if (material == null || view == null) return;
+
+            try
+            {
                 var materialColor = GetMaterialColor(material);
                 if (!materialColor.IsValid)
                 {
                     System.Diagnostics.Debug.WriteLine($"⚠️ 材質顏色無效: {material.Name}");
                     return;
                 }
-                
+
                 // 取得實心填充圖案ID
                 var solidPatternId = GetSolidFillPatternId(doc);
-                
-                foreach (var view in allViews)
+
+                var overrides = new OverrideGraphicSettings();
+
+                // 設定填充圖案（重要：確保顏色能顯示）
+                if (solidPatternId != ElementId.InvalidElementId)
                 {
-                    try
-                    {
-                        var overrides = new OverrideGraphicSettings();
-                        
-                        // 設定填充圖案（重要：確保顏色能顯示）
-                        if (solidPatternId != ElementId.InvalidElementId)
-                        {
-                            overrides.SetSurfaceForegroundPatternId(solidPatternId);
-                            overrides.SetSurfaceBackgroundPatternId(solidPatternId);
-                            overrides.SetCutForegroundPatternId(solidPatternId);
-                            overrides.SetCutBackgroundPatternId(solidPatternId);
-                        }
-                        
-                        // 設定所有顏色屬性（確保在不同視圖模式下都能顯示）
-                        overrides.SetSurfaceForegroundPatternColor(materialColor);
-                        overrides.SetSurfaceBackgroundPatternColor(materialColor);
-                        overrides.SetProjectionLineColor(materialColor);
-                        overrides.SetCutLineColor(materialColor);
-                        overrides.SetCutForegroundPatternColor(materialColor);
-                        overrides.SetCutBackgroundPatternColor(materialColor);
-                        
-                        // 3D視圖特殊設定
-                        if (view is View3D)
-                        {
-                            overrides.SetSurfaceTransparency(transparency);
-                            overrides.SetProjectionLineWeight(3);
-                            overrides.SetCutLineWeight(3);
-                        }
-                        else
-                        {
-                            // 其他視圖使用較細的線條
-                            overrides.SetProjectionLineWeight(1);
-                        }
-                        
-                        view.SetElementOverrides(elementId, overrides);
-                        System.Diagnostics.Debug.WriteLine($"✅ 為視圖 '{view.Name}' 設定材質顏色: R={materialColor.Red}, G={materialColor.Green}, B={materialColor.Blue}");
-                    }
-                    catch (Exception viewEx)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"⚠️ 視圖 '{view.Name}' 設定失敗: {viewEx.Message}");
-                    }
+                    overrides.SetSurfaceForegroundPatternId(solidPatternId);
+                    overrides.SetSurfaceBackgroundPatternId(solidPatternId);
+                    overrides.SetCutForegroundPatternId(solidPatternId);
+                    overrides.SetCutBackgroundPatternId(solidPatternId);
                 }
-                
-                System.Diagnostics.Debug.WriteLine($"✅ 完成為 {allViews.Count} 個視圖設定材質顏色");
+
+                // 設定所有顏色屬性（確保在不同視圖模式下都能顯示）
+                overrides.SetSurfaceForegroundPatternColor(materialColor);
+                overrides.SetSurfaceBackgroundPatternColor(materialColor);
+                overrides.SetProjectionLineColor(materialColor);
+                overrides.SetCutLineColor(materialColor);
+                overrides.SetCutForegroundPatternColor(materialColor);
+                overrides.SetCutBackgroundPatternColor(materialColor);
+
+                // 3D視圖特殊設定
+                if (view is View3D)
+                {
+                    overrides.SetSurfaceTransparency(transparency);
+                    overrides.SetProjectionLineWeight(3);
+                    overrides.SetCutLineWeight(3);
+                }
+                else
+                {
+                    // 其他視圖使用較細的線條
+                    overrides.SetProjectionLineWeight(1);
+                }
+
+                view.SetElementOverrides(elementId, overrides);
+                System.Diagnostics.Debug.WriteLine($"✅ 為視圖 '{view.Name}' 設定材質顏色: R={materialColor.Red}, G={materialColor.Green}, B={materialColor.Blue}");
             }
             catch (Exception ex)
             {

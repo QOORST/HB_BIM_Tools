@@ -5,9 +5,11 @@ using System;
 using System.Linq;
 using System.Text;
 using YD_RevitTools.LicenseManager.Helpers.AR.Finishings;
+#if !REVIT2025 && !REVIT2026
 using YD_RevitTools.LicenseManager.UI.Finishings;
+#endif
 
-namespace YD_RevitTools.LicenseManager.Commands.AR
+namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
 {
     [Transaction(TransactionMode.Manual)]
     public class CmdFinishings : IExternalCommand
@@ -27,6 +29,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR
                     return Result.Cancelled;
                 }
 
+#if REVIT2025 || REVIT2026
+                // Revit 2025/2026: XAML UI 不可用，顯示訊息
+                TaskDialog.Show("功能暫不可用",
+                    "裝修生成功能在 Revit 2025/2026 版本中暫時不可用。\n\n" +
+                    "我們正在開發新的 UI 介面以支援這些版本。\n\n" +
+                    "請使用 Revit 2024 或更早版本來使用此功能。");
+                return Result.Cancelled;
+#else
                 // 清空之前的日誌
                 Logger.ClearLog();
                 Logger.Log("=== AR_Finishings 執行開始 ===");
@@ -48,6 +58,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR
                     return Result.Cancelled;
 
                 return ExecuteOperation(uiDoc, win.ViewModel, ref message);
+#endif
             }
             catch (Exception ex)
             {

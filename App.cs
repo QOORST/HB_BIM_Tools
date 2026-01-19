@@ -157,8 +157,6 @@ namespace YD_RevitTools.LicenseManager
             string assemblyPath = Assembly.GetExecutingAssembly().Location;
 
             // === 模板工具組 (Pulldown Button) ===
-            // 注意：模板工具功能尚未實作，暫時註解
-            /*
             PulldownButtonData formworkPulldownData = new PulldownButtonData("FormworkTools", "模板\n工具");
             formworkPulldownData.ToolTip = "模板工具組";
             formworkPulldownData.LongDescription = "建築模板相關工具集合";
@@ -171,7 +169,7 @@ namespace YD_RevitTools.LicenseManager
                 "FormworkGenerate",
                 "模板生成",
                 assemblyPath,
-                "YD_RevitTools.LicenseManager.Commands.AR.CmdMain");
+                "YD_RevitTools.LicenseManager.Commands.AR.Formwork.CmdMain");
             formworkGenerateData.ToolTip = "模板生成工具";
             formworkGenerateData.LongDescription = "自動生成建築模板系統 (Trial+)";
             SetButtonIcon(formworkGenerateData, "formwork");
@@ -182,7 +180,7 @@ namespace YD_RevitTools.LicenseManager
                 "FormworkDelete",
                 "刪除模板",
                 assemblyPath,
-                "YD_RevitTools.LicenseManager.Commands.AR.CmdDelete");
+                "YD_RevitTools.LicenseManager.Commands.AR.Formwork.CmdDelete");
             formworkDeleteData.ToolTip = "刪除模板工具";
             formworkDeleteData.LongDescription = "刪除已生成的模板 (Trial+)";
             SetButtonIcon(formworkDeleteData, "formwork_delete");
@@ -193,7 +191,7 @@ namespace YD_RevitTools.LicenseManager
                 "FormworkPickFace",
                 "面選模板",
                 assemblyPath,
-                "YD_RevitTools.LicenseManager.Commands.AR.CmdPickFace");
+                "YD_RevitTools.LicenseManager.Commands.AR.Formwork.CmdPickFace");
             formworkPickFaceData.ToolTip = "面選模板工具";
             formworkPickFaceData.LongDescription = "透過選擇面來生成模板 (Standard+)";
             SetButtonIcon(formworkPickFaceData, "formwork_pick");
@@ -204,7 +202,7 @@ namespace YD_RevitTools.LicenseManager
                 "FormworkExportCsv",
                 "匯出CSV",
                 assemblyPath,
-                "YD_RevitTools.LicenseManager.Commands.AR.CmdExportCsv");
+                "YD_RevitTools.LicenseManager.Commands.AR.Formwork.CmdExportCsv");
             formworkExportCsvData.ToolTip = "匯出CSV工具";
             formworkExportCsvData.LongDescription = "匯出模板數量到CSV檔案 (Standard+)";
             SetButtonIcon(formworkExportCsvData, "export_csv");
@@ -215,12 +213,11 @@ namespace YD_RevitTools.LicenseManager
                 "StructuralAnalysis",
                 "結構分析",
                 assemblyPath,
-                "YD_RevitTools.LicenseManager.Commands.AR.CmdStructuralAnalysis");
+                "YD_RevitTools.LicenseManager.Commands.AR.Formwork.CmdStructuralAnalysis");
             structuralAnalysisData.ToolTip = "結構分析工具";
             structuralAnalysisData.LongDescription = "分析結構並計算模板需求 (Professional)";
             SetButtonIcon(structuralAnalysisData, "structural_analysis");
             formworkPulldown.AddPushButton(structuralAnalysisData);
-            */
 
             // === 裝修工具組 (Pulldown Button) ===
             PulldownButtonData finishingsPulldownData = new PulldownButtonData("FinishingsTools", "裝修\n工具");
@@ -240,6 +237,17 @@ namespace YD_RevitTools.LicenseManager
             finishingsGenerateData.LongDescription = "自動生成房間裝修（地板、天花板、牆面、踢腳板）";
             SetButtonIcon(finishingsGenerateData, "finishings");
             finishingsPulldown.AddPushButton(finishingsGenerateData);
+
+            // 面生面
+            PushButtonData faceToFaceData = new PushButtonData(
+                "FaceToFace",
+                "面生面",
+                assemblyPath,
+                "YD_RevitTools.LicenseManager.Commands.AR.Finishings.CmdFaceToFace");
+            faceToFaceData.ToolTip = "面生面工具";
+            faceToFaceData.LongDescription = "透過選擇面來生成裝修面，參數寫入材料資訊供數量產出 (Standard+)";
+            SetButtonIcon(faceToFaceData, "formwork_pick");
+            finishingsPulldown.AddPushButton(faceToFaceData);
 
             // === 接合工具組 (Pulldown Button) ===
             PulldownButtonData joinPulldownData = new PulldownButtonData("JoinTools", "接合\n工具");

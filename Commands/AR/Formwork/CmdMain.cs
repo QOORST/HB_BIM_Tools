@@ -548,9 +548,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             overrides.SetProjectionLineColor(color);
                             overrides.SetCutLineColor(color);
                             overrides.SetCutForegroundPatternColor(color);
-                            
-                            // 設定透明度以便查看結構
-                            overrides.SetSurfaceTransparency(15); // 15% 透明度
+
+                            // 不設定透明度，完整顯示材質顏色
+                            overrides.SetSurfaceTransparency(0); // 0% 透明度（不透明）
                             
                             // 應用視圖覆蓋
                             activeView.SetElementOverrides(element.Id, overrides);

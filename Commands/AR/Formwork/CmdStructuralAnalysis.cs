@@ -1253,13 +1253,23 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     // ✅ 修正：根據參數類型使用正確的設定方法
                     if (hostIdParam.StorageType == StorageType.Integer)
                     {
+#if REVIT2024 || REVIT2025 || REVIT2026
                         hostIdParam.Set((int)hostElement.Id.Value);
                         System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(整數): {hostElement.Id.Value}");
+#else
+                        hostIdParam.Set(hostElement.Id.IntegerValue);
+                        System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(整數): {hostElement.Id.IntegerValue}");
+#endif
                     }
                     else if (hostIdParam.StorageType == StorageType.String)
                     {
+#if REVIT2024 || REVIT2025 || REVIT2026
                         hostIdParam.Set(hostElement.Id.Value.ToString());
                         System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(字串): {hostElement.Id.Value}");
+#else
+                        hostIdParam.Set(hostElement.Id.IntegerValue.ToString());
+                        System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(字串): {hostElement.Id.IntegerValue}");
+#endif
                     }
                     else
                     {

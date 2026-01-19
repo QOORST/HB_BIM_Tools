@@ -1,10 +1,10 @@
 ; YD_BIM 工具安裝腳本 - Inno Setup
-; 版本: 2.2.9
-; 日期: 2024-12-24
+; 版本: 2.3.3
+; 日期: 2026-01-12
 ; 支援: Revit 2024, 2025, 2026
 
 #define MyAppName "YD_BIM Tools"
-#define MyAppVersion "2.2.9"
+#define MyAppVersion "2.3.3"
 #define MyAppPublisher "YD_BIM Owen"
 #define MyAppURL "http://www.ydbim.com"
 #define MyAppExeName "YD_RevitTools.LicenseManager.dll"

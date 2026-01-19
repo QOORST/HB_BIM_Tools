@@ -1250,7 +1250,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         // 改良版面外露檢查 - 正確判斷交集後的面是否需要模板
         private static bool IsFaceExposedFast(Document doc, Element host, PlanarFace pf, double extraDepthInternal)
         {
+#if REVIT2024 || REVIT2025 || REVIT2026
             Debug.Log("檢查面是否需要模板 - Host:{0}", host.Id.Value);
+#else
+            Debug.Log("檢查面是否需要模板 - Host:{0}", host.Id.IntegerValue);
+#endif
 
             var normal = pf.FaceNormal;
             
@@ -1305,7 +1309,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         bbox.Min.Y <= probePoint.Y && probePoint.Y <= bbox.Max.Y &&
                         bbox.Min.Z <= probePoint.Z && probePoint.Z <= bbox.Max.Z)
                     {
+#if REVIT2024 || REVIT2025 || REVIT2026
                         Debug.Log("  => 面可能被 {0} 遮擋", neighborInfo.Element.Id.Value);
+#else
+                        Debug.Log("  => 面可能被 {0} 遮擋", neighborInfo.Element.Id.IntegerValue);
+#endif
                         // 但不直接返回 false，繼續進行更精確的檢查
                     }
                 }
@@ -1609,7 +1617,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
         private static StructuralElementType GetStructuralElementType(Element element)
         {
+#if REVIT2024 || REVIT2025 || REVIT2026
             var categoryId = element.Category?.Id?.Value;
+#else
+            var categoryId = element.Category?.Id?.IntegerValue;
+#endif
             switch (categoryId)
             {
                 case (int)BuiltInCategory.OST_StructuralFraming:
