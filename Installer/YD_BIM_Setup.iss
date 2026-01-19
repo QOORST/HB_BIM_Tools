@@ -97,6 +97,51 @@ Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\
 Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+; EPPlus 及其依賴項（Excel 功能需要）
+Source: "EPPlus.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "EPPlus.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "EPPlus.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "EPPlus.Interfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "EPPlus.Interfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "EPPlus.Interfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "EPPlus.System.Drawing.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "EPPlus.System.Drawing.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "EPPlus.System.Drawing.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "Microsoft.IO.RecyclableMemoryStream.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "Microsoft.IO.RecyclableMemoryStream.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "Microsoft.IO.RecyclableMemoryStream.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "System.ComponentModel.Annotations.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "System.ComponentModel.Annotations.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "System.ComponentModel.Annotations.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "System.Drawing.Common.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "System.Drawing.Common.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "System.Drawing.Common.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "System.Numerics.Vectors.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "System.Numerics.Vectors.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "System.Numerics.Vectors.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "System.Text.Encoding.CodePages.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "System.Text.Encoding.CodePages.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "System.Text.Encoding.CodePages.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "System.Threading.Tasks.Extensions.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "System.Threading.Tasks.Extensions.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "System.Threading.Tasks.Extensions.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+Source: "System.ValueTuple.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "System.ValueTuple.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "System.ValueTuple.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
 ; Revit 2024 DLL
 Source: "2024\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2024
 

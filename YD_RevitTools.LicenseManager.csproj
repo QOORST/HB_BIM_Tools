@@ -89,12 +89,12 @@
     <None Remove="UI\Finishings\**" />
     <Page Remove="Commands\AR\Finishings\**" />
     <Page Remove="UI\Finishings\**" />
-    <Page Remove="LicenseWindow.xaml" />
   </ItemGroup>
 
   <!-- Revit 2025/2026: 排除所有 XAML 相關檔案（因為 XAML 編譯器有問題） -->
   <ItemGroup Condition="'$(RevitVersion)' == '2025' OR '$(RevitVersion)' == '2026'">
     <!-- 排除 XAML 檔案 -->
+    <Page Remove="LicenseWindow.xaml" />
     <Page Remove="Commands\Family\MainWindow.xaml" />
     <Page Remove="Commands\Family\SliderSettingsWindow.xaml" />
     <Page Remove="Commands\MEP\PipeSleeveWindow.xaml" />
@@ -104,6 +104,7 @@
     <Page Remove="UI\AutoJoin\NearMissResultWindow.xaml" />
     <Page Remove="UI\AutoJoin\AutoJoinSimpleWindow.xaml" />
     <!-- 排除 XAML.CS 檔案 -->
+    <Compile Remove="UI\LicenseWindow.xaml.cs" />
     <Compile Remove="Commands\Family\MainWindow.xaml.cs" />
     <Compile Remove="Commands\Family\SliderSettingsWindow.xaml.cs" />
     <Compile Remove="Commands\MEP\PipeSleeveWindow.xaml.cs" />
@@ -113,6 +114,7 @@
     <Compile Remove="UI\AutoJoin\NearMissResultWindow.xaml.cs" />
     <Compile Remove="UI\AutoJoin\AutoJoinSimpleWindow.xaml.cs" />
     <!-- 排除引用 XAML UI 的命令檔案 -->
+    <Compile Remove="Commands\AR\CmdLicenseInfo.cs" />
     <Compile Remove="Commands\AboutCommand.cs" />
     <Compile Remove="Commands\AR\AutoJoin\CmdAutoJoin.cs" />
     <Compile Remove="Commands\AR\AutoJoin\CmdJoinToPicked.cs" />

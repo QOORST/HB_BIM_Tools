@@ -1,0 +1,157 @@
+═══════════════════════════════════════════════════════════════
+  YD_BIM Tools - 快速部署說明
+═══════════════════════════════════════════════════════════════
+
+如果無法使用安裝程式，請使用以下方式手動部署：
+
+───────────────────────────────────────────────────────────────
+  方法一：使用自動部署腳本（推薦）
+───────────────────────────────────────────────────────────────
+
+【在開發電腦上】
+
+1. 開啟 PowerShell
+2. 執行準備腳本：
+   
+   cd "專案目錄\Tools"
+   .\PrepareDeployment.ps1
+
+3. 腳本會在 Output\Deployment 資料夾創建完整的部署包
+
+4. 將 Output\Deployment 資料夾複製到 USB 隨身碟
+
+
+【在目標電腦上】
+
+1. 將 Deployment 資料夾從 USB 複製到目標電腦
+
+2. 以系統管理員身分執行 PowerShell：
+   - 按 Win + X
+   - 選擇「Windows PowerShell (系統管理員)」
+
+3. 切換到 Deployment 資料夾：
+   
+   cd "複製的路徑\Deployment"
+
+4. 執行部署腳本：
+   
+   .\Deploy.ps1
+
+5. 按照提示選擇要部署的 Revit 版本
+
+6. 關閉所有 Revit 程式，然後重新啟動
+
+
+───────────────────────────────────────────────────────────────
+  方法二：完全手動複製
+───────────────────────────────────────────────────────────────
+
+如果無法執行 PowerShell 腳本，請手動複製檔案：
+
+【Revit 2024】
+
+1. 創建資料夾：
+   C:\ProgramData\Autodesk\Revit\Addins\2024\YD_BIM\
+
+2. 從開發電腦複製以下檔案到上述資料夾：
+   
+   bin\Release2024\YD_RevitTools.LicenseManager.dll
+   bin\Release2024\Newtonsoft.Json.dll
+   bin\Release2024\System.Text.Json.dll
+   bin\Release2024\System.Text.Encodings.Web.dll
+   bin\Release2024\System.Memory.dll
+   bin\Release2024\System.Buffers.dll
+   bin\Release2024\System.Runtime.CompilerServices.Unsafe.dll
+   bin\Release2024\EPPlus.dll
+   bin\Release2024\EPPlus.Interfaces.dll
+   bin\Release2024\EPPlus.System.Drawing.dll
+   bin\Release2024\Microsoft.IO.RecyclableMemoryStream.dll
+   bin\Release2024\Microsoft.Bcl.AsyncInterfaces.dll
+   bin\Release2024\System.ComponentModel.Annotations.dll
+   bin\Release2024\System.Drawing.Common.dll
+   bin\Release2024\System.Numerics.Vectors.dll
+   bin\Release2024\System.Text.Encoding.CodePages.dll
+   bin\Release2024\System.Threading.Tasks.Extensions.dll
+   bin\Release2024\System.ValueTuple.dll
+
+3. 複製圖示資源：
+   Resources\Icons\ (整個資料夾)
+   到
+   C:\ProgramData\Autodesk\Revit\Addins\2024\YD_BIM\Resources\Icons\
+
+4. 創建配置檔案：
+   在 C:\ProgramData\Autodesk\Revit\Addins\2024\ 創建檔案
+   檔名：YD_RevitTools.LicenseManager.addin
+   內容：見下方「配置檔案內容」
+
+5. 重新啟動 Revit
+
+
+【Revit 2025 / 2026】
+
+步驟相同，只需將路徑中的 2024 替換為 2025 或 2026
+
+
+───────────────────────────────────────────────────────────────
+  配置檔案內容
+───────────────────────────────────────────────────────────────
+
+創建文字檔案 YD_RevitTools.LicenseManager.addin，內容如下：
+
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>YD_BIM Tools</Name>
+    <Assembly>C:\ProgramData\Autodesk\Revit\Addins\2024\YD_BIM\YD_RevitTools.LicenseManager.dll</Assembly>
+    <FullClassName>YD_RevitTools.LicenseManager.App</FullClassName>
+    <ClientId>B3F5D2D4-9392-4A9E-9C0D-A6F5DD93FAC7</ClientId>
+    <VendorId>YD</VendorId>
+    <VendorDescription>YD BIM Tools, www.ydbim.com</VendorDescription>
+  </AddIn>
+</RevitAddIns>
+
+注意：
+- Revit 2025 要將路徑改為 \2025\
+- Revit 2026 要將路徑改為 \2026\
+
+
+───────────────────────────────────────────────────────────────
+  驗證部署
+───────────────────────────────────────────────────────────────
+
+1. 啟動 Revit
+2. 檢查是否出現「YD_BIM Tools」選項卡
+3. 如果沒有出現：
+   - 點擊「外部工具」→「外掛管理員」
+   - 查看是否有錯誤訊息
+   - 檢查所有檔案是否都已複製
+
+
+───────────────────────────────────────────────────────────────
+  常見問題
+───────────────────────────────────────────────────────────────
+
+Q: PowerShell 無法執行腳本？
+A: 執行以下命令允許腳本執行：
+   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+Q: 出現「無法載入檔案或組件」錯誤？
+A: 確認所有 DLL 檔案都已複製，特別是依賴項 DLL
+
+Q: 圖示沒有顯示？
+A: 確認 Resources\Icons\ 資料夾已完整複製
+
+Q: 需要在多台電腦部署？
+A: 使用方法一的自動部署腳本，準備一次部署包後可以在多台電腦上使用
+
+
+───────────────────────────────────────────────────────────────
+  技術支援
+───────────────────────────────────────────────────────────────
+
+Email: qoorst123456@gmail.com
+電話: 04-2376-1698
+網站: www.ydbim.com
+
+═══════════════════════════════════════════════════════════════
+

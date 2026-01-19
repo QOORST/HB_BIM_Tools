@@ -141,7 +141,7 @@ namespace YD_RevitTools.LicenseManager
                 "LicenseManagement",
                 "授權\n管理",
                 assemblyPath,
-                "YD_RevitTools.LicenseManager.Commands.LicenseManagementCommand");
+                "YD_RevitTools.LicenseManager.Commands.AR.CmdLicenseInfo");
 
             buttonData.ToolTip = "管理 YD BIM 工具授權";
             buttonData.LongDescription = "開啟授權管理視窗，查看授權狀態、啟用新授權或更新現有授權。";
@@ -157,6 +157,8 @@ namespace YD_RevitTools.LicenseManager
             string assemblyPath = Assembly.GetExecutingAssembly().Location;
 
             // === 模板工具組 (Pulldown Button) ===
+            // 注意：模板工具功能尚未實作，暫時註解
+            /*
             PulldownButtonData formworkPulldownData = new PulldownButtonData("FormworkTools", "模板\n工具");
             formworkPulldownData.ToolTip = "模板工具組";
             formworkPulldownData.LongDescription = "建築模板相關工具集合";
@@ -218,6 +220,7 @@ namespace YD_RevitTools.LicenseManager
             structuralAnalysisData.LongDescription = "分析結構並計算模板需求 (Professional)";
             SetButtonIcon(structuralAnalysisData, "structural_analysis");
             formworkPulldown.AddPushButton(structuralAnalysisData);
+            */
 
             // === 裝修工具組 (Pulldown Button) ===
             PulldownButtonData finishingsPulldownData = new PulldownButtonData("FinishingsTools", "裝修\n工具");

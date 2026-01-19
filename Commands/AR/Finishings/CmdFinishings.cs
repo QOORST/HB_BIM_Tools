@@ -7,7 +7,7 @@ using System.Text;
 using YD_RevitTools.LicenseManager.Helpers.AR.Finishings;
 using YD_RevitTools.LicenseManager.UI.Finishings;
 
-namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
+namespace YD_RevitTools.LicenseManager.Commands.AR
 {
     [Transaction(TransactionMode.Manual)]
     public class CmdFinishings : IExternalCommand

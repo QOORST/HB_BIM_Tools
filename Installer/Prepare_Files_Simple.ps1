@@ -12,13 +12,28 @@ Write-Host "Checking source files..." -ForegroundColor Yellow
 
 # Use Release2024 as the base for dependency DLLs (they are the same across versions)
 $baseBinDir = Join-Path $projectRoot "bin\Release2024"
-$sourceNewtonsoftDll = Join-Path $baseBinDir "Newtonsoft.Json.dll"
-$sourceSystemTextJsonDll = Join-Path $baseBinDir "System.Text.Json.dll"
-$sourceSystemTextEncodingsWebDll = Join-Path $baseBinDir "System.Text.Encodings.Web.dll"
-$sourceSystemMemoryDll = Join-Path $baseBinDir "System.Memory.dll"
-$sourceSystemBuffersDll = Join-Path $baseBinDir "System.Buffers.dll"
-$sourceSystemRuntimeCompilerServicesUnsafeDll = Join-Path $baseBinDir "System.Runtime.CompilerServices.Unsafe.dll"
 $sourceIcons = Join-Path $projectRoot "Resources\Icons"
+
+# 定義所有需要的依賴 DLL（排除 Revit API 和 .NET Framework 內建的）
+$dependencyDlls = @(
+    "Newtonsoft.Json.dll",
+    "System.Text.Json.dll",
+    "System.Text.Encodings.Web.dll",
+    "System.Memory.dll",
+    "System.Buffers.dll",
+    "System.Runtime.CompilerServices.Unsafe.dll",
+    "EPPlus.dll",
+    "EPPlus.Interfaces.dll",
+    "EPPlus.System.Drawing.dll",
+    "Microsoft.IO.RecyclableMemoryStream.dll",
+    "Microsoft.Bcl.AsyncInterfaces.dll",
+    "System.ComponentModel.Annotations.dll",
+    "System.Drawing.Common.dll",
+    "System.Numerics.Vectors.dll",
+    "System.Text.Encoding.CodePages.dll",
+    "System.Threading.Tasks.Extensions.dll",
+    "System.ValueTuple.dll"
+)
 
 # Version-specific DLLs
 $sourceDll2024 = Join-Path $projectRoot "bin\Release2024\YD_RevitTools.LicenseManager.dll"
@@ -44,30 +59,34 @@ if (-not (Test-Path $sourceDll2025)) {
     exit 1
 }
 
-# sourceDll2026 is already set above (either Release2026 or fallback to Release2025)
-
-if (-not (Test-Path $sourceNewtonsoftDll)) {
-    Write-Host "[ERROR] Cannot find Newtonsoft.Json.dll" -ForegroundColor Red
-    Write-Host "Path: $sourceNewtonsoftDll" -ForegroundColor Gray
-    exit 1
+# Check dependency DLLs exist
+$missingDlls = @()
+foreach ($dll in $dependencyDlls) {
+    $dllPath = Join-Path $baseBinDir $dll
+    if (-not (Test-Path $dllPath)) {
+        $missingDlls += $dll
+    }
 }
 
-if (-not (Test-Path $sourceSystemTextJsonDll)) {
-    Write-Host "[ERROR] Cannot find System.Text.Json.dll" -ForegroundColor Red
-    Write-Host "Path: $sourceSystemTextJsonDll" -ForegroundColor Gray
-    exit 1
+if ($missingDlls.Count -gt 0) {
+    Write-Host "[WARNING] Some dependency DLLs not found:" -ForegroundColor Yellow
+    foreach ($dll in $missingDlls) {
+        Write-Host "  - $dll" -ForegroundColor Gray
+    }
+    Write-Host ""
 }
 
 if (-not (Test-Path $sourceIcons)) {
-    Write-Host "[ERROR] Cannot find Icons directory" -ForegroundColor Red
-    Write-Host "Path: $sourceIcons" -ForegroundColor Gray
-    exit 1
+    Write-Host "[WARNING] Icons directory not found: $sourceIcons" -ForegroundColor Yellow
+    Write-Host "Icons will not be included in the installer." -ForegroundColor Yellow
+    Write-Host ""
 }
 
 Write-Host "[OK] Main DLL found (2024, 2025, 2026)" -ForegroundColor Green
-Write-Host "[OK] Newtonsoft.Json.dll found" -ForegroundColor Green
-Write-Host "[OK] System.Text.Json.dll found" -ForegroundColor Green
-Write-Host "[OK] Icons directory found" -ForegroundColor Green
+Write-Host "[OK] Dependency DLLs checked" -ForegroundColor Green
+if (Test-Path $sourceIcons) {
+    Write-Host "[OK] Icons directory found" -ForegroundColor Green
+}
 Write-Host ""
 
 # Create shared resources
@@ -79,37 +98,26 @@ if (Test-Path (Join-Path $installerDir "Resources")) {
     Remove-Item (Join-Path $installerDir "Resources") -Recurse -Force
 }
 New-Item -ItemType Directory -Path $sharedIconsDir -Force | Out-Null
-Copy-Item "$sourceIcons\*.png" -Destination $sharedIconsDir -Force
-$iconCount = (Get-ChildItem $sharedIconsDir -Filter "*.png").Count
-Write-Host "[OK] Shared icons ready: $iconCount files" -ForegroundColor Green
+
+$iconCount = 0
+if (Test-Path $sourceIcons) {
+    Copy-Item "$sourceIcons\*.png" -Destination $sharedIconsDir -Force -ErrorAction SilentlyContinue
+    $iconCount = (Get-ChildItem $sharedIconsDir -Filter "*.png" -ErrorAction SilentlyContinue).Count
+    Write-Host "[OK] Shared icons ready: $iconCount files" -ForegroundColor Green
+} else {
+    Write-Host "[SKIP] No icons to copy" -ForegroundColor Yellow
+}
 
 # 2. Copy dependency DLLs
-Copy-Item $sourceNewtonsoftDll -Destination $installerDir -Force
-Write-Host "[OK] Newtonsoft.Json.dll copied" -ForegroundColor Green
-
-Copy-Item $sourceSystemTextJsonDll -Destination $installerDir -Force
-Write-Host "[OK] System.Text.Json.dll copied" -ForegroundColor Green
-
-# Copy System.Text.Json dependencies
-if (Test-Path $sourceSystemTextEncodingsWebDll) {
-    Copy-Item $sourceSystemTextEncodingsWebDll -Destination $installerDir -Force
-    Write-Host "[OK] System.Text.Encodings.Web.dll copied" -ForegroundColor Green
+$copiedCount = 0
+foreach ($dll in $dependencyDlls) {
+    $sourceDll = Join-Path $baseBinDir $dll
+    if (Test-Path $sourceDll) {
+        Copy-Item $sourceDll -Destination $installerDir -Force
+        $copiedCount++
+    }
 }
-
-if (Test-Path $sourceSystemMemoryDll) {
-    Copy-Item $sourceSystemMemoryDll -Destination $installerDir -Force
-    Write-Host "[OK] System.Memory.dll copied" -ForegroundColor Green
-}
-
-if (Test-Path $sourceSystemBuffersDll) {
-    Copy-Item $sourceSystemBuffersDll -Destination $installerDir -Force
-    Write-Host "[OK] System.Buffers.dll copied" -ForegroundColor Green
-}
-
-if (Test-Path $sourceSystemRuntimeCompilerServicesUnsafeDll) {
-    Copy-Item $sourceSystemRuntimeCompilerServicesUnsafeDll -Destination $installerDir -Force
-    Write-Host "[OK] System.Runtime.CompilerServices.Unsafe.dll copied" -ForegroundColor Green
-}
+Write-Host "[OK] Copied $copiedCount dependency DLLs" -ForegroundColor Green
 
 Write-Host ""
 
@@ -170,19 +178,16 @@ Write-Host ""
 
 # Calculate total size
 $totalSize = 0
-$iconsSize = (Get-ChildItem $sharedIconsDir -Recurse | Measure-Object -Property Length -Sum).Sum
+$iconsSize = 0
+if (Test-Path $sharedIconsDir) {
+    $iconFiles = Get-ChildItem $sharedIconsDir -Recurse -ErrorAction SilentlyContinue
+    if ($iconFiles) {
+        $iconsSize = ($iconFiles | Measure-Object -Property Length -Sum).Sum
+    }
+}
 $totalSize += $iconsSize
 
 # Calculate dependency DLLs size
-$dependencyDlls = @(
-    "Newtonsoft.Json.dll",
-    "System.Text.Json.dll",
-    "System.Text.Encodings.Web.dll",
-    "System.Memory.dll",
-    "System.Buffers.dll",
-    "System.Runtime.CompilerServices.Unsafe.dll"
-)
-
 $dependencySize = 0
 foreach ($dll in $dependencyDlls) {
     $dllPath = Join-Path $installerDir $dll
@@ -192,11 +197,16 @@ foreach ($dll in $dependencyDlls) {
 }
 $totalSize += $dependencySize
 
+# Calculate version-specific DLLs size
+$versions = @("2024", "2025", "2026")
 $dllsSize = 0
 foreach ($version in $versions) {
     $versionDir = Join-Path $installerDir $version
     if (Test-Path $versionDir) {
-        $dllsSize += (Get-ChildItem $versionDir -Recurse | Measure-Object -Property Length -Sum).Sum
+        $versionFiles = Get-ChildItem $versionDir -Recurse -ErrorAction SilentlyContinue
+        if ($versionFiles) {
+            $dllsSize += ($versionFiles | Measure-Object -Property Length -Sum).Sum
+        }
     }
 }
 $totalSize += $dllsSize

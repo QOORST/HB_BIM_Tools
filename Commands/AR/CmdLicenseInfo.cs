@@ -1,9 +1,9 @@
 using System;
+using System.Windows.Interop;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
-using YD_RevitTools.LicenseManager;
-using YD_RevitTools.LicenseManager.Helpers.AR;
+using YD_RevitTools.LicenseManager.UI;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR
 {
@@ -17,35 +17,32 @@ namespace YD_RevitTools.LicenseManager.Commands.AR
         {
             try
             {
-                // 使用統一的授權管理系統顯示授權資訊
-                var licenseManager = LicenseManager.Instance;
-                var licenseInfo = licenseManager.GetCurrentLicense();
-                var validationResult = licenseManager.ValidateLicense();
+                // 開啟授權管理視窗
+                var window = new LicenseWindow();
 
-                TaskDialog td = new TaskDialog("授權資訊");
-                td.MainInstruction = "YD BIM 工具授權資訊";
-
-                if (licenseInfo != null)
+                // 設定視窗的擁有者為 Revit 主視窗
+                try
                 {
-                    td.MainContent = $"授權類型：{licenseInfo.LicenseType}\n" +
-                                    $"用戶名稱：{licenseInfo.UserName}\n" +
-                                    $"到期日期：{licenseInfo.ExpiryDate:yyyy-MM-dd}\n" +
-                                    $"剩餘天數：{validationResult.DaysUntilExpiry} 天\n\n" +
-                                    $"授權狀態：{(validationResult.IsValid ? "有效" : "無效")}\n" +
-                                    $"{(validationResult.IsValid ? "" : $"錯誤訊息：{validationResult.Message}")}";
+                    var mainWindowHandle = commandData.Application.MainWindowHandle;
+                    if (mainWindowHandle != IntPtr.Zero)
+                    {
+                        var helper = new WindowInteropHelper(window);
+                        helper.Owner = mainWindowHandle;
+                    }
                 }
-                else
+                catch
                 {
-                    td.MainContent = "未找到授權資訊\n\n請聯絡管理員進行授權。";
+                    // 如果設定擁有者失敗，忽略錯誤繼續顯示視窗
                 }
 
-                td.Show();
+                // 顯示視窗
+                window.ShowDialog();
 
                 return Result.Succeeded;
             }
             catch (Exception ex)
             {
-                message = $"顯示授權資訊時發生錯誤：{ex.Message}";
+                message = $"顯示授權管理視窗時發生錯誤：{ex.Message}";
                 return Result.Failed;
             }
         }

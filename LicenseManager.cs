@@ -390,6 +390,184 @@ namespace YD_RevitTools.LicenseManager
             byte[] decrypted = ProtectedData.Unprotect(data, null, DataProtectionScope.LocalMachine);
             return Encoding.UTF8.GetString(decrypted);
         }
+
+        /// <summary>
+        /// 生成機器碼（基於硬體資訊）
+        /// </summary>
+        public string GetMachineCode()
+        {
+            try
+            {
+                string machineInfo = Environment.MachineName +
+                                   Environment.UserName +
+                                   Environment.ProcessorCount.ToString();
+
+                using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                {
+                    byte[] bytes = Encoding.UTF8.GetBytes(machineInfo);
+                    byte[] hash = sha256.ComputeHash(bytes);
+
+                    // 取前16個字節並轉換為16進制字串
+                    string machineCode = BitConverter.ToString(hash, 0, 16).Replace("-", "");
+
+                    // 格式化為 XXXX-XXXX-XXXX-XXXX
+                    return $"{machineCode.Substring(0, 4)}-{machineCode.Substring(4, 4)}-{machineCode.Substring(8, 4)}-{machineCode.Substring(12, 4)}";
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"生成機器碼失敗: {ex.Message}");
+                return "無法生成機器碼";
+            }
+        }
+
+        /// <summary>
+        /// 啟用授權（解析並驗證授權金鑰）
+        /// </summary>
+        /// <param name="licenseKey">授權金鑰（Base64 編碼的 JSON）</param>
+        /// <returns>驗證結果</returns>
+        public LicenseValidationResult ActivateLicense(string licenseKey)
+        {
+            try
+            {
+                // 移除空白字元和換行
+                licenseKey = licenseKey.Replace("\r", "").Replace("\n", "").Replace(" ", "").Trim();
+
+                if (string.IsNullOrWhiteSpace(licenseKey))
+                {
+                    return new LicenseValidationResult
+                    {
+                        IsValid = false,
+                        Message = "授權金鑰不能為空",
+                        Severity = ValidationSeverity.Error
+                    };
+                }
+
+                // 解析授權金鑰（Base64 解碼）
+                string jsonData;
+                try
+                {
+                    byte[] data = Convert.FromBase64String(licenseKey);
+                    jsonData = Encoding.UTF8.GetString(data);
+                }
+                catch (FormatException)
+                {
+                    return new LicenseValidationResult
+                    {
+                        IsValid = false,
+                        Message = "授權金鑰格式錯誤（無效的 Base64 編碼）",
+                        Severity = ValidationSeverity.Error
+                    };
+                }
+
+                // 解析 JSON
+                LicenseInfo license;
+                try
+                {
+                    license = JsonConvert.DeserializeObject<LicenseInfo>(jsonData);
+                }
+                catch (JsonException ex)
+                {
+                    return new LicenseValidationResult
+                    {
+                        IsValid = false,
+                        Message = $"授權金鑰格式錯誤（無效的 JSON）：{ex.Message}",
+                        Severity = ValidationSeverity.Error
+                    };
+                }
+
+                // 驗證授權資訊
+                if (license == null)
+                {
+                    return new LicenseValidationResult
+                    {
+                        IsValid = false,
+                        Message = "授權金鑰解析失敗",
+                        Severity = ValidationSeverity.Error
+                    };
+                }
+
+                // 檢查必要欄位
+                if (string.IsNullOrWhiteSpace(license.UserName))
+                {
+                    return new LicenseValidationResult
+                    {
+                        IsValid = false,
+                        Message = "授權金鑰缺少使用者名稱",
+                        Severity = ValidationSeverity.Error
+                    };
+                }
+
+                // 檢查機器碼綁定（如果授權有指定機器碼）
+                if (!string.IsNullOrWhiteSpace(license.MachineCode))
+                {
+                    string currentMachineCode = GetMachineCode();
+                    if (license.MachineCode != currentMachineCode)
+                    {
+                        return new LicenseValidationResult
+                        {
+                            IsValid = false,
+                            Message = $"此授權金鑰已綁定到其他電腦\n\n" +
+                                     $"授權機器碼：{license.MachineCode}\n" +
+                                     $"目前機器碼：{currentMachineCode}\n\n" +
+                                     $"請聯繫技術支援以重新綁定授權。",
+                            Severity = ValidationSeverity.Error
+                        };
+                    }
+                }
+
+                // 檢查授權是否過期
+                if (DateTime.Now > license.ExpiryDate)
+                {
+                    return new LicenseValidationResult
+                    {
+                        IsValid = false,
+                        Message = $"授權已過期（到期日：{license.ExpiryDate:yyyy-MM-dd}）",
+                        Severity = ValidationSeverity.Error
+                    };
+                }
+
+                // 設定授權為啟用狀態
+                license.IsEnabled = true;
+                license.LicenseKey = licenseKey;
+
+                // 如果授權沒有綁定機器碼，自動綁定到當前電腦
+                if (string.IsNullOrWhiteSpace(license.MachineCode))
+                {
+                    license.MachineCode = GetMachineCode();
+                }
+
+                // 儲存授權
+                if (!SaveLicense(license))
+                {
+                    return new LicenseValidationResult
+                    {
+                        IsValid = false,
+                        Message = "授權儲存失敗",
+                        Severity = ValidationSeverity.Error
+                    };
+                }
+
+                // 返回成功結果
+                return new LicenseValidationResult
+                {
+                    IsValid = true,
+                    Message = "授權啟用成功",
+                    LicenseInfo = license,
+                    DaysUntilExpiry = (license.ExpiryDate - DateTime.Now).Days,
+                    Severity = ValidationSeverity.Success
+                };
+            }
+            catch (Exception ex)
+            {
+                return new LicenseValidationResult
+                {
+                    IsValid = false,
+                    Message = $"授權啟用時發生錯誤：{ex.Message}",
+                    Severity = ValidationSeverity.Error
+                };
+            }
+        }
     }
 
     // 驗證嚴重性
