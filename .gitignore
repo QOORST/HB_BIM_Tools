@@ -50,12 +50,19 @@ GIT_QUICK_START.md
 發布狀態報告.md
 
 # Documentation and reports (temporary)
-*報告.md
-*說明.md
-*完成.md
-*完成.txt
-*清單.md
-*指南.md
+*報告*.md
+*說明*.md
+*完成*.md
+*完成*.txt
+*清單*.md
+*指南*.md
+*步驟*.md
 *.bat
 更新DLL.ps1
 README_和_LICENSE_更新完成.txt
+Tools/UpdateFormworkNamespaces.ps1
+AR模板工具*.md
+安裝檔更新*.md
+模板工具*.md
+發布說明*.md
+手動更新*.md
