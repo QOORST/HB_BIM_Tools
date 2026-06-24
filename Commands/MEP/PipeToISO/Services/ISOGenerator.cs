@@ -1,9 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Plumbing;
 using YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
 {
@@ -59,7 +60,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
                         throw new Exception("找不到 3D 視圖類型");
                     }
                     
-                    Logger.Info($"找到視圖類型: {viewFamilyType.Name} (ID: {viewFamilyType.Id.Value})");
+                    Logger.Info($"找到視圖類型: {viewFamilyType.Name} (ID: {viewFamilyType.Id.GetIdValue()})");
 
                     Logger.Info("建立等角視圖");
                     View3D isoView = View3D.CreateIsometric(_doc, viewFamilyType.Id);

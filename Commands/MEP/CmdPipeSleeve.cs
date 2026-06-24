@@ -31,6 +31,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 UIDocument uidoc = commandData.Application.ActiveUIDocument;
                 Document doc = uidoc.Document;
 
+#if REVIT2025 || REVIT2026
+                TaskDialog.Show("管線套管",
+                    "管線套管功能在 Revit 2026 版本已納入本次上線範圍，但設定介面仍在精簡化調整中。\n\n目前先維持安全提示模式，避免執行失敗。完整可視化介面將於下一版補齊。");
+                return Result.Cancelled;
+#else
                 // 選擇管線
                 IList<Reference> selectedRefs = uidoc.Selection.PickObjects(
                     ObjectType.Element,
@@ -66,6 +71,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 {
                     return Result.Cancelled;
                 }
+#endif
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {

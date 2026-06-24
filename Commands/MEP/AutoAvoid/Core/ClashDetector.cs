@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Mechanical;
 using Autodesk.Revit.DB.Plumbing;
 using Autodesk.Revit.DB.Electrical;
+using YD_RevitTools.LicenseManager.Helpers;
 
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.Core
@@ -68,7 +69,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.Core
         public static List<Element> CollectObstacles(Document doc, View view, AvoidOptions opt, List<Element> excluding)
         {
             Logger.Info($"開始收集障礙物，排除 {excluding.Count} 個目標元素");
-            var idsExclude = new HashSet<long>(excluding.Select(x => x.Id.Value));
+            var idsExclude = new HashSet<long>(excluding.Select(x => x.Id.GetIdValue()));
 
             var result = new List<Element>();
             
@@ -139,7 +140,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.Core
                 }
 
                 // 移除目標元素本身
-                result = result.Where(e => !idsExclude.Contains(e.Id.Value)).ToList();
+                result = result.Where(e => !idsExclude.Contains(e.Id.GetIdValue())).ToList();
                 Logger.Info($"總共收集到 {result.Count} 個障礙物");
             }
             catch (Exception ex)

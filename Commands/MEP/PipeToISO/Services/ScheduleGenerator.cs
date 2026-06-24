@@ -1,9 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Plumbing;
 using YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
 {
@@ -188,7 +189,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
             {
                 // 查找對應的可排程欄位
                 SchedulableField targetField = schedulableFields.FirstOrDefault(
-                    sf => sf.ParameterId.Value == (int)builtInParam
+                    sf => sf.ParameterId.GetIdValue() == (int)builtInParam
                 );
 
                 if (targetField != null)
@@ -232,7 +233,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
                     ScheduleField field = definition.GetField(i);
                     
                     // 如果是系統類型參數,設定過濾器
-                    if (field.ParameterId.Value == (long)BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)
+                    if (field.ParameterId.GetIdValue() == (long)BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)
                     {
                         // 查找系統類型 ID
                         ElementId systemTypeId = FindSystemTypeId(isoData.SystemName);
@@ -281,7 +282,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
                     for (int i = 0; i < fieldCount; i++)
                     {
                         ScheduleField field = definition.GetField(i);
-                        long paramId = field.ParameterId.Value;
+                        long paramId = field.ParameterId.GetIdValue();
                         
                         if (paramId == (long)BuiltInParameter.RBS_PIPE_DIAMETER_PARAM ||
                             paramId == (long)BuiltInParameter.RBS_CALCULATED_SIZE)
@@ -301,7 +302,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
                     {
                         ScheduleField field = definition.GetField(i);
                         
-                        if (field.ParameterId.Value == (long)BuiltInParameter.CURVE_ELEM_LENGTH)
+                        if (field.ParameterId.GetIdValue() == (long)BuiltInParameter.CURVE_ELEM_LENGTH)
                         {
                             field.DisplayType = ScheduleFieldDisplayType.Totals;
                             Logger.Info("已設定長度欄位顯示總計");

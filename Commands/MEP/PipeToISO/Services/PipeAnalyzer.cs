@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Plumbing;
 using YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models;
 using PipeSegmentModel = YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models.PipeSegment;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
 {
@@ -386,7 +387,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
         {
             string systemName = pipingSystem.Name;
             string date = DateTime.Now.ToString("yyyyMMdd");
-            string number = pipingSystem.Id.Value.ToString("D6");
+            string number = pipingSystem.Id.GetIdValue().ToString("D6");
             
             return $"ISO-{systemName}-{date}-{number}";
         }

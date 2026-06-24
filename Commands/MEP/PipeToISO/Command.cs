@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Plumbing;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.Attributes;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
 {
@@ -90,7 +91,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
                 Category category = familyInstance.Category;
                 if (category != null)
                 {
-                    return category.Id.Value == (int)BuiltInCategory.OST_PipeFitting;
+                    return category.Id.GetIdValue() == (int)BuiltInCategory.OST_PipeFitting;
                 }
             }
             return false;
