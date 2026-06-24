@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Helpers.Data
 {
@@ -234,8 +235,8 @@ namespace YD_RevitTools.LicenseManager.Helpers.Data
 
             try
             {
-                // 回退到舊版 IntegerValue 屬性
-                return id.IntegerValue.ToString();
+                // 使用相容性輔助方法，避免 Revit 2026 移除 IntegerValue 後編譯失敗
+                return RevitApiCompatibility.GetIdValue(id).ToString();
             }
             catch (Exception ex)
             {
@@ -273,39 +274,8 @@ namespace YD_RevitTools.LicenseManager.Helpers.Data
                 // 再嘗試 long（處理大型 ID）
                 if (long.TryParse(s, out long lid))
                 {
-                    try
-                    {
-                        // 嘗試使用 long 建構函式 (Revit 2024+)
-                        return new ElementId(lid);
-                    }
-                    catch (MissingMethodException)
-                    {
-                        // 某些環境（例如 Revit 2022）不支援 long 建構函式，回退到 int 範圍
-                        if (lid >= int.MinValue && lid <= int.MaxValue)
-                        {
-                            try
-                            {
-                                return new ElementId((int)lid);
-                            }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"回退到int範圍失敗: {ex.Message}");
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"使用long建構ElementId失敗: {ex.Message}");
-                        // 如果是其他錯誤，嘗試回退到int
-                        if (lid >= int.MinValue && lid <= int.MaxValue)
-                        {
-                            try
-                            {
-                                return new ElementId((int)lid);
-                            }
-                            catch { }
-                        }
-                    }
+                    // 使用兼容性輔助方法（自動處理 Revit 2022-2026 差異）
+                    return RevitApiCompatibility.CreateElementId(lid);
                 }
                 
                 // 最後嘗試使用 ElementId.InvalidElementId
@@ -342,8 +312,8 @@ namespace YD_RevitTools.LicenseManager.Helpers.Data
                     if (value is int intVal) return intVal > 0;
                 }
                 
-                // 回退到舊版 API
-                return id.IntegerValue > 0;
+                // 回退到相容性 API
+                return RevitApiCompatibility.GetIdValue(id) > 0;
             }
             catch
             {

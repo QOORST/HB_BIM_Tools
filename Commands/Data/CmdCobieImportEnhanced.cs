@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -47,8 +48,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
                 var ofd = new OpenFileDialog
                 {
-                    Filter = "COBie 檔案|*.csv;*.xlsx;*.xls|CSV 檔案 (*.csv)|*.csv|Excel 檔案 (*.xlsx;*.xls)|*.xlsx;*.xls|所有檔案 (*.*)|*.*",
-                    Title = "選擇 COBie 匯入檔案 (CSV 或 Excel)"
+                    Filter = "COBie 檔案|*.csv;*.xlsx|CSV 檔案 (*.csv)|*.csv|Excel 檔案 (*.xlsx)|*.xlsx|所有檔案 (*.*)|*.*",
+                    Title = "選擇 COBie 匯入檔案 (CSV 或 Excel .xlsx)"
                 };
                 if (ofd.ShowDialog() != DialogResult.OK) return Result.Cancelled;
 
@@ -75,12 +76,24 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     }
                 }
 
+                if (map.Count == 0)
+                {
+                    TaskDialog.Show("COBie 匯入", "尚未啟用任何可匯入欄位，請先於「COBie 欄位管理」勾選匯入欄位。");
+                    return Result.Cancelled;
+                }
+
                 // 根據檔案類型讀取資料
                 List<string> headers;
                 List<List<string>> rows;
 
                 string fileExt = Path.GetExtension(ofd.FileName).ToLower();
-                if (fileExt == ".xlsx" || fileExt == ".xls")
+                if (fileExt == ".xls")
+                {
+                    TaskDialog.Show("COBie 匯入", "不支援舊版 Excel .xls 格式。請先另存為 .xlsx 或 .csv 後再匯入。");
+                    return Result.Cancelled;
+                }
+
+                if (fileExt == ".xlsx")
                 {
                     // 讀取 Excel 檔案
                     var excelData = ReadExcelFile(ofd.FileName);
@@ -92,7 +105,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     headers = excelData[0];
                     rows = excelData.Skip(1).ToList();
                 }
-                else
+                else if (fileExt == ".csv")
                 {
                     // 讀取 CSV 檔案
                     var rawLines = File.ReadAllLines(ofd.FileName, Encoding.UTF8);
@@ -106,7 +119,16 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     }
 
                     headers = SplitCsv(lines[0]).Select(h => h.Trim()).ToList();
-                    rows = lines.Skip(1).Select(SplitCsv).Where(r => r.Count == headers.Count).ToList();
+                    rows = lines.Skip(1)
+                        .Select(SplitCsv)
+                        .Where(r => r.Any(v => !string.IsNullOrWhiteSpace(v)))
+                        .Select(r => NormalizeRow(r, headers.Count))
+                        .ToList();
+                }
+                else
+                {
+                    TaskDialog.Show("COBie 匯入", "不支援的檔案格式。請選擇 .xlsx 或 .csv 檔案。");
+                    return Result.Cancelled;
                 }
 
                 int idxUnique = headers.FindIndex(h => h.Equals("UniqueId", StringComparison.OrdinalIgnoreCase));
@@ -187,7 +209,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
                             if (!map.TryGetValue(head, out var cfg)) continue;
 
-                            string val = r[c];
+                            string val = Safe(r, c);
                             try
                             {
                                 bool ok = ApplyValue(elem, cfg, val);
@@ -296,8 +318,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             if (p == null || p.IsReadOnly) return false;
             switch ((dataType ?? "Text").Trim())
             {
-                case "Number": if (double.TryParse(raw, out double d)) return p.Set(d); return false;
-                case "Integer": if (int.TryParse(raw, out int i)) return p.Set(i); return false;
+                case "Number": if (TryParseDouble(raw, out double d)) return p.Set(d); return false;
+                case "Integer": if (TryParseInteger(raw, out int i)) return p.Set(i); return false;
                 case "YesNo": if (TryParseBool(raw, out int b)) return p.Set(b); return false;
                 case "Date": return p.Set(raw ?? "");
                 default: return p.Set(raw ?? "");
@@ -311,6 +333,28 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             if (s == "1" || s == "true" || s == "yes" || s == "y" || s == "是") { val = 1; return true; }
             if (s == "0" || s == "false" || s == "no" || s == "n" || s == "否") { val = 0; return true; }
             return false;
+        }
+
+        private static bool TryParseDouble(string raw, out double value)
+        {
+            value = 0;
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+
+            var text = raw.Trim();
+            var styles = NumberStyles.Float | NumberStyles.AllowThousands;
+            return double.TryParse(text, styles, CultureInfo.CurrentCulture, out value)
+                || double.TryParse(text, styles, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static bool TryParseInteger(string raw, out int value)
+        {
+            value = 0;
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+
+            var text = raw.Trim();
+            var styles = NumberStyles.Integer | NumberStyles.AllowThousands;
+            return int.TryParse(text, styles, CultureInfo.CurrentCulture, out value)
+                || int.TryParse(text, styles, CultureInfo.InvariantCulture, out value);
         }
 
         private static (string family, string type) GetFamilyAndType(Document doc, Element e)
@@ -352,6 +396,16 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             }
             list.Add(sb.ToString());
             return list;
+        }
+
+        private static List<string> NormalizeRow(List<string> row, int headerCount)
+        {
+            row = row ?? new List<string>();
+            while (row.Count < headerCount)
+            {
+                row.Add("");
+            }
+            return row;
         }
 
         private static void SaveFailCsv(string path, List<FailRow> fails)

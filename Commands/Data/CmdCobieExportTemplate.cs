@@ -54,15 +54,27 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
                 // 根據檔案類型寫入範本
                 string fileExt = Path.GetExtension(sfd.FileName).ToLower();
-                if (fileExt == ".xlsx" || fileExt == ".xls")
+                if (fileExt == ".xls")
+                {
+                    TaskDialog.Show("COBie 範本匯出", "不支援舊版 Excel .xls 格式。請改用 .xlsx 或 .csv。");
+                    return Result.Cancelled;
+                }
+
+                if (fileExt == ".xlsx")
                 {
                     // 寫入 Excel 範本
                     WriteExcelTemplate(sfd.FileName, headers, exportFields);
                 }
-                else
+                else if (fileExt == ".csv")
                 {
                     // 寫入 CSV 範本
                     WriteCsvTemplate(sfd.FileName, headers);
+                    WriteCsvFieldGuide(sfd.FileName);
+                }
+                else
+                {
+                    TaskDialog.Show("COBie 範本匯出", "不支援的檔案格式。請使用 .xlsx 或 .csv。");
+                    return Result.Cancelled;
                 }
 
                 TaskDialog.Show("COBie 範本匯出", 
@@ -138,9 +150,45 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 // 自動調整欄寬
                 worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
 
+                WriteFieldGuideSheet(package);
+
                 // 儲存檔案
                 package.Save();
             }
+        }
+
+        private void WriteFieldGuideSheet(ExcelPackage package)
+        {
+            var worksheet = package.Workbook.Worksheets.Add("COBie Field Guide");
+            var headers = new[] { "SheetName", "FieldName", "Requirement", "DataSource", "SuggestedAction", "AutoFillValue", "Note" };
+
+            for (int col = 0; col < headers.Length; col++)
+            {
+                var cell = worksheet.Cells[1, col + 1];
+                cell.Value = headers[col];
+                cell.Style.Font.Bold = true;
+                cell.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+                cell.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.FromArgb(31, 73, 125));
+                cell.Style.Font.Color.SetColor(System.Drawing.Color.White);
+                cell.Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Center;
+            }
+
+            int row = 2;
+            foreach (var rule in CobieFieldRules.All)
+            {
+                worksheet.Cells[row, 1].Value = rule.SheetName;
+                worksheet.Cells[row, 2].Value = rule.FieldName;
+                worksheet.Cells[row, 3].Value = rule.Requirement;
+                worksheet.Cells[row, 4].Value = rule.DataSource;
+                worksheet.Cells[row, 5].Value = CobieFieldRules.GetSuggestedAction(rule, 1, 1);
+                worksheet.Cells[row, 6].Value = CobieFieldRules.GetAutoFillValue(rule);
+                worksheet.Cells[row, 7].Value = rule.Note;
+                row++;
+            }
+
+            worksheet.View.FreezePanes(2, 1);
+            worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns(10, 48);
+            worksheet.Cells[1, 1, Math.Max(1, row - 1), headers.Length].AutoFilter = true;
         }
 
         /// <summary>
@@ -154,6 +202,37 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 sw.WriteLine(string.Join(",", headers.Select(h => $"\"{h}\"")));
             }
         }
+
+        private void WriteCsvFieldGuide(string filePath)
+        {
+            string dir = Path.GetDirectoryName(filePath);
+            string name = Path.GetFileNameWithoutExtension(filePath);
+            string guidePath = Path.Combine(dir ?? string.Empty, $"{name}_FieldGuide.csv");
+            var headers = new[] { "SheetName", "FieldName", "Requirement", "DataSource", "SuggestedAction", "AutoFillValue", "Note" };
+
+            using (var sw = new StreamWriter(guidePath, false, System.Text.Encoding.UTF8))
+            {
+                sw.WriteLine(string.Join(",", headers.Select(Csv)));
+                foreach (var rule in CobieFieldRules.All)
+                {
+                    sw.WriteLine(string.Join(",", new[]
+                    {
+                        rule.SheetName,
+                        rule.FieldName,
+                        rule.Requirement,
+                        rule.DataSource,
+                        CobieFieldRules.GetSuggestedAction(rule, 1, 1),
+                        CobieFieldRules.GetAutoFillValue(rule),
+                        rule.Note
+                    }.Select(Csv)));
+                }
+            }
+        }
+
+        private static string Csv(string value)
+        {
+            value = value ?? string.Empty;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
     }
 }
-

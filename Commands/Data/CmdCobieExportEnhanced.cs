@@ -17,6 +17,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
     [Transaction(TransactionMode.ReadOnly)]
     public class CmdCobieExportEnhanced : IExternalCommand
     {
+        private static readonly List<System.Windows.Forms.Form> OpenExportForms = new List<System.Windows.Forms.Form>();
+
         public Result Execute(ExternalCommandData cd, ref string msg, ElementSet set)
         {
             // 檢查授權 - COBie 匯出功能
@@ -41,7 +43,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 var exportFields = cfgs.Where(c => c.ExportEnabled).ToList();
                 if (exportFields.Count == 0)
                 {
-                    TaskDialog.Show("COBie 匯出", "尚未勾選任何匯出欄位，請先於「COBie 欄位管理」設定。");
+                    TaskDialog.Show("自訂 COBie", "尚未勾選任何匯出欄位，請先於「COBie 欄位設定」設定。");
                     return Result.Cancelled;
                 }
 
@@ -82,266 +84,362 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 // 如果沒有任何可用類別，顯示訊息並退出
                 if (existingCategories.Count == 0)
                 {
-                    TaskDialog.Show("COBie 匯出", "模型中沒有找到任何支援的設備類別。");
+                    TaskDialog.Show("自訂 COBie", "模型中沒有找到任何支援的設備類別。");
                     return Result.Cancelled;
                 }
                 
-                // 建立勾選對話框
-                var form = new System.Windows.Forms.Form
+                var handler = new CobieExportExternalEventHandler(doc, exportFields);
+                var externalEvent = ExternalEvent.Create(handler);
+                CustomCobieExportForm form = null;
+                form = new CustomCobieExportForm(existingCategories, categoryMap, request =>
                 {
-                    Text = "選擇要匯出的設備類別",
-                    Width = 400,
-                    Height = 400,
-                    StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
-                    FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog,
-                    MaximizeBox = false,
-                    MinimizeBox = false
+                    handler.Request(request);
+                    if (externalEvent.Raise() != ExternalEventRequest.Accepted)
+                        form.SetRequestCompleted("目前無法送出 Revit 匯出動作，請稍後再試。");
+                });
+                handler.Attach(form);
+                OpenExportForms.Add(form);
+                form.FormClosed += (s, e) =>
+                {
+                    OpenExportForms.Remove(form);
+                    externalEvent.Dispose();
                 };
-                
-                var panel = new System.Windows.Forms.Panel
-                {
-                    Dock = System.Windows.Forms.DockStyle.Fill,
-                    AutoScroll = true
-                };
-                form.Controls.Add(panel);
-                
-                var checkBoxes = new Dictionary<BuiltInCategory, System.Windows.Forms.CheckBox>();
-                int yPos = 10;
-                
-                foreach (var cat in existingCategories)
-                {
-                    var cb = new System.Windows.Forms.CheckBox
-                    {
-                        Text = categoryMap[cat],
-                        Checked = true,
-                        Location = new System.Drawing.Point(10, yPos),
-                        Width = 350,
-                        Height = 24
-                    };
-                    panel.Controls.Add(cb);
-                    checkBoxes.Add(cat, cb);
-                    yPos += 30;
-                }
-                
-                var btnOk = new System.Windows.Forms.Button
-                {
-                    Text = "確定",
-                    DialogResult = System.Windows.Forms.DialogResult.OK,
-                    Location = new System.Drawing.Point(200, 320),
-                    Width = 80
-                };
-                
-                var btnCancel = new System.Windows.Forms.Button
-                {
-                    Text = "取消",
-                    DialogResult = System.Windows.Forms.DialogResult.Cancel,
-                    Location = new System.Drawing.Point(290, 320),
-                    Width = 80
-                };
-                
-                form.Controls.Add(btnOk);
-                form.Controls.Add(btnCancel);
-                form.AcceptButton = btnOk;
-                form.CancelButton = btnCancel;
-                
-                if (form.ShowDialog() != System.Windows.Forms.DialogResult.OK)
-                {
-                    return Result.Cancelled;
-                }
-                
-                // 獲取選中的類別
-                var selectedCategories = checkBoxes.Where(kv => kv.Value.Checked).Select(kv => kv.Key).ToList();
-                
-                if (selectedCategories.Count == 0)
-                {
-                    TaskDialog.Show("COBie 匯出", "請至少選擇一個設備類別。");
-                    return Result.Cancelled;
-                }
-                
-                // 建立篩選器，只選擇設備類物件
-                var categoryFilters = selectedCategories.Select(cat => 
-                    (ElementFilter)new ElementCategoryFilter(cat)).ToList();
-                
-                var combinedFilter = new LogicalOrFilter(categoryFilters);
-                
-                // 收集設備類元件
-                var allElements = new FilteredElementCollector(doc)
-                    .WhereElementIsNotElementType()
-                    .WherePasses(combinedFilter)
-                    .ToElements();
-
-                // 進一步篩選，確保只包含有實體的設備
-                var elems = allElements.Where(e =>
-                {
-                    // 確保元件有幾個形狀或是設備類型
-                    var category = e.Category;
-                    if (category == null) return false;
-
-                    // 檢查是否為設備類別（使用相容性方法避免 IntegerValue 警告）
-                    var catIdStr = ParamTypeCompat.ElementIdToString(category.Id);
-                    if (!int.TryParse(catIdStr, out int catId)) return false;
-                    return selectedCategories.Any(bic => (int)bic == catId);
-                }).ToList();
-
-                if (elems.Count == 0)
-                {
-                    TaskDialog.Show("COBie 匯出", "專案中沒有找到任何設備類物件。\n\n支援的設備類別包括：機械設備、電氣設備、衛浴設備、照明設備等。");
-                    return Result.Cancelled;
-                }
-
-                // 顯示將要匯出的設備統計
-                var categoryStats = elems.GroupBy(e => e.Category?.Name ?? "未知")
-                    .Select(g => $"{g.Key}: {g.Count()} 個")
-                    .ToList();
-                
-                var statsMessage = $"即將匯出 {elems.Count} 個設備類物件：\n\n" + string.Join("\n", categoryStats);
-                var confirmResult = TaskDialog.Show("確認匯出", statsMessage, TaskDialogCommonButtons.Ok | TaskDialogCommonButtons.Cancel);
-                
-                if (confirmResult != TaskDialogResult.Ok) return Result.Cancelled;
-
-                // 設定 EPPlus 授權模式（非商業用途）
-                ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-
-                var sfd = new SaveFileDialog
-                {
-                    Filter = "Excel 檔案 (*.xlsx)|*.xlsx|CSV 檔案 (*.csv)|*.csv|所有檔案 (*.*)|*.*",
-                    FileName = $"COBie_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
-                    DefaultExt = "xlsx"
-                };
-                if (sfd.ShowDialog() != DialogResult.OK) return Result.Cancelled;
-
-                var headers = new List<string> { "UniqueId", "ElementId", "FamilyName", "TypeName" };
-                headers.AddRange(exportFields.Select(f => f.DisplayName?.Trim()).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct());
-
-                // 收集所有資料列
-                var allRows = new List<List<string>>();
-
-                foreach (var e in elems)
-                    {
-                        var (fam, typ) = GetFamilyAndType(doc, e);
-                        var row = new List<string>
-                        {
-                            e.UniqueId ?? "",
-                            ParamTypeCompat.ElementIdToString(e.Id),
-                            fam ?? "",
-                            typ ?? ""
-                        };
-
-                        foreach (var f in exportFields)
-                        {
-                            string val = "";
-                            
-                            // 自動填入空間名稱與空間代碼
-                            if (f.CobieName == "Space.Name" || f.CobieName == "Component.Space" || f.CobieName == "Component.SpaceCode")
-                            {
-                                var room = GetRoomFromElement(doc, e);
-                                if (room != null)
-                                {
-                                    // 取得房間的名稱參數（不含編號）
-                                    string roomName = room.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? "";
-                                    string roomNumber = room.Number ?? "";
-
-                                    System.Diagnostics.Debug.WriteLine($"房間資訊 - ID: {room.Id}, Name屬性: '{room.Name}', Name參數: '{roomName}', Number: '{roomNumber}'");
-
-                                    if (f.CobieName == "Space.Name")
-                                        val = roomName; // 使用 ROOM_NAME 參數，不含編號
-                                    else if (f.CobieName == "Component.Space")
-                                        val = roomNumber; // 使用房間編號作為空間代碼
-                                    else if (f.CobieName == "Component.SpaceCode")
-                                        val = roomNumber; // 編號只呈現於空間代碼
-                                }
-                            }
-                            // 資產編號由廠商填寫，不自動填值
-                            else if (f.CobieName == "Component.TagNumber")
-                            {
-                                val = "";
-                            }
-                            // 自動填入系統名稱和系統代碼
-                            else if (f.CobieName == "System.Name" || f.CobieName == "System.Identifier")
-                            {
-                                var phase = GetElementPhase(doc, e);
-                                if (!string.IsNullOrEmpty(phase))
-                                {
-                                    if (f.CobieName == "System.Name")
-                                    {
-                                        val = phase;
-                                    }
-                                    else if (f.CobieName == "System.Identifier")
-                                    {
-                                        if (phase.Contains("建築")) val = "AR";
-                                        else if (phase.Contains("給水")) val = "WW";
-                                        else if (phase.Contains("排水")) val = "PP";
-                                        else if (phase.Contains("電氣")) val = "EE";
-                                        else if (phase.Contains("弱電")) val = "LC";
-                                        else if (phase.Contains("消防")) val = "FP";
-                                        else if (phase.Contains("空調")) val = "MC";
-                                        else val = "OT";
-                                    }
-                                }
-                            }
-                            else if (f.CobieName == "Component.Name")
-                            {
-                                var (family, type) = GetFamilyAndType(doc, e);
-                                if (!string.IsNullOrEmpty(family) && !string.IsNullOrEmpty(type))
-                                {
-                                    val = $"{family}-{type}";
-                                }
-                            }
-                            else if (f.IsBuiltIn && f.BuiltInParam.HasValue)
-                            {
-                                if (f.IsInstance)
-                                    val = TryGetStringParam(e, f.BuiltInParam.Value) ?? f.DefaultValue ?? "";
-                                else
-                                {
-                                    var et = doc.GetElement(e.GetTypeId()) as ElementType;
-                                    var pt = et?.get_Parameter(f.BuiltInParam.Value);
-                                    val = pt?.AsString() ?? pt?.AsValueString() ?? f.DefaultValue ?? "";
-                                }
-                            }
-                            else if (!string.IsNullOrWhiteSpace(f.SharedParameterName))
-                            {
-                                if (f.IsInstance)
-                                    val = TryGetStringParam(e, f.SharedParameterName) ?? f.DefaultValue ?? "";
-                                else
-                                {
-                                    var et = doc.GetElement(e.GetTypeId()) as ElementType;
-                                    var pt = et?.Parameters.Cast<Parameter>().FirstOrDefault(x => x.Definition?.Name == f.SharedParameterName);
-                                    val = pt?.AsString() ?? pt?.AsValueString() ?? f.DefaultValue ?? "";
-                                }
-                            }
-                            else
-                                val = f.DefaultValue ?? "";
-
-                            row.Add(val);
-                        }
-                        allRows.Add(row);
-                    }
-
-                // 根據檔案類型寫入資料
-                string fileExt = Path.GetExtension(sfd.FileName).ToLower();
-                if (fileExt == ".xlsx" || fileExt == ".xls")
-                {
-                    // 寫入 Excel 檔案
-                    WriteExcelFile(sfd.FileName, headers, allRows);
-                }
-                else
-                {
-                    // 寫入 CSV 檔案
-                    using (var fs = new FileStream(sfd.FileName, FileMode.Create, FileAccess.Write, FileShare.None))
-                    using (var sw = new StreamWriter(fs, new UTF8Encoding(true)))
-                    {
-                        sw.WriteLine(Csv(headers));
-                        foreach (var row in allRows)
-                        {
-                            sw.WriteLine(Csv(row));
-                        }
-                    }
-                }
-
-                TaskDialog.Show("COBie 匯出", $"已輸出 {elems.Count} 筆至：\n{Path.GetFileName(sfd.FileName)}");
+                form.Show();
                 return Result.Succeeded;
             }
             catch (Exception ex) { msg = ex.ToString(); return Result.Failed; }
+        }
+
+        private sealed class CobieExportRequest
+        {
+            public List<BuiltInCategory> Categories { get; set; } = new List<BuiltInCategory>();
+            public string FilePath { get; set; }
+        }
+
+        private sealed class CobieExportExternalEventHandler : IExternalEventHandler
+        {
+            private readonly Document _doc;
+            private readonly List<CmdCobieFieldManager.CobieFieldConfig> _exportFields;
+            private CobieExportRequest _request;
+            private CustomCobieExportForm _form;
+
+            public CobieExportExternalEventHandler(
+                Document doc,
+                List<CmdCobieFieldManager.CobieFieldConfig> exportFields)
+            {
+                _doc = doc;
+                _exportFields = exportFields;
+            }
+
+            public void Attach(CustomCobieExportForm form)
+            {
+                _form = form;
+            }
+
+            public void Request(CobieExportRequest request)
+            {
+                _request = request;
+            }
+
+            public void Execute(UIApplication app)
+            {
+                try
+                {
+                    ExportSelectedCategories(_doc, _exportFields, _request);
+                    _form?.SetRequestCompleted();
+                }
+                catch (Exception ex)
+                {
+                    _form?.SetRequestCompleted(ex.Message);
+                    TaskDialog.Show("自訂 COBie", "匯出失敗：\n" + ex.Message);
+                }
+                finally
+                {
+                    _request = null;
+                }
+            }
+
+            public string GetName()
+            {
+                return "YD BIM Tools - 自訂 COBie";
+            }
+        }
+
+        private sealed class CustomCobieExportForm : System.Windows.Forms.Form
+        {
+            private readonly Dictionary<BuiltInCategory, System.Windows.Forms.CheckBox> _checkBoxes;
+            private readonly Action<CobieExportRequest> _requestAction;
+            private readonly System.Windows.Forms.Button _exportButton;
+            private bool _requestPending;
+
+            public CustomCobieExportForm(
+                IEnumerable<BuiltInCategory> categories,
+                IReadOnlyDictionary<BuiltInCategory, string> categoryNames,
+                Action<CobieExportRequest> requestAction)
+            {
+                _requestAction = requestAction;
+                _checkBoxes = new Dictionary<BuiltInCategory, System.Windows.Forms.CheckBox>();
+
+                Text = "YD BIM Tools - 自訂 COBie";
+                Width = 460;
+                Height = 540;
+                MinimumSize = new System.Drawing.Size(420, 460);
+                StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+                FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
+                Font = new System.Drawing.Font("Microsoft JhengHei UI", 9.5f);
+
+                var header = new System.Windows.Forms.Label
+                {
+                    Text = "選擇匯出類別",
+                    Dock = System.Windows.Forms.DockStyle.Top,
+                    Height = 52,
+                    Padding = new System.Windows.Forms.Padding(14, 14, 0, 0),
+                    Font = new System.Drawing.Font("Microsoft JhengHei UI", 13f, System.Drawing.FontStyle.Bold),
+                    ForeColor = System.Drawing.Color.White,
+                    BackColor = System.Drawing.Color.FromArgb(16, 67, 108)
+                };
+
+                var hint = new System.Windows.Forms.Label
+                {
+                    Text = "視窗開啟時可回到 Revit 檢查模型；按「匯出」後才讀取模型資料。",
+                    Dock = System.Windows.Forms.DockStyle.Top,
+                    Height = 42,
+                    Padding = new System.Windows.Forms.Padding(14, 10, 8, 0),
+                    ForeColor = System.Drawing.Color.DimGray
+                };
+
+                var categoryPanel = new System.Windows.Forms.FlowLayoutPanel
+                {
+                    Dock = System.Windows.Forms.DockStyle.Fill,
+                    FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
+                    WrapContents = false,
+                    AutoScroll = true,
+                    Padding = new System.Windows.Forms.Padding(14, 8, 14, 8)
+                };
+                foreach (var category in categories)
+                {
+                    var checkBox = new System.Windows.Forms.CheckBox
+                    {
+                        Text = categoryNames[category],
+                        Checked = true,
+                        AutoSize = false,
+                        Width = 380,
+                        Height = 28
+                    };
+                    _checkBoxes.Add(category, checkBox);
+                    categoryPanel.Controls.Add(checkBox);
+                }
+
+                var footer = new System.Windows.Forms.FlowLayoutPanel
+                {
+                    Dock = System.Windows.Forms.DockStyle.Bottom,
+                    Height = 54,
+                    FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft,
+                    Padding = new System.Windows.Forms.Padding(8),
+                    BackColor = System.Drawing.Color.FromArgb(242, 246, 250)
+                };
+                var closeButton = new System.Windows.Forms.Button { Text = "關閉", Width = 86, Height = 32 };
+                closeButton.Click += (s, e) => Close();
+                _exportButton = new System.Windows.Forms.Button
+                {
+                    Text = "匯出",
+                    Width = 110,
+                    Height = 32,
+                    BackColor = System.Drawing.Color.FromArgb(16, 67, 108),
+                    ForeColor = System.Drawing.Color.White,
+                    FlatStyle = System.Windows.Forms.FlatStyle.Flat
+                };
+                _exportButton.Click += ExportButton_Click;
+                footer.Controls.Add(closeButton);
+                footer.Controls.Add(_exportButton);
+
+                Controls.Add(categoryPanel);
+                Controls.Add(hint);
+                Controls.Add(header);
+                Controls.Add(footer);
+            }
+
+            private void ExportButton_Click(object sender, EventArgs e)
+            {
+                if (_requestPending) return;
+
+                var categories = _checkBoxes
+                    .Where(pair => pair.Value.Checked)
+                    .Select(pair => pair.Key)
+                    .ToList();
+                if (categories.Count == 0)
+                {
+                    MessageBox.Show("請至少選擇一個設備類別。", "自訂 COBie");
+                    return;
+                }
+
+                using (var dialog = new SaveFileDialog
+                {
+                    Filter = "Excel 檔案 (*.xlsx)|*.xlsx|CSV 檔案 (*.csv)|*.csv",
+                    FileName = $"COBie_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+                    DefaultExt = "xlsx",
+                    Title = "匯出自訂 COBie"
+                })
+                {
+                    if (dialog.ShowDialog() != DialogResult.OK) return;
+                    _requestPending = true;
+                    _exportButton.Enabled = false;
+                    _exportButton.Text = "匯出中...";
+                    _requestAction(new CobieExportRequest
+                    {
+                        Categories = categories,
+                        FilePath = dialog.FileName
+                    });
+                }
+            }
+
+            public void SetRequestCompleted(string error = null)
+            {
+                if (IsDisposed) return;
+                _requestPending = false;
+                _exportButton.Enabled = true;
+                _exportButton.Text = "匯出";
+                if (!string.IsNullOrWhiteSpace(error))
+                    MessageBox.Show(error, "自訂 COBie", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static void ExportSelectedCategories(
+            Document doc,
+            List<CmdCobieFieldManager.CobieFieldConfig> exportFields,
+            CobieExportRequest request)
+        {
+            if (request == null || request.Categories.Count == 0)
+                throw new InvalidOperationException("沒有選擇匯出類別。");
+
+            var filters = request.Categories
+                .Select(category => (ElementFilter)new ElementCategoryFilter(category))
+                .ToList();
+            var elements = new FilteredElementCollector(doc)
+                .WhereElementIsNotElementType()
+                .WherePasses(new LogicalOrFilter(filters))
+                .ToElements()
+                .Where(element => element.Category != null)
+                .ToList();
+
+            if (elements.Count == 0)
+                throw new InvalidOperationException("專案中沒有找到所選類別的設備物件。");
+
+            var stats = elements
+                .GroupBy(element => element.Category?.Name ?? "未知")
+                .Select(group => $"{group.Key}: {group.Count()} 個");
+            if (TaskDialog.Show(
+                    "確認匯出",
+                    $"即將匯出 {elements.Count} 個設備類物件：\n\n{string.Join("\n", stats)}",
+                    TaskDialogCommonButtons.Ok | TaskDialogCommonButtons.Cancel) != TaskDialogResult.Ok)
+                return;
+
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            var headers = new List<string> { "UniqueId", "ElementId", "FamilyName", "TypeName" };
+            headers.AddRange(exportFields
+                .Select(field => field.DisplayName?.Trim())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct());
+
+            var rows = new List<List<string>>();
+            foreach (var element in elements)
+            {
+                var familyAndType = GetFamilyAndType(doc, element);
+                var row = new List<string>
+                {
+                    element.UniqueId ?? "",
+                    ParamTypeCompat.ElementIdToString(element.Id),
+                    familyAndType.family ?? "",
+                    familyAndType.type ?? ""
+                };
+                row.AddRange(exportFields.Select(field => GetExportFieldValue(doc, element, field)));
+                rows.Add(row);
+            }
+
+            var extension = Path.GetExtension(request.FilePath).ToLowerInvariant();
+            if (extension == ".xlsx")
+            {
+                WriteExcelFile(request.FilePath, headers, rows);
+            }
+            else if (extension == ".csv")
+            {
+                using (var stream = new FileStream(request.FilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                using (var writer = new StreamWriter(stream, new UTF8Encoding(true)))
+                {
+                    writer.WriteLine(Csv(headers));
+                    foreach (var row in rows) writer.WriteLine(Csv(row));
+                }
+            }
+            else
+            {
+                throw new InvalidOperationException("不支援的檔案格式。請使用 .xlsx 或 .csv。");
+            }
+
+            TaskDialog.Show("自訂 COBie", $"已輸出 {elements.Count} 筆至：\n{Path.GetFileName(request.FilePath)}");
+        }
+
+        private static string GetExportFieldValue(
+            Document doc,
+            Element element,
+            CmdCobieFieldManager.CobieFieldConfig field)
+        {
+            if (field.CobieName == "Space.Name" ||
+                field.CobieName == "Component.Space" ||
+                field.CobieName == "Component.SpaceCode")
+            {
+                var room = GetRoomFromElement(doc, element);
+                if (room == null) return "";
+                return field.CobieName == "Space.Name"
+                    ? room.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? ""
+                    : room.Number ?? "";
+            }
+
+            if (field.CobieName == "Component.TagNumber") return "";
+
+            if (field.CobieName == "System.Name" || field.CobieName == "System.Identifier")
+            {
+                var phase = GetElementPhase(doc, element);
+                if (field.CobieName == "System.Name") return phase ?? "";
+                if (string.IsNullOrEmpty(phase)) return "";
+                if (phase.Contains("建築")) return "AR";
+                if (phase.Contains("給水")) return "WW";
+                if (phase.Contains("排水")) return "PP";
+                if (phase.Contains("電氣")) return "EE";
+                if (phase.Contains("弱電")) return "LC";
+                if (phase.Contains("消防")) return "FP";
+                if (phase.Contains("空調")) return "MC";
+                return "OT";
+            }
+
+            if (field.CobieName == "Component.Name")
+            {
+                var familyAndType = GetFamilyAndType(doc, element);
+                return !string.IsNullOrEmpty(familyAndType.family) && !string.IsNullOrEmpty(familyAndType.type)
+                    ? $"{familyAndType.family}-{familyAndType.type}"
+                    : "";
+            }
+
+            if (field.IsBuiltIn && field.BuiltInParam.HasValue)
+            {
+                if (field.IsInstance)
+                    return TryGetStringParam(element, field.BuiltInParam.Value) ?? field.DefaultValue ?? "";
+                var elementType = doc.GetElement(element.GetTypeId()) as ElementType;
+                var parameter = elementType?.get_Parameter(field.BuiltInParam.Value);
+                return parameter?.AsString() ?? parameter?.AsValueString() ?? field.DefaultValue ?? "";
+            }
+
+            if (!string.IsNullOrWhiteSpace(field.SharedParameterName))
+            {
+                if (field.IsInstance)
+                    return TryGetStringParam(element, field.SharedParameterName) ?? field.DefaultValue ?? "";
+                var elementType = doc.GetElement(element.GetTypeId()) as ElementType;
+                var parameter = elementType?.Parameters
+                    .Cast<Parameter>()
+                    .FirstOrDefault(item => item.Definition?.Name == field.SharedParameterName);
+                return parameter?.AsString() ?? parameter?.AsValueString() ?? field.DefaultValue ?? "";
+            }
+
+            return field.DefaultValue ?? "";
         }
 
         private static (string family, string type) GetFamilyAndType(Document doc, Element e)
