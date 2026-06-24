@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Collections.Generic;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -109,7 +110,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 
                 doc.ActiveView.SetElementOverrides(elementId, overrides);
                 
-                System.Diagnostics.Debug.WriteLine($"✅ 設定 {category} 元素 {elementId.Value} 外觀: R={color.Red}, G={color.Green}, B={color.Blue}");
+                System.Diagnostics.Debug.WriteLine($"✅ 設定 {category} 元素 {elementId.GetIdValue()} 外觀: R={color.Red}, G={color.Green}, B={color.Blue}");
             }
             catch (Exception ex)
             {
@@ -417,18 +418,70 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
+                System.Diagnostics.Debug.WriteLine($"🎨 開始取得材質顏色: {material.Name}");
+
+                // 🎯 優先使用材料的「著色」顏色（material.Color）
+                if (material.Color != null && material.Color.IsValid)
+                {
+                    var color = material.Color;
+                    System.Diagnostics.Debug.WriteLine($"✅ 使用材料著色顏色: RGB({color.Red}, {color.Green}, {color.Blue})");
+
+                    // 🔍 檢測是否為灰色（可能需要從材質名稱推斷顏色）
+                    if (color.Red == 120 && color.Green == 120 && color.Blue == 120)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"⚠️ 材料「{material.Name}」的著色顏色是灰色，嘗試從名稱推斷顏色");
+
+                        // 根據材料名稱推斷顏色
+                        if (material.Name.Contains("藍") || material.Name.Contains("蓝"))
+                        {
+                            color = new Color(0, 112, 192); // 藍色
+                            System.Diagnostics.Debug.WriteLine($"✅ 偵測到「藍」字，使用藍色 RGB(0, 112, 192)");
+                        }
+                        else if (material.Name.Contains("紅") || material.Name.Contains("红"))
+                        {
+                            color = new Color(255, 0, 0); // 紅色
+                            System.Diagnostics.Debug.WriteLine($"✅ 偵測到「紅」字，使用紅色 RGB(255, 0, 0)");
+                        }
+                        else if (material.Name.Contains("綠") || material.Name.Contains("绿"))
+                        {
+                            color = new Color(0, 176, 80); // 綠色
+                            System.Diagnostics.Debug.WriteLine($"✅ 偵測到「綠」字，使用綠色 RGB(0, 176, 80)");
+                        }
+                        else if (material.Name.Contains("黃") || material.Name.Contains("黄"))
+                        {
+                            color = new Color(255, 192, 0); // 黃色
+                            System.Diagnostics.Debug.WriteLine($"✅ 偵測到「黃」字，使用黃色 RGB(255, 192, 0)");
+                        }
+                        else if (material.Name.Contains("白"))
+                        {
+                            color = new Color(255, 255, 255); // 白色
+                            System.Diagnostics.Debug.WriteLine($"✅ 偵測到「白」字，使用白色 RGB(255, 255, 255)");
+                        }
+                        else if (material.Name.Contains("黑"))
+                        {
+                            color = new Color(0, 0, 0); // 黑色
+                            System.Diagnostics.Debug.WriteLine($"✅ 偵測到「黑」字，使用黑色 RGB(0, 0, 0)");
+                        }
+                    }
+
+                    return color;
+                }
+
                 // 嘗試取得表面顏色
                 if (material.SurfaceForegroundPatternColor.IsValid)
                 {
+                    System.Diagnostics.Debug.WriteLine($"✅ 使用表面前景顏色: RGB({material.SurfaceForegroundPatternColor.Red}, {material.SurfaceForegroundPatternColor.Green}, {material.SurfaceForegroundPatternColor.Blue})");
                     return material.SurfaceForegroundPatternColor;
                 }
-                
+
                 if (material.SurfaceBackgroundPatternColor.IsValid)
                 {
+                    System.Diagnostics.Debug.WriteLine($"✅ 使用表面背景顏色: RGB({material.SurfaceBackgroundPatternColor.Red}, {material.SurfaceBackgroundPatternColor.Green}, {material.SurfaceBackgroundPatternColor.Blue})");
                     return material.SurfaceBackgroundPatternColor;
                 }
-                
+
                 // 如果沒有設定顏色，返回預設顏色
+                System.Diagnostics.Debug.WriteLine($"⚠️ 材料 {material.Name} 沒有設定顏色，使用預設淺灰色");
                 return new Color(200, 200, 200); // 淺灰色
             }
             catch (Exception ex)

@@ -5,6 +5,7 @@ using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using YD_RevitTools.LicenseManager;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -30,7 +31,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 using (var tx = new Transaction(doc, "結構模板分析"))
                 {
                     tx.Start();
-                    
+
                     // 使用傳統模式進行分析
                     FormworkEngine.Debug.Enable(true);
                     FormworkEngine.BeginRun();
@@ -72,7 +73,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 try
                 {
                     var formworkIds = new List<ElementId>();
-                    
+
                     // 第一優先：改進的模板引擎（基於 Dynamo 邏輯）
                     formworkIds = GenerateFormworkWithImprovedEngine(doc, element);
                     generatedFormworkIds.AddRange(formworkIds);
@@ -92,7 +93,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         {
                             System.Diagnostics.Debug.WriteLine("Wall/Floor 引擎也失敗，使用原始方法");
                             var fallbackIds = FormworkEngine.BuildFormworkSolids(
-                                doc, element, analysis.FormworkInfo, null, null, 
+                                doc, element, analysis.FormworkInfo, null, null,
                                 true, 20, 30, true);
                             generatedFormworkIds.AddRange(fallbackIds);
                             formworkIds = fallbackIds.ToList();
@@ -102,10 +103,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     // ✅ 修正順序：先設定宿主ID，再計算面積，最後設定顏色
                     // 1. 先設定宿主ID參數（面積計算需要）
                     SetHostIdParametersForFormwork(doc, formworkIds, element);
-                    
+
                     // 2. 計算並設定面積參數
                     SetFormworkAreaParameters(doc, formworkIds, element);
-                    
+
                     // 3. 最後設定模板顏色和材質
                     SetFormworkAppearance(doc, formworkIds, analysis);
                 }
@@ -311,7 +312,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             var category = element.Category;
             if (category != null)
             {
-                switch (category.Id.Value)
+                switch (category.Id.GetIdValue())
                 {
                     case (long)BuiltInCategory.OST_Columns:
                     case (long)BuiltInCategory.OST_StructuralColumns:
@@ -330,19 +331,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     case (long)BuiltInCategory.OST_Walls:
                         return "牆";
                         
-                    case (long)BuiltInCategory.OST_Stairs:
-                        return "樓梯";
+                    default:
+                        if (ElementCategorizer.IsStairCategory(category.Id.GetIdValue()))
+                            return "樓梯";
+                        break;
                 }
             }
 
             // 根據元素名稱進行判斷（備用方案）
             var name = element.Name.ToLower();
+            if (name.Contains("樓梯") || name.Contains("stair")) return "樓梯";
             if (name.Contains("柱") || name.Contains("column")) return "柱";
             if (name.Contains("梁") || name.Contains("beam")) return "梁";
             if (name.Contains("板") || name.Contains("slab") || name.Contains("floor")) return "板";
             if (name.Contains("牆") || name.Contains("wall")) return "牆";
             if (name.Contains("基礎") || name.Contains("foundation")) return "基礎";
-            if (name.Contains("樓梯") || name.Contains("stair")) return "樓梯";
 
             return "預設";
         }
@@ -578,7 +581,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 if (solidPattern != null)
                 {
-                    System.Diagnostics.Debug.WriteLine($"✅ 找到實體填充圖案: {solidPattern.Name} (ID: {solidPattern.Id.Value})");
+                    System.Diagnostics.Debug.WriteLine($"✅ 找到實體填充圖案: {solidPattern.Name} (ID: {solidPattern.Id.GetIdValue()})");
                     return solidPattern.Id;
                 }
 
@@ -587,7 +590,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var firstPattern = fillPatterns.FirstOrDefault();
                 if (firstPattern != null)
                 {
-                    System.Diagnostics.Debug.WriteLine($"✅ 使用填充圖案: {firstPattern.Name} (ID: {firstPattern.Id.Value})");
+                    System.Diagnostics.Debug.WriteLine($"✅ 使用填充圖案: {firstPattern.Name} (ID: {firstPattern.Id.GetIdValue()})");
                     return firstPattern.Id;
                 }
 
@@ -607,7 +610,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// </summary>
         private void SetHostIdParametersForFormwork(Document doc, IList<ElementId> formworkIds, Element hostElement)
         {
-            System.Diagnostics.Debug.WriteLine($"🔧 開始為 {formworkIds.Count} 個模板設定宿主ID: {hostElement.Id.Value}");
+            System.Diagnostics.Debug.WriteLine($"🔧 開始為 {formworkIds.Count} 個模板設定宿主ID: {hostElement.Id.GetIdValue()}");
             
             int successCount = 0;
             foreach (var id in formworkIds)
@@ -623,10 +626,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"❌ 設定元素 {id.Value} 宿主ID失敗: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"❌ 設定元素 {id.GetIdValue()} 宿主ID失敗: {ex.Message}");
                 }
             }
-            
+
             System.Diagnostics.Debug.WriteLine($"✅ 成功設定 {successCount}/{formworkIds.Count} 個元素的宿主ID");
         }
 
@@ -635,7 +638,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// </summary>
         private void SetFormworkAreaParameters(Document doc, IList<ElementId> formworkIds, Element hostElement)
         {
-            System.Diagnostics.Debug.WriteLine($"📐 開始為 {formworkIds.Count} 個模板計算面積（宿主: {hostElement.Category?.Name ?? "未知"} ID:{hostElement.Id.Value}）");
+            System.Diagnostics.Debug.WriteLine($"📐 開始為 {formworkIds.Count} 個模板計算面積（宿主: {hostElement.Category?.Name ?? "未知"} ID:{hostElement.Id.GetIdValue()}）");
             
             int successCount = 0;
             double totalCalculatedArea = 0;
@@ -647,30 +650,30 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     var element = doc.GetElement(id);
                     if (element is DirectShape ds)
                     {
-                        System.Diagnostics.Debug.WriteLine($"📊 處理元素 {id.Value}");
-                        
+                        System.Diagnostics.Debug.WriteLine($"📊 處理元素 {id.GetIdValue()}");
+
                         // ✅ 直接傳入宿主元素進行面積計算（含接觸面扣除）
                         double areaM2 = CalculateDirectShapeArea(ds, hostElement);
-                        
+
                         if (areaM2 > 0)
                         {
                             // 設定面積相關的共用參數
                             SetAreaToSharedParameters(ds, areaM2);
-                            
+
                             successCount++;
                             totalCalculatedArea += areaM2;
-                            
-                            System.Diagnostics.Debug.WriteLine($"✅ 元素 {id.Value} 面積參數設定完成: {areaM2:F2} m²");
+
+                            System.Diagnostics.Debug.WriteLine($"✅ 元素 {id.GetIdValue()} 面積參數設定完成: {areaM2:F2} m²");
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"⚠️ 元素 {id.Value} 面積計算為0，跳過參數設定");
+                            System.Diagnostics.Debug.WriteLine($"⚠️ 元素 {id.GetIdValue()} 面積計算為0，跳過參數設定");
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"❌ 設定元素 {id.Value} 面積參數失敗: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"❌ 設定元素 {id.GetIdValue()} 面積參數失敗: {ex.Message}");
                 }
             }
             
@@ -684,7 +687,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
-                System.Diagnostics.Debug.WriteLine($"🔍 開始計算 DirectShape {directShape.Id.Value} 的面積（宿主ID: {hostElement.Id.Value}）");
+                System.Diagnostics.Debug.WriteLine($"🔍 開始計算 DirectShape {directShape.Id.GetIdValue()} 的面積（宿主ID: {hostElement.Id.GetIdValue()}）");
                 
                 var geometry = directShape.get_Geometry(new Options());
                 double totalSurfaceArea = 0;
@@ -709,7 +712,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 System.Diagnostics.Debug.WriteLine($"  ├─ 轉換為平方米 = {baseSurfaceAreaM2:F6} m²");
                 
                 // ✅ 直接使用傳入的 hostElement 計算精確面積（含接觸面扣除）
-                System.Diagnostics.Debug.WriteLine($"  ├─ 宿主元素: {hostElement.Category?.Name ?? "未知"} (ID: {hostElement.Id.Value})");
+                System.Diagnostics.Debug.WriteLine($"  ├─ 宿主元素: {hostElement.Category?.Name ?? "未知"} (ID: {hostElement.Id.GetIdValue()})");
                 double accurateArea = CalculateAccurateFormworkAreaWithDeduction(hostElement, baseSurfaceAreaM2);
                 
                 System.Diagnostics.Debug.WriteLine($"  └─ ✅ 最終面積（含扣除）= {accurateArea:F6} m²");
@@ -729,7 +732,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
-                System.Diagnostics.Debug.WriteLine($"🔧 開始計算接觸面扣除（主件ID: {hostElement.Id.Value}）");
+                System.Diagnostics.Debug.WriteLine($"🔧 開始計算接觸面扣除（主件ID: {hostElement.Id.GetIdValue()}）");
                 
                 // 🚀 重構: 使用 AreaCalculator 和整合的工具類別
                 
@@ -764,7 +767,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 foreach (var nearby in nearbyElements)
                 {
                     var categoryName = ElementCategorizer.GetCategoryName(nearby);
-                    System.Diagnostics.Debug.WriteLine($"  │  ├─ {categoryName} (ID: {nearby.Id.Value})");
+                    System.Diagnostics.Debug.WriteLine($"  │  ├─ {categoryName} (ID: {nearby.Id.GetIdValue()})");
                 }
                 
                 // 3. 使用 AreaCalculator 計算接觸面扣除
@@ -825,13 +828,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             try
             {
                 var doc = hostElement.Document;
-                var structuralCategories = new List<BuiltInCategory>
-                {
-                    BuiltInCategory.OST_StructuralColumns,
-                    BuiltInCategory.OST_StructuralFraming,
-                    BuiltInCategory.OST_Floors,
-                    BuiltInCategory.OST_Walls
-                };
+                var structuralCategories = ElementCategorizer.GetStructuralCategories();
 
                 // 取得宿主元素的邊界框
                 var hostBBox = hostElement.get_BoundingBox(null);
@@ -877,7 +874,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             double distance = hostCenter.DistanceTo(elementCenter);
                             
                             var categoryName = ElementCategorizer.GetCategoryName(element);
-                            System.Diagnostics.Debug.WriteLine($"  │  ├─ 找到: {categoryName} (ID: {element.Id.Value}, 距離: {distance:F2} ft = {distance * 0.3048:F2} m)");
+                            System.Diagnostics.Debug.WriteLine($"  │  ├─ 找到: {categoryName} (ID: {element.Id.GetIdValue()}, 距離: {distance:F2} ft = {distance * 0.3048:F2} m)");
                         }
                     }
                 }
@@ -1254,8 +1251,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     if (hostIdParam.StorageType == StorageType.Integer)
                     {
 #if REVIT2024 || REVIT2025 || REVIT2026
-                        hostIdParam.Set((int)hostElement.Id.Value);
-                        System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(整數): {hostElement.Id.Value}");
+                        hostIdParam.Set((int)hostElement.Id.GetIdValue());
+                        System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(整數): {hostElement.Id.GetIdValue()}");
 #else
                         hostIdParam.Set(hostElement.Id.IntegerValue);
                         System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(整數): {hostElement.Id.IntegerValue}");
@@ -1264,8 +1261,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     else if (hostIdParam.StorageType == StorageType.String)
                     {
 #if REVIT2024 || REVIT2025 || REVIT2026
-                        hostIdParam.Set(hostElement.Id.Value.ToString());
-                        System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(字串): {hostElement.Id.Value}");
+                        hostIdParam.Set(hostElement.Id.GetIdValue().ToString());
+                        System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(字串): {hostElement.Id.GetIdValue()}");
 #else
                         hostIdParam.Set(hostElement.Id.IntegerValue.ToString());
                         System.Diagnostics.Debug.WriteLine($"✅ 設定宿主ID參數(字串): {hostElement.Id.IntegerValue}");

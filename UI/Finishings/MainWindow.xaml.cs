@@ -5,13 +5,14 @@ using System.Windows;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
+using YD_RevitTools.LicenseManager.Helpers;
 using YD_RevitTools.LicenseManager.Helpers.AR.Finishings;
 
 namespace YD_RevitTools.LicenseManager.UI.Finishings
 {
     public class RoomSelectionFilter : ISelectionFilter
     {
-        public bool AllowElement(Element elem) => elem.Category != null && elem.Category.Id.Value == (int)BuiltInCategory.OST_Rooms;
+        public bool AllowElement(Element elem) => elem.Category != null && elem.Category.Id.GetIdValue() == (int)BuiltInCategory.OST_Rooms;
         public bool AllowReference(Reference reference, XYZ position) => true;
     }
 

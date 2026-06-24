@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -15,7 +16,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// </summary>
         public static double CalculateFormworkArea(Element element, List<ElementConnection> connections)
         {
-            var category = element.Category?.Id?.Value;
+            var category = element.Category?.Id?.GetIdValue();
+
+            if (category.HasValue && ElementCategorizer.IsStairCategory(category.Value))
+                return CalculateGenericFormworkArea(element, connections);
             
             switch (category)
             {
@@ -73,7 +77,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 double finalArea = Math.Max(0, totalArea - deductionArea);
                 
                 FormworkEngine.Debug.Log("梁模板計算 ID:{0} - 長:{1:F2}m 寬:{2:F2}m 高:{3:F2}m 面積:{4:F2}m² 扣除:{5:F2}m²", 
-                    beam.Id.Value, length, width, height, totalArea, deductionArea);
+                    beam.Id.GetIdValue(), length, width, height, totalArea, deductionArea);
 
                 return finalArea;
             }
@@ -126,7 +130,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 double finalArea = Math.Max(0, baseArea - deductionArea - openingArea);
                 
                 FormworkEngine.Debug.Log("板模板計算 ID:{0} - 基本面積:{1:F2}m² 扣除連接:{2:F2}m² 扣除開口:{3:F2}m²", 
-                    slab.Id.Value, baseArea, deductionArea, openingArea);
+                    slab.Id.GetIdValue(), baseArea, deductionArea, openingArea);
 
                 return finalArea;
             }
@@ -169,7 +173,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 double finalArea = Math.Max(0, baseArea - deductionArea);
                 
                 FormworkEngine.Debug.Log("柱模板計算 ID:{0} - 高:{1:F2}m 周長:{2:F2}m 面積:{3:F2}m² 扣除:{4:F2}m²", 
-                    column.Id.Value, height, perimeter, baseArea, deductionArea);
+                    column.Id.GetIdValue(), height, perimeter, baseArea, deductionArea);
 
                 return finalArea;
             }
@@ -215,7 +219,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 double finalArea = Math.Max(0, baseArea - openingArea - deductionArea);
                 
                 FormworkEngine.Debug.Log("牆模板計算 ID:{0} - 長:{1:F2}m 高:{2:F2}m 面積:{3:F2}m² 扣除開口:{4:F2}m² 扣除連接:{5:F2}m²", 
-                    wall.Id.Value, length, height, baseArea, openingArea, deductionArea);
+                    wall.Id.GetIdValue(), length, height, baseArea, openingArea, deductionArea);
 
                 return finalArea;
             }
@@ -275,27 +279,61 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
-                var boundingBox = GetElementBoundingBox(solids);
-                if (boundingBox == null) return null;
+                // ── 優先 1：從 LocationCurve 取梁長，從斷面參數取寬高（支援斜梁）
+                double length = 0;
+                double width = 0;
+                double height = 0;
 
-                double length = UnitUtils.ConvertFromInternalUnits(
-                    Math.Max(boundingBox.Max.X - boundingBox.Min.X,
-                            Math.Max(boundingBox.Max.Y - boundingBox.Min.Y,
-                                    boundingBox.Max.Z - boundingBox.Min.Z)), 
-                    UnitTypeId.Meters);
+                var locCurve = beam.Location as LocationCurve;
+                if (locCurve?.Curve != null)
+                {
+                    length = UnitUtils.ConvertFromInternalUnits(locCurve.Curve.Length, UnitTypeId.Meters);
+                }
 
-                double width = UnitUtils.ConvertFromInternalUnits(
-                    Math.Min(boundingBox.Max.X - boundingBox.Min.X,
-                            Math.Max(boundingBox.Max.Y - boundingBox.Min.Y,
-                                    boundingBox.Max.Z - boundingBox.Min.Z)), 
-                    UnitTypeId.Meters);
+                // 從型別參數取斷面尺寸（Revit 標準參數）
+                var bType = beam.Document.GetElement(beam.GetTypeId());
+                if (bType != null)
+                {
+                    var wb = bType.LookupParameter("b") ?? bType.LookupParameter("Width") ?? bType.LookupParameter("梁寬");
+                    var hb = bType.LookupParameter("h") ?? bType.LookupParameter("Height") ?? bType.LookupParameter("梁深") ?? bType.LookupParameter("梁高");
+                    if (wb != null && wb.HasValue)
+                        width = UnitUtils.ConvertFromInternalUnits(wb.AsDouble(), UnitTypeId.Meters);
+                    if (hb != null && hb.HasValue)
+                        height = UnitUtils.ConvertFromInternalUnits(hb.AsDouble(), UnitTypeId.Meters);
+                }
 
-                double height = UnitUtils.ConvertFromInternalUnits(
-                    Math.Min(boundingBox.Max.X - boundingBox.Min.X,
-                            Math.Min(boundingBox.Max.Y - boundingBox.Min.Y,
-                                    boundingBox.Max.Z - boundingBox.Min.Z)), 
-                    UnitTypeId.Meters);
+                // 若參數取不到，退回實體 BoundingBox（沿梁方向投影）
+                if (width < 1e-4 || height < 1e-4)
+                {
+                    var bb = GetElementBoundingBox(solids);
+                    if (bb == null) return null;
 
+                    double dx = bb.Max.X - bb.Min.X;
+                    double dy = bb.Max.Y - bb.Min.Y;
+                    double dz = bb.Max.Z - bb.Min.Z;
+
+                    // 梁長方向為三邊最長者；寬/高取其餘兩邊
+                    if (dx >= dy && dx >= dz)
+                    {
+                        if (length < 1e-4) length = UnitUtils.ConvertFromInternalUnits(dx, UnitTypeId.Meters);
+                        width   = UnitUtils.ConvertFromInternalUnits(Math.Max(dy, dz), UnitTypeId.Meters);
+                        height  = UnitUtils.ConvertFromInternalUnits(Math.Min(dy, dz), UnitTypeId.Meters);
+                    }
+                    else if (dy >= dx && dy >= dz)
+                    {
+                        if (length < 1e-4) length = UnitUtils.ConvertFromInternalUnits(dy, UnitTypeId.Meters);
+                        width   = UnitUtils.ConvertFromInternalUnits(Math.Max(dx, dz), UnitTypeId.Meters);
+                        height  = UnitUtils.ConvertFromInternalUnits(Math.Min(dx, dz), UnitTypeId.Meters);
+                    }
+                    else
+                    {
+                        if (length < 1e-4) length = UnitUtils.ConvertFromInternalUnits(dz, UnitTypeId.Meters);
+                        width   = UnitUtils.ConvertFromInternalUnits(Math.Max(dx, dy), UnitTypeId.Meters);
+                        height  = UnitUtils.ConvertFromInternalUnits(Math.Min(dx, dy), UnitTypeId.Meters);
+                    }
+                }
+
+                if (length < 1e-4) return null;
                 return new BeamGeometry { Length = length, Width = width, Height = height };
             }
             catch
@@ -397,58 +435,52 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
         private static double CalculateBeamConnectionDeduction(ElementConnection connection, BeamGeometry beamParams)
         {
+            // 使用實際幾何接觸面積（ContactArea 由 FindConnectedElements 計算），不用假設值
             switch (connection.ConnectionType)
             {
                 case ConnectionType.ColumnBeam:
-                    // 梁與柱連接：扣除柱寬度範圍內的模板面積
-                    return beamParams.Height * 0.3; // 假設柱寬約30cm
-                    
+                    // 梁端嵌入柱：扣除梁側模 + 底模在柱寬度內的面積
+                    // ContactArea = 兩側模面積 + 底模面積（在柱斷面範圍內）
+                    return UnitUtils.ConvertFromInternalUnits(connection.ContactArea, UnitTypeId.SquareMeters);
+
                 case ConnectionType.BeamSlab:
-                    // 梁與板連接：通常梁頂部被板覆蓋
-                    return beamParams.Length * beamParams.Width * 0.8; // 80%的頂部面積
-                    
+                    // 梁頂被板覆蓋：扣除頂面面積（= 梁寬 × 在板範圍內的梁長）
+                    // ContactArea 即為接觸投影面積，直接使用
+                    return UnitUtils.ConvertFromInternalUnits(connection.ContactArea, UnitTypeId.SquareMeters);
+
                 default:
-                    return connection.ContactArea * 0.5;
+                    return UnitUtils.ConvertFromInternalUnits(connection.ContactArea, UnitTypeId.SquareMeters);
             }
         }
 
         private static double CalculateSlabConnectionDeduction(ElementConnection connection)
         {
-            switch (connection.ConnectionType)
-            {
-                case ConnectionType.BeamSlab:
-                    // 板與梁連接：梁佔用的面積
-                    return connection.ContactArea;
-                    
-                case ConnectionType.ColumnSlab:
-                    // 板與柱連接：柱佔用的面積
-                    return connection.ContactArea;
-                    
-                default:
-                    return connection.ContactArea * 0.8;
-            }
+            // 板底模扣除：凡被梁/柱佔用的投影面積均扣除（施工實務：梁體所佔位置不鋪板底模）
+            return UnitUtils.ConvertFromInternalUnits(connection.ContactArea, UnitTypeId.SquareMeters);
         }
 
         private static double CalculateColumnConnectionDeduction(ElementConnection connection, ColumnGeometry columnParams)
         {
+            // 使用實際接觸面積，而非固定假設值
             switch (connection.ConnectionType)
             {
                 case ConnectionType.ColumnBeam:
-                    // 柱與梁連接：扣除梁高度範圍內的周長面積
-                    return columnParams.Perimeter * 0.6; // 假設梁高約60cm
-                    
+                    // 柱側面被梁端遮蔽的面積：ContactArea = 梁斷面在柱側面的投影
+                    return UnitUtils.ConvertFromInternalUnits(connection.ContactArea, UnitTypeId.SquareMeters);
+
                 case ConnectionType.ColumnSlab:
-                    // 柱與板連接：扣除板厚度範圍內的周長面積
-                    return columnParams.Perimeter * 0.15; // 假設板厚約15cm
-                    
+                    // 柱側面被樓板包覆的面積：ContactArea = 柱周長 × 板厚
+                    return UnitUtils.ConvertFromInternalUnits(connection.ContactArea, UnitTypeId.SquareMeters);
+
                 default:
-                    return connection.ContactArea;
+                    return UnitUtils.ConvertFromInternalUnits(connection.ContactArea, UnitTypeId.SquareMeters);
             }
         }
 
         private static double CalculateWallConnectionDeduction(ElementConnection connection)
         {
-            return connection.ContactArea * 0.9; // 90%的連接面積需要扣除
+            // 牆側模扣除：實際接觸面積（柱/梁/板與牆的接觸部分不需要牆面模板）
+            return UnitUtils.ConvertFromInternalUnits(connection.ContactArea, UnitTypeId.SquareMeters);
         }
 
         #endregion
@@ -457,39 +489,74 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
         private static double CalculateSlabOpenings(Element slab)
         {
-            // TODO: 實現板開口計算（如樓梯口、電梯井等）
-            // 這需要分析板的幾何形狀或從參數中獲取開口信息
-            return 0;
-        }
-
-        private static double CalculateWallOpenings(Element wall)
-        {
+            // 計算板開口面積（樓梯口、電梯井、設備孔等），單位：m²
             double openingArea = 0;
-            
             try
             {
-                // 對於牆類型，需要強制轉換為 Wall 才能使用 FindInserts
-                if (wall is Wall wallElement)
+                var doc = slab.Document;
+
+                // 方法 1：使用 Floor.FindInserts 取得嵌入的 Opening/FamilyInstance
+                if (slab is Floor floor)
                 {
-                    var wallOpenings = wallElement.FindInserts(true, true, true, true);
-                    
-                    foreach (ElementId openingId in wallOpenings)
+                    var inserts = floor.FindInserts(true, true, true, true);
+                    foreach (var insertId in inserts)
                     {
-                        var opening = wall.Document.GetElement(openingId);
-                        if (opening != null)
+                        var insert = doc.GetElement(insertId);
+                        if (insert == null) continue;
+
+                        // 取開口元素的垂直投影面積（即板底模需扣除的面積）
+                        // 優先從幾何取水平截面面積
+                        var insertSolids = FormworkEngine.GetElementSolids(insert);
+                        foreach (var solid in insertSolids)
                         {
-                            // 計算開口面積
-                            var openingSolids = FormworkEngine.GetElementSolids(opening).ToList();
-                            foreach (var solid in openingSolids)
+                            if (solid?.Volume <= 1e-6) continue;
+                            foreach (Face f in solid.Faces)
                             {
-                                if (solid?.Volume > 1e-6)
+                                var n = f.ComputeNormal(new UV(0.5, 0.5));
+                                // 取向下的水平面（板底投影面）
+                                if (n.Z < -0.8)
                                 {
-                                    // 估算開口面積（使用包圍盒的最大面）
-                                    var bb = solid.GetBoundingBox();
-                                    double width = UnitUtils.ConvertFromInternalUnits(bb.Max.X - bb.Min.X, UnitTypeId.Meters);
-                                    double height = UnitUtils.ConvertFromInternalUnits(bb.Max.Z - bb.Min.Z, UnitTypeId.Meters);
-                                    openingArea += width * height;
+                                    openingArea += UnitUtils.ConvertFromInternalUnits(f.Area, UnitTypeId.SquareMeters);
+                                    break; // 每個 solid 只取一個底面
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // 方法 2：尋找與板幾何重疊的 Opening 元素（Shaft Opening 也可能切穿樓板）
+                // Opening 類別無 BoundarySegments，改用幾何實體取水平截面面積
+                var slabBB = slab.get_BoundingBox(null);
+                if (slabBB != null)
+                {
+                    var bbFilter = new BoundingBoxIntersectsFilter(
+                        new Outline(slabBB.Min, slabBB.Max));
+                    var openings = new FilteredElementCollector(doc)
+                        .OfClass(typeof(Opening))
+                        .WherePasses(bbFilter)
+                        .Cast<Opening>()
+                        .ToList();
+
+                    foreach (var opening in openings)
+                    {
+                        // 從 Opening 幾何取水平截面面積（向下面 = 板底開口投影）
+                        var openingSolids = FormworkEngine.GetElementSolids(opening);
+                        foreach (var solid in openingSolids)
+                        {
+                            if (solid?.Volume <= 1e-6) continue;
+                            foreach (Face f in solid.Faces)
+                            {
+                                try
+                                {
+                                    XYZ fn = f.ComputeNormal(new UV(0.5, 0.5));
+                                    if (fn.Z < -0.8)
+                                    {
+                                        openingArea += UnitUtils.ConvertFromInternalUnits(
+                                            f.Area, UnitTypeId.SquareMeters);
+                                        break;
+                                    }
+                                }
+                                catch { }
                             }
                         }
                     }
@@ -497,10 +564,87 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             }
             catch (Exception ex)
             {
+                FormworkEngine.Debug.Log("計算板開口錯誤: {0}", ex.Message);
+            }
+            return openingArea;
+        }
+
+        private static double CalculateWallOpenings(Element wall)
+        {
+            double openingArea = 0;
+            if (!(wall is Wall wallElement)) return 0;
+
+            try
+            {
+                var doc = wall.Document;
+                var wallInserts = wallElement.FindInserts(true, true, true, true);
+
+                foreach (var insertId in wallInserts)
+                {
+                    var insert = doc.GetElement(insertId);
+                    if (insert == null) continue;
+
+                    // 優先從開口元素的 Width/Height 參數取正確面積
+                    // （適用於門、窗、洞口 FamilyInstance）
+                    double w = 0, h = 0;
+                    var pW = insert.LookupParameter("Width") ?? insert.LookupParameter("寬度");
+                    var pH = insert.LookupParameter("Height") ?? insert.LookupParameter("高度");
+
+                    if (pW != null && pW.HasValue && pH != null && pH.HasValue)
+                    {
+                        w = UnitUtils.ConvertFromInternalUnits(pW.AsDouble(), UnitTypeId.Meters);
+                        h = UnitUtils.ConvertFromInternalUnits(pH.AsDouble(), UnitTypeId.Meters);
+                        if (w > 0 && h > 0)
+                        {
+                            openingArea += w * h * 2; // 兩面各扣除一次
+                            continue;
+                        }
+                    }
+
+                    // 退路：取開口幾何在牆面方向上的最大面面積
+                    // 牆法向量方向投影面為實際開口面
+                    XYZ wallNormal = GetWallNormal(wallElement);
+                    var insertSolids = FormworkEngine.GetElementSolids(insert);
+                    foreach (var solid in insertSolids)
+                    {
+                        if (solid?.Volume <= 1e-6) continue;
+                        double maxFaceArea = 0;
+                        foreach (Face f in solid.Faces)
+                        {
+                            try
+                            {
+                                XYZ fn = f.ComputeNormal(new UV(0.5, 0.5));
+                                // 取與牆面法向量平行的面（即洞口正面）
+                                if (Math.Abs(fn.DotProduct(wallNormal)) > 0.8)
+                                    maxFaceArea = Math.Max(maxFaceArea, f.Area);
+                            }
+                            catch { }
+                        }
+                        openingArea += UnitUtils.ConvertFromInternalUnits(maxFaceArea, UnitTypeId.SquareMeters) * 2;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
                 FormworkEngine.Debug.Log("計算牆開口錯誤: {0}", ex.Message);
             }
-            
+
             return openingArea;
+        }
+
+        private static XYZ GetWallNormal(Wall wall)
+        {
+            try
+            {
+                var locCurve = wall.Location as LocationCurve;
+                if (locCurve?.Curve is Line line)
+                {
+                    var dir = line.Direction.Normalize();
+                    return new XYZ(-dir.Y, dir.X, 0).Normalize(); // 垂直於牆長方向
+                }
+            }
+            catch { }
+            return XYZ.BasisX;
         }
 
         #endregion

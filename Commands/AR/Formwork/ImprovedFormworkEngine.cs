@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -29,7 +30,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 // Step 1: 取得目標元素的面（模仿 Dynamo 的 PolySurface.Surfaces）
                 var elementSurfaces = GetElementSurfaces(element);
-                System.Diagnostics.Debug.WriteLine($"目標元素有 {elementSurfaces.Count} 個平面");
+                System.Diagnostics.Debug.WriteLine($"目標元素有 {elementSurfaces.Count} 個面（含曲面）");
 
                 // Step 2: 按方向篩選面（模仿 Dynamo 的 Surface.FilterByOrientation）
                 var filteredSurfaces = FilterSurfacesByOrientation(elementSurfaces);
@@ -75,10 +76,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
         /// <summary>
         /// Step 1: 取得元素表面（PolySurface.Surfaces）
+        /// 包含所有 Face 類型（PlanarFace 和曲面）
         /// </summary>
-        private static List<PlanarFace> GetElementSurfaces(Element element)
+        private static List<Face> GetElementSurfaces(Element element)
         {
-            var surfaces = new List<PlanarFace>();
+            var surfaces = new List<Face>();
 
             // 🚀 重構: 使用 GeometryExtractor 統一工具
             var solids = GeometryExtractor.GetElementSolids(element);
@@ -86,10 +88,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             {
                 foreach (Face face in solid.Faces)
                 {
-                    if (face is PlanarFace planarFace)
-                    {
-                        surfaces.Add(planarFace);
-                    }
+                    surfaces.Add(face); // 包含 PlanarFace 和曲面（CylindricalFace 等）
                 }
             }
 
@@ -100,15 +99,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// Step 2: 按方向篩選面（Surface.FilterByOrientation）
         /// 遵循模板實務原則: 只生成垂直面和底面模板
         /// </summary>
-        private static List<PlanarFace> FilterSurfacesByOrientation(List<PlanarFace> surfaces)
+        private static List<Face> FilterSurfacesByOrientation(List<Face> surfaces)
         {
-            var filteredSurfaces = new List<PlanarFace>();
+            var filteredSurfaces = new List<Face>();
 
             foreach (var surface in surfaces)
             {
                 try
                 {
-                    var normal = surface.FaceNormal;
+                    // 使用 FormworkEngine 的主要法向量計算（支援曲面）
+                    var normal = FormworkEngine.GetFaceDominantNormal(surface);
                     var area = surface.Area * 0.092903; // 轉換為平方米
 
                     // 面積過濾
@@ -124,7 +124,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     if (isVertical || isHorizontalBottom)
                     {
                         string faceType = isVertical ? "垂直面" : "底面";
-                        System.Diagnostics.Debug.WriteLine($"✅ 面通過篩選 - 類型:{faceType}, Normal:({normal.X:F2},{normal.Y:F2},{normal.Z:F2}), Area:{area:F3}m²");
+                        string faceKind = surface is PlanarFace ? "平面" : "曲面";
+                        System.Diagnostics.Debug.WriteLine($"✅ 面通過篩選 - 類型:{faceType}({faceKind}), Normal:({normal.X:F2},{normal.Y:F2},{normal.Z:F2}), Area:{area:F3}m²");
                         filteredSurfaces.Add(surface);
                     }
                     else
@@ -147,6 +148,22 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// Step 3: 為單個面生成模板（改用智能接觸扣除）
         /// </summary>
         private static ElementId CreateFormworkForSurface(Document doc, Element hostElement, 
+            Face surface, double thicknessMm)
+        {
+            // 曲面：交由 FormworkEngine.BuildFromAnyFace 處理（TessBuilder Mesh，無 Boolean）
+            if (!(surface is PlanarFace planarFace))
+            {
+                System.Diagnostics.Debug.WriteLine($"🌀 曲面面積={surface.Area * 0.092903:F3}m²，交由 BuildFromAnyFace 處理");
+                return FormworkEngine.BuildFromAnyFace(doc, hostElement, surface, thicknessMm, null);
+            }
+
+            return CreateFormworkForPlanarFace(doc, hostElement, planarFace, thicknessMm);
+        }
+
+        /// <summary>
+        /// 為平面面生成模板（原始邏輯）
+        /// </summary>
+        private static ElementId CreateFormworkForPlanarFace(Document doc, Element hostElement,
             PlanarFace surface, double thicknessMm)
         {
             try
@@ -187,7 +204,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 // 🔧 改進: 根據宿主元素類型調整扣除策略
                 // 柱子穿過樓板時,需要更積極的扣除策略 (降低閾值)
-                bool isColumn = hostElement.Category?.Id?.Value == (long)BuiltInCategory.OST_StructuralColumns;
+                bool isColumn = hostElement.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralColumns;
                 double intersectionThreshold = isColumn ? 0.01 : 0.05; // 柱子使用 1% 閾值,其他使用 5%
                 
                 System.Diagnostics.Debug.WriteLine($"🎯 宿主元素類型: {hostElement.Category?.Name}, 使用閾值: {intersectionThreshold:F2} ({intersectionThreshold * 100}%)");
@@ -370,7 +387,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             if (hostElement == null || hostElement.Category == null)
                 return "其他";
 
-            var categoryId = hostElement.Category.Id.Value;
+            var categoryId = hostElement.Category.Id.GetIdValue();
 
             if (categoryId == (long)BuiltInCategory.OST_StructuralColumns)
                 return "柱模板";
@@ -382,7 +399,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 return "牆模板";
             else if (categoryId == (long)BuiltInCategory.OST_StructuralFoundation)
                 return "基礎模板";
-            else if (categoryId == (long)BuiltInCategory.OST_Stairs)
+            else if (ElementCategorizer.IsStairCategory(categoryId))
                 return "樓梯模板";
             else
                 return "其他";

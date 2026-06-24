@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -35,9 +36,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 double totalArea = 0.0;
                 double deductionArea = 0.0;
                 
-                // 🚀 性能優化: 快速計算總表面積 (使用 LINQ 平行處理)
+                // 全面積（含 PlanarFace 和曲面）
                 totalArea = formworkSolid.Faces.Cast<Face>()
-                    .Where(face => face is PlanarFace)
                     .AsParallel()
                     .Sum(face => face.Area);
                 
@@ -80,10 +80,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 
                 foreach (Face face in formworkSolid.Faces)
                 {
-                    if (face is PlanarFace planarFace)
-                    {
-                        totalArea += planarFace.Area;
-                    }
+                    totalArea += face.Area;
                 }
                 
                 double areaM2 = ConvertToSquareMeters(totalArea);
@@ -166,7 +163,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     
                     if (elementSolids.Count == 0)
                     {
-                        System.Diagnostics.Debug.WriteLine($"  │  ├─ [{processedCount}] ID {element.Id.Value}: 無法取得實體");
+                        System.Diagnostics.Debug.WriteLine($"  │  ├─ [{processedCount}] ID {element.Id.GetIdValue()}: 無法取得實體");
                         continue;
                     }
                     
@@ -183,7 +180,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             
                             var categoryName = ElementCategorizer.GetCategoryName(element);
                             double contactAreaM2 = ConvertToSquareMeters(contactArea);
-                            System.Diagnostics.Debug.WriteLine($"  │  ├─ [{processedCount}] {categoryName} (ID: {element.Id.Value}): 接觸面積 = {contactArea:F6} sq ft = {contactAreaM2:F6} m²");
+                            System.Diagnostics.Debug.WriteLine($"  │  ├─ [{processedCount}] {categoryName} (ID: {element.Id.GetIdValue()}): 接觸面積 = {contactArea:F6} sq ft = {contactAreaM2:F6} m²");
                         }
                     }
                 }

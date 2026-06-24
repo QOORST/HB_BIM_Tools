@@ -1,5 +1,8 @@
 ﻿using System;
 using Autodesk.Revit.DB;
+using System.Collections.Generic;
+using System.Linq;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -8,6 +11,65 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
     /// </summary>
     public static class ElementCategorizer
     {
+        public static List<BuiltInCategory> GetStructuralCategories(bool includeFoundation = false)
+        {
+            var categories = new List<BuiltInCategory>
+            {
+                BuiltInCategory.OST_StructuralColumns,
+                BuiltInCategory.OST_StructuralFraming,
+                BuiltInCategory.OST_Floors,
+                BuiltInCategory.OST_Walls,
+                BuiltInCategory.OST_Stairs,
+                BuiltInCategory.OST_StairsRuns,
+                BuiltInCategory.OST_StairsLandings,
+                BuiltInCategory.OST_StairsSupports
+            };
+
+            if (includeFoundation)
+            {
+                categories.Add(BuiltInCategory.OST_StructuralFoundation);
+            }
+
+            return categories;
+        }
+
+        public static bool IsStairCategory(long categoryId)
+        {
+            return categoryId == (long)BuiltInCategory.OST_Stairs ||
+                   categoryId == (long)BuiltInCategory.OST_StairsRuns ||
+                   categoryId == (long)BuiltInCategory.OST_StairsLandings ||
+                   categoryId == (long)BuiltInCategory.OST_StairsSupports;
+        }
+
+        public static List<Element> GetStairPartElements(Document doc, Element stairElement)
+        {
+            var result = new List<Element>();
+            if (doc == null || stairElement == null || !IsStairs(stairElement))
+                return result;
+
+            try
+            {
+                foreach (var id in stairElement.GetDependentElements(null))
+                {
+                    var part = doc.GetElement(id);
+                    if (IsStairs(part))
+                    {
+                        result.Add(part);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"取得樓梯子構件失敗: {ex.Message}");
+            }
+
+            return result
+                .Where(e => e != null && e.Id != stairElement.Id)
+                .GroupBy(e => e.Id.GetIdValue())
+                .Select(g => g.First())
+                .ToList();
+        }
+
         /// <summary>
         /// 取得元素的中文類別名稱
         /// </summary>
@@ -17,7 +79,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             if (element?.Category?.Id == null) return "未知構件";
             
-            var categoryId = element.Category.Id.Value;
+            var categoryId = element.Category.Id.GetIdValue();
             
             switch (categoryId)
             {
@@ -29,13 +91,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     return "樓板";
                 case (long)BuiltInCategory.OST_Walls:
                     return "結構牆";
-                case (long)BuiltInCategory.OST_Stairs:
-                    return "樓梯";
                 case (long)BuiltInCategory.OST_StructuralFoundation:
                     return "基礎";
                 case (long)BuiltInCategory.OST_Ramps:
                     return "坡道";
                 default:
+                    if (IsStairCategory(categoryId)) return "樓梯";
                     return GetCategoryByFallback(element);
             }
         }
@@ -49,7 +110,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             if (element?.Category?.Id == null) return "Unknown";
             
-            var categoryId = element.Category.Id.Value;
+            var categoryId = element.Category.Id.GetIdValue();
             
             switch (categoryId)
             {
@@ -61,13 +122,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     return "Slab";
                 case (long)BuiltInCategory.OST_Walls:
                     return "Wall";
-                case (long)BuiltInCategory.OST_Stairs:
-                    return "Stairs";
                 case (long)BuiltInCategory.OST_StructuralFoundation:
                     return "Foundation";
                 case (long)BuiltInCategory.OST_Ramps:
                     return "Ramp";
                 default:
+                    if (IsStairCategory(categoryId)) return "Stairs";
                     return GetCategoryByFallbackEnglish(element);
             }
         }
@@ -79,7 +139,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <returns>是否為結構柱</returns>
         public static bool IsStructuralColumn(Element element)
         {
-            return element?.Category?.Id.Value == (long)BuiltInCategory.OST_StructuralColumns;
+            return element?.Category?.Id.GetIdValue() == (long)BuiltInCategory.OST_StructuralColumns;
         }
         
         /// <summary>
@@ -89,7 +149,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <returns>是否為結構梁</returns>
         public static bool IsStructuralBeam(Element element)
         {
-            return element?.Category?.Id.Value == (long)BuiltInCategory.OST_StructuralFraming;
+            return element?.Category?.Id.GetIdValue() == (long)BuiltInCategory.OST_StructuralFraming;
         }
         
         /// <summary>
@@ -99,7 +159,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <returns>是否為樓板</returns>
         public static bool IsFloor(Element element)
         {
-            return element?.Category?.Id.Value == (long)BuiltInCategory.OST_Floors;
+            return element?.Category?.Id.GetIdValue() == (long)BuiltInCategory.OST_Floors;
         }
         
         /// <summary>
@@ -109,7 +169,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <returns>是否為牆</returns>
         public static bool IsWall(Element element)
         {
-            return element?.Category?.Id.Value == (long)BuiltInCategory.OST_Walls;
+            return element?.Category?.Id.GetIdValue() == (long)BuiltInCategory.OST_Walls;
         }
         
         /// <summary>
@@ -119,7 +179,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <returns>是否為樓梯</returns>
         public static bool IsStairs(Element element)
         {
-            return element?.Category?.Id.Value == (long)BuiltInCategory.OST_Stairs;
+            if (element?.Category?.Id == null) return false;
+            return IsStairCategory(element.Category.Id.GetIdValue());
         }
         
         /// <summary>
@@ -129,7 +190,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <returns>是否為基礎</returns>
         public static bool IsFoundation(Element element)
         {
-            return element?.Category?.Id.Value == (long)BuiltInCategory.OST_StructuralFoundation;
+            return element?.Category?.Id.GetIdValue() == (long)BuiltInCategory.OST_StructuralFoundation;
         }
         
         /// <summary>
@@ -141,13 +202,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             if (element?.Category?.Id == null) return false;
             
-            var categoryId = element.Category.Id.Value;
+            var categoryId = element.Category.Id.GetIdValue();
             
             return categoryId == (long)BuiltInCategory.OST_StructuralColumns ||
                    categoryId == (long)BuiltInCategory.OST_StructuralFraming ||
                    categoryId == (long)BuiltInCategory.OST_Floors ||
                    categoryId == (long)BuiltInCategory.OST_Walls ||
-                   categoryId == (long)BuiltInCategory.OST_Stairs ||
+                   IsStairCategory(categoryId) ||
                    categoryId == (long)BuiltInCategory.OST_StructuralFoundation;
         }
         
@@ -160,7 +221,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             if (element?.Category?.Id == null) return null;
             
-            var categoryId = element.Category.Id.Value;
+            var categoryId = element.Category.Id.GetIdValue();
             
             switch (categoryId)
             {
@@ -172,11 +233,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     return BuiltInCategory.OST_Floors;
                 case (long)BuiltInCategory.OST_Walls:
                     return BuiltInCategory.OST_Walls;
-                case (long)BuiltInCategory.OST_Stairs:
-                    return BuiltInCategory.OST_Stairs;
                 case (long)BuiltInCategory.OST_StructuralFoundation:
                     return BuiltInCategory.OST_StructuralFoundation;
                 default:
+                    if (IsStairCategory(categoryId)) return BuiltInCategory.OST_Stairs;
                     return null;
             }
         }
@@ -192,20 +252,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             var elementName = element.Name ?? "";
             
             // 檢查類別名稱
+            if (name.Contains("樓梯") || name.Contains("Stair")) return "樓梯";
             if (name.Contains("柱") || name.Contains("Column")) return "結構柱";
             if (name.Contains("梁") || name.Contains("Beam") || name.Contains("Framing")) return "結構梁";
             if (name.Contains("板") || name.Contains("樓板") || name.Contains("Floor") || name.Contains("Slab")) return "樓板";
             if (name.Contains("牆") || name.Contains("Wall")) return "結構牆";
-            if (name.Contains("樓梯") || name.Contains("Stair")) return "樓梯";
             if (name.Contains("基礎") || name.Contains("Foundation")) return "基礎";
             if (name.Contains("坡道") || name.Contains("Ramp")) return "坡道";
             
             // 檢查元素名稱
+            if (elementName.Contains("樓梯") || elementName.Contains("Stair")) return "樓梯";
             if (elementName.Contains("柱") || elementName.Contains("Column")) return "結構柱";
             if (elementName.Contains("梁") || elementName.Contains("Beam")) return "結構梁";
             if (elementName.Contains("板") || elementName.Contains("樓板") || elementName.Contains("Floor")) return "樓板";
             if (elementName.Contains("牆") || elementName.Contains("Wall")) return "結構牆";
-            if (elementName.Contains("樓梯") || elementName.Contains("Stair")) return "樓梯";
             
             // 根據元素類型進一步判斷
             if (element is FamilyInstance)
@@ -235,11 +295,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             var name = element.Category?.Name ?? "";
             var elementName = element.Name ?? "";
             
+            if (name.Contains("Stair") || elementName.Contains("Stair")) return "Stairs";
             if (name.Contains("Column") || elementName.Contains("Column")) return "Column";
             if (name.Contains("Beam") || name.Contains("Framing") || elementName.Contains("Beam")) return "Beam";
             if (name.Contains("Floor") || name.Contains("Slab") || elementName.Contains("Floor")) return "Slab";
             if (name.Contains("Wall") || elementName.Contains("Wall")) return "Wall";
-            if (name.Contains("Stair") || elementName.Contains("Stair")) return "Stairs";
             if (name.Contains("Foundation") || elementName.Contains("Foundation")) return "Foundation";
             if (name.Contains("Ramp") || elementName.Contains("Ramp")) return "Ramp";
             

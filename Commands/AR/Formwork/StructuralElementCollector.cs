@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -18,19 +19,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <returns>結構元素清單</returns>
         public static List<Element> CollectAll(Document doc, bool includeFoundation = false)
         {
-            var categories = new List<BuiltInCategory>
-            {
-                BuiltInCategory.OST_StructuralColumns,
-                BuiltInCategory.OST_StructuralFraming,
-                BuiltInCategory.OST_Floors,
-                BuiltInCategory.OST_Walls,
-                BuiltInCategory.OST_Stairs
-            };
-            
-            if (includeFoundation)
-            {
-                categories.Add(BuiltInCategory.OST_StructuralFoundation);
-            }
+            var categories = ElementCategorizer.GetStructuralCategories(includeFoundation);
                 
             return CollectByCategories(doc, categories);
         }
@@ -64,7 +53,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     .WherePasses(categoryFilter)
                     .WhereElementIsNotElementType();
                 
-                return collector.ToList();
+                return collector
+                    .GroupBy(e => e.Id.GetIdValue())
+                    .Select(g => g.First())
+                    .ToList();
             }
             catch (Exception ex)
             {
@@ -87,7 +79,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         System.Diagnostics.Debug.WriteLine($"收集類別 {category} 失敗: {categoryEx.Message}");
                     }
                 }
-                return elements;
+                return elements
+                    .GroupBy(e => e.Id.GetIdValue())
+                    .Select(g => g.First())
+                    .ToList();
             }
         }
         
@@ -100,19 +95,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <returns>結構元素清單</returns>
         public static List<Element> CollectInView(Document doc, ElementId viewId, bool includeFoundation = false)
         {
-            var categories = new List<BuiltInCategory>
-            {
-                BuiltInCategory.OST_StructuralColumns,
-                BuiltInCategory.OST_StructuralFraming,
-                BuiltInCategory.OST_Floors,
-                BuiltInCategory.OST_Walls,
-                BuiltInCategory.OST_Stairs
-            };
-            
-            if (includeFoundation)
-            {
-                categories.Add(BuiltInCategory.OST_StructuralFoundation);
-            }
+            var categories = ElementCategorizer.GetStructuralCategories(includeFoundation);
             
             var elements = new List<Element>();
             
@@ -132,7 +115,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 }
             }
             
-            return elements;
+            return elements
+                .GroupBy(e => e.Id.GetIdValue())
+                .Select(g => g.First())
+                .ToList();
         }
         
         /// <summary>
