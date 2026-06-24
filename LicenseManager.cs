@@ -85,6 +85,15 @@ namespace YD_RevitTools.LicenseManager
                     return false;
             }
         }
+
+        internal static bool VerifyLicenseSignature(byte[] payload, byte[] signature)
+        {
+            using (var rsa = new RSACryptoServiceProvider(2048))
+            {
+                rsa.FromXmlString(LicenseManager.LICENSE_PUBLIC_KEY_XML);
+                return rsa.VerifyData(payload, CryptoConfig.MapNameToOID("SHA256"), signature);
+            }
+        }
     }
 
     public class LicenseManager
@@ -92,7 +101,7 @@ namespace YD_RevitTools.LicenseManager
         private static LicenseManager _instance;
         private static readonly object _lock = new object();
         private LicenseInfo _currentLicense;
-        private const string LICENSE_HMAC_SECRET = "YD-BIM-Tools#2025@License-HMAC-SignKey!v1";
+        internal const string LICENSE_PUBLIC_KEY_XML = "<RSAKeyValue><Modulus>vOabCDg4iCCKhHUjKis6vYfyL89Q0znE50X+/LOINwnakq672O8e2lvBtcXyWClJMmhNJ9v6hG8C9uZbPvsWKJss1Ng0hBs7OHxns/2qauAXxzxvmnoS5VpS8W6avea1nViUi7HAf5qPbm/XfTGXVlk841IV0c0hSHHpK4RwwB/PvtCupOavFy6QPf2LKEPXrODJhur2vD348NkXfVGlBxIjhCOeKPlXNSFfHo79CEr4Hcy/3Y5j9veIZNPchZ7zI7DrJ+s7w/ek/ySwXQOM+i5pimp1505nsuX41mhh0nAA3GU5v8+WhDITyIGzgHxhoVqr8j6DCJaDtL/K1VyWqQ==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
 
         // 功能權限映射表
         private static readonly Dictionary<LicenseType, HashSet<string>> FeatureMap = new Dictionary<LicenseType, HashSet<string>>
@@ -494,38 +503,37 @@ namespace YD_RevitTools.LicenseManager
                     };
                 }
 
-                // 解析授權金鑰（支援 HMAC 簽名格式 base64JSON.base64Sig 及舊格式 base64JSON）
+                // License format: base64(JSON).base64(RSA-SHA256 signature)
                 string jsonData;
                 try
                 {
-                    if (licenseKey.Contains('.'))
+                    int dotIdx = licenseKey.LastIndexOf('.');
+                    if (dotIdx <= 0 || dotIdx >= licenseKey.Length - 1)
                     {
-                        // 新格式：base64(JSON).base64(HMAC-SHA256)
-                        int dotIdx = licenseKey.LastIndexOf('.');
-                        string jsonB64 = licenseKey.Substring(0, dotIdx);
-                        string sigB64 = licenseKey.Substring(dotIdx + 1);
-                        byte[] jsonBytes = Convert.FromBase64String(jsonB64);
-                        byte[] sigBytes = Convert.FromBase64String(sigB64);
-                        using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(LICENSE_HMAC_SECRET)))
+                        return new LicenseValidationResult
                         {
-                            if (!hmac.ComputeHash(jsonBytes).SequenceEqual(sigBytes))
-                            {
-                                return new LicenseValidationResult
-                                {
-                                    IsValid = false,
-                                    Message = "授權金鑰簽名無效（金鑰可能已被篹改）",
-                                    Severity = ValidationSeverity.Error
-                                };
-                            }
-                        }
-                        jsonData = Encoding.UTF8.GetString(jsonBytes);
+                            IsValid = false,
+                            Message = "授權金鑰格式錯誤，請使用新版簽章授權碼。",
+                            Severity = ValidationSeverity.Error
+                        };
                     }
-                    else
+
+                    string jsonB64 = licenseKey.Substring(0, dotIdx);
+                    string sigB64 = licenseKey.Substring(dotIdx + 1);
+                    byte[] jsonBytes = Convert.FromBase64String(jsonB64);
+                    byte[] sigBytes = Convert.FromBase64String(sigB64);
+
+                    if (!LicenseInfo.VerifyLicenseSignature(jsonBytes, sigBytes))
                     {
-                        // 舊格式（向下相容）
-                        byte[] data = Convert.FromBase64String(licenseKey);
-                        jsonData = Encoding.UTF8.GetString(data);
+                        return new LicenseValidationResult
+                        {
+                            IsValid = false,
+                            Message = "授權金鑰簽章無效。",
+                            Severity = ValidationSeverity.Error
+                        };
                     }
+
+                    jsonData = Encoding.UTF8.GetString(jsonBytes);
                 }
                 catch (FormatException)
                 {
