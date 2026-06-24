@@ -3,6 +3,7 @@
     <TargetFramework>net48</TargetFramework>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>9.0</LangVersion>
     <Configurations>Debug;Release;Debug2022;Release2022;Debug2023;Release2023;Debug2024;Release2024;Debug2025;Release2025;Debug2026;Release2026</Configurations>
     <!-- 預設為 Revit 2024 -->
     <RevitVersion Condition="'$(Configuration)' == 'Debug' OR '$(Configuration)' == 'Release'">2024</RevitVersion>
@@ -43,6 +44,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" Version="2.20.0" />
     <PackageReference Include="EPPlus" Version="7.5.2" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
@@ -85,48 +87,67 @@
     <Compile Remove="Commands\LicenseManagementCommand.cs" />
   </ItemGroup>
 
-  <!-- Revit 2025/2026: 排除所有 XAML 相關檔案（因為 XAML 編譯器有問題） -->
-  <ItemGroup Condition="'$(RevitVersion)' == '2025' OR '$(RevitVersion)' == '2026'">
-    <!-- 排除 XAML 檔案 -->
+  <!-- Revit 2025: 仍排除 XAML 相關檔案 -->
+  <ItemGroup Condition="'$(RevitVersion)' == '2025'">
     <Page Remove="LicenseWindow.xaml" />
     <Page Remove="Commands\Family\MainWindow.xaml" />
     <Page Remove="Commands\Family\SliderSettingsWindow.xaml" />
     <Page Remove="Commands\MEP\PipeSleeveWindow.xaml" />
     <Page Remove="Commands\MEP\AutoAvoid\UI\MainWindow.xaml" />
+    <Page Remove="Commands\MEP\AutoPipeRouting\UI\MainWindow.xaml" />
     <Page Remove="Commands\MEP\PipeToISO\MainWindow.xaml" />
-    <Page Remove="UI\AutoJoin\AutoJoinWindow.xaml" />
-    <Page Remove="UI\AutoJoin\NearMissResultWindow.xaml" />
-    <Page Remove="UI\AutoJoin\AutoJoinSimpleWindow.xaml" />
     <Page Remove="UI\Finishings\MainWindow.xaml" />
-    <!-- 排除 XAML.CS 檔案 -->
+    <Page Remove="Commands\AR\Finishings\RoomFinish\UI\MainWindow.xaml" />
+    <Page Remove="Commands\AR\Finishings\RoomFinish\UI\ExecutionStatusWindow.xaml" />
     <Compile Remove="UI\LicenseWindow.xaml.cs" />
     <Compile Remove="Commands\Family\MainWindow.xaml.cs" />
     <Compile Remove="Commands\Family\SliderSettingsWindow.xaml.cs" />
     <Compile Remove="Commands\MEP\PipeSleeveWindow.xaml.cs" />
     <Compile Remove="Commands\MEP\AutoAvoid\UI\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\AutoPipeRouting\UI\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\CmdAutoPipeRouting.cs" />
     <Compile Remove="Commands\MEP\PipeToISO\MainWindow.xaml.cs" />
-    <Compile Remove="UI\AutoJoin\AutoJoinWindow.xaml.cs" />
-    <Compile Remove="UI\AutoJoin\NearMissResultWindow.xaml.cs" />
-    <Compile Remove="UI\AutoJoin\AutoJoinSimpleWindow.xaml.cs" />
     <Compile Remove="UI\Finishings\MainWindow.xaml.cs" />
-    <!-- 排除引用 XAML UI 的命令檔案 -->
-    <Compile Remove="Commands\AR\CmdLicenseInfo.cs" />
-    <Compile Remove="Commands\AboutCommand.cs" />
-    <Compile Remove="Commands\AR\AutoJoin\CmdAutoJoin.cs" />
-    <Compile Remove="Commands\AR\AutoJoin\CmdJoinToPicked.cs" />
-    <Compile Remove="Commands\AR\AutoJoin\CmdAutoJoinSimple.cs" />
-    <Compile Remove="Commands\CheckUpdateCommand.cs" />
-    <Compile Remove="Commands\MEP\CmdAutoAvoid.cs" />
-    <Compile Remove="Commands\MEP\CmdPipeSleeve.cs" />
-    <Compile Remove="Commands\MEP\CmdPipeToISO.cs" />
-    <!-- CmdFinishings.cs 現在使用條件編譯，不需要排除 -->
-    <Compile Remove="Commands\MEP\AutoAvoid\**" />
+    <Compile Remove="Commands\AR\Finishings\RoomFinish\UI\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\AR\Finishings\RoomFinish\UI\ExecutionStatusWindow.xaml.cs" />
+    <Compile Remove="Commands\AR\Finishings\RoomFinish\CmdRoomFinish.cs" />
+    <Compile Remove="Commands\AR\Finishings\RoomFinish\ExternalEventHandlers.cs" />
     <Compile Remove="Commands\MEP\PipeToISO\**" />
     <Compile Remove="Commands\Family\**" />
-    <EmbeddedResource Remove="Commands\MEP\AutoAvoid\**" />
     <EmbeddedResource Remove="Commands\MEP\PipeToISO\**" />
     <EmbeddedResource Remove="Commands\Family\**" />
-    <None Remove="Commands\MEP\AutoAvoid\**" />
+    <None Remove="Commands\MEP\PipeToISO\**" />
+    <None Remove="Commands\Family\**" />
+  </ItemGroup>
+
+  <!-- Revit 2026: 仍排除 XAML 檔案，但保留非 WPF 的房間裝修命令 -->
+  <ItemGroup Condition="'$(RevitVersion)' == '2026'">
+    <Page Remove="LicenseWindow.xaml" />
+    <Page Remove="Commands\Family\MainWindow.xaml" />
+    <Page Remove="Commands\Family\SliderSettingsWindow.xaml" />
+    <Page Remove="Commands\MEP\PipeSleeveWindow.xaml" />
+    <Page Remove="Commands\MEP\AutoAvoid\UI\MainWindow.xaml" />
+    <Page Remove="Commands\MEP\AutoPipeRouting\UI\MainWindow.xaml" />
+    <Page Remove="Commands\MEP\PipeToISO\MainWindow.xaml" />
+    <Page Remove="UI\Finishings\MainWindow.xaml" />
+    <Page Remove="Commands\AR\Finishings\RoomFinish\UI\MainWindow.xaml" />
+    <Page Remove="Commands\AR\Finishings\RoomFinish\UI\ExecutionStatusWindow.xaml" />
+    <Compile Remove="UI\LicenseWindow.xaml.cs" />
+    <Compile Remove="Commands\Family\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\Family\SliderSettingsWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\PipeSleeveWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\AutoAvoid\UI\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\AutoPipeRouting\UI\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\MEP\CmdAutoPipeRouting.cs" />
+    <Compile Remove="Commands\MEP\PipeToISO\MainWindow.xaml.cs" />
+    <Compile Remove="UI\Finishings\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\AR\Finishings\RoomFinish\UI\MainWindow.xaml.cs" />
+    <Compile Remove="Commands\AR\Finishings\RoomFinish\UI\ExecutionStatusWindow.xaml.cs" />
+    <Compile Remove="Commands\AR\Finishings\RoomFinish\ExternalEventHandlers.cs" />
+    <Compile Remove="Commands\MEP\PipeToISO\**" />
+    <Compile Remove="Commands\Family\**" />
+    <EmbeddedResource Remove="Commands\MEP\PipeToISO\**" />
+    <EmbeddedResource Remove="Commands\Family\**" />
     <None Remove="Commands\MEP\PipeToISO\**" />
     <None Remove="Commands\Family\**" />
   </ItemGroup>

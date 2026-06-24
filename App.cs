@@ -73,7 +73,9 @@ namespace YD_RevitTools.LicenseManager
                 AddMEPToolButtons(mepPanel);
 
                 // === Family 面板 ===
+#if !REVIT2025 && !REVIT2026
                 AddFamilyToolButtons(familyPanel);
+#endif
 
                 // === 資料 面板 ===
                 AddDataToolButtons(dataPanel);
@@ -227,16 +229,25 @@ namespace YD_RevitTools.LicenseManager
 
             PulldownButton finishingsPulldown = panel.AddItem(finishingsPulldownData) as PulldownButton;
 
-            // 裝修生成
-            PushButtonData finishingsGenerateData = new PushButtonData(
-                "FinishingsGenerate",
-                "裝修生成",
+#if !REVIT2025
+            // 房間裝修 (Revit 2022-2024、2026 支援)
+            PushButtonData roomFinishData = new PushButtonData(
+                "RoomFinish",
+                "房間裝修",
                 assemblyPath,
-                "YD_RevitTools.LicenseManager.Commands.AR.Finishings.CmdFinishings");
-            finishingsGenerateData.ToolTip = "裝修生成工具";
-            finishingsGenerateData.LongDescription = "自動生成房間裝修（地板、天花板、牆面、踢腳板）";
-            SetButtonIcon(finishingsGenerateData, "finishings");
-            finishingsPulldown.AddPushButton(finishingsGenerateData);
+                "YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.CmdRoomFinish");
+            roomFinishData.ToolTip = "房間裝修工具";
+            roomFinishData.LongDescription = "根據房間邊界自動生成裝修面（牆、樓板、天花板、踢腳板）\n\n" +
+                "功能特色：\n" +
+                "• 選擇房間批次生成裝修\n" +
+                "• 支援多種邊界模式（內裝修面、中心線、外裝修面）\n" +
+                "• 自動連接牆體\n" +
+                "• 參數化設定（高度、偏移、厚度）\n" +
+                "• 匯出數量到 Excel\n\n" +
+                "授權要求：Standard+";
+            SetButtonIcon(roomFinishData, "finishings");
+            finishingsPulldown.AddPushButton(roomFinishData);
+#endif
 
             // 面生面
             PushButtonData faceToFaceData = new PushButtonData(
@@ -246,13 +257,51 @@ namespace YD_RevitTools.LicenseManager
                 "YD_RevitTools.LicenseManager.Commands.AR.Finishings.CmdFaceToFace");
             faceToFaceData.ToolTip = "面生面工具";
             faceToFaceData.LongDescription = "透過選擇面來生成裝修面，參數寫入材料資訊供數量產出 (Standard+)";
-            SetButtonIcon(faceToFaceData, "formwork_pick");
+            SetButtonIcon(faceToFaceData, "face_to_face");
             finishingsPulldown.AddPushButton(faceToFaceData);
+
+            // 更新粉刷面參數
+            PushButtonData refreshParamsData = new PushButtonData(
+                "RefreshFinishParams",
+                "更新\n粉刷參數",
+                assemblyPath,
+                "YD_RevitTools.LicenseManager.Commands.AR.Finishings.CmdRefreshFinishParams");
+            refreshParamsData.ToolTip = "更新粉刷面共用參數";
+            refreshParamsData.LongDescription =
+                "重新掃描模型中的粉刷元素（面生面或手動調整），依目前幾何位置回寫：\n" +
+                "• 房間 ID / 名稱 / 編號\n" +
+                "• 裝修面積\n" +
+                "• 材料名稱 / 厚度\n\n" +
+                "確保數量表輸出資訊正確。(Standard+)";
+            SetButtonIcon(refreshParamsData, "refresh_finish_params");
+            finishingsPulldown.AddPushButton(refreshParamsData);
+
+            // 更換裝修面顏色
+            PushButtonData changeColorData = new PushButtonData(
+                "ChangeFinishingColor",
+                "更換顏色",
+                assemblyPath,
+                "YD_RevitTools.LicenseManager.Commands.AR.Finishings.CmdChangeFinishingColor");
+            changeColorData.ToolTip = "更換裝修面顏色";
+            changeColorData.LongDescription = "選擇已創建的一般模型裝修面，更換其材質顏色（支援多選）";
+            SetButtonIcon(changeColorData, "change_finishing_color");
+            finishingsPulldown.AddPushButton(changeColorData);
+
+            // 刪除裝修
+            PushButtonData deleteFinishingsData = new PushButtonData(
+                "DeleteFinishings",
+                "刪除裝修",
+                assemblyPath,
+                "YD_RevitTools.LicenseManager.Commands.AR.Finishings.CmdDeleteFinishings");
+            deleteFinishingsData.ToolTip = "刪除 AR 裝修元素";
+            deleteFinishingsData.LongDescription = "刪除由 AR 裝修工具建立的牆、樓板、天花板與一般模型裝修元素。";
+            SetButtonIcon(deleteFinishingsData, "formwork_delete");
+            finishingsPulldown.AddPushButton(deleteFinishingsData);
 
             // === 接合工具組 (Pulldown Button) ===
             PulldownButtonData joinPulldownData = new PulldownButtonData("JoinTools", "接合\n工具");
-            joinPulldownData.ToolTip = "接合工具組";
-            joinPulldownData.LongDescription = "結構元素自動接合工具集合";
+            joinPulldownData.ToolTip = "接合與分割工具組";
+            joinPulldownData.LongDescription = "提供模型元素自動接合、解除接合、牆輪廓對齊與牆/樓板分割工具";
             SetButtonIcon(joinPulldownData, "auto_join");
 
             PulldownButton joinPulldown = panel.AddItem(joinPulldownData) as PulldownButton;
@@ -263,21 +312,96 @@ namespace YD_RevitTools.LicenseManager
                 "自動接合",
                 assemblyPath,
                 "YD_RevitTools.LicenseManager.Commands.AR.AutoJoin.CmdAutoJoin");
-            autoJoinData.ToolTip = "自動結構接合工具";
-            autoJoinData.LongDescription = "自動檢測並接合結構元素（柱、梁、牆、樓板）";
+            autoJoinData.ToolTip = "自動接合 / 解除接合";
+            autoJoinData.LongDescription = "依範圍、類別與優先序，自動接合或解除接合牆、樓板、柱、梁等模型元素，也可執行牆輪廓對齊。";
             SetButtonIcon(autoJoinData, "auto_join");
             joinPulldown.AddPushButton(autoJoinData);
 
-            // 接合到選取
-            PushButtonData joinToPickedData = new PushButtonData(
-                "JoinToPicked",
-                "接合到選取",
+            // 分割樓板
+            PushButtonData splitFloorData = new PushButtonData(
+                "SplitFloor",
+                "分割樓板",
                 assemblyPath,
-                "YD_RevitTools.LicenseManager.Commands.AR.AutoJoin.CmdJoinToPicked");
-            joinToPickedData.ToolTip = "接合所有相交元素到選取的目標";
-            joinToPickedData.LongDescription = "選取一個目標元素，自動接合所有與其相交的結構元素";
-            SetButtonIcon(joinToPickedData, "auto_join");
-            joinPulldown.AddPushButton(joinToPickedData);
+                "YD_RevitTools.LicenseManager.Commands.AR.AutoJoin.CmdSplitFloor");
+            splitFloorData.ToolTip = "分割樓板工具";
+            splitFloorData.LongDescription =
+                "依選取的結構構架（梁）將樓板分割為多塊。\n\n" +
+                "操作步驟：\n" +
+                "  同時選取要分割的樓板及穿越其中的梁，完成後按 Finish。";
+            SetButtonIcon(splitFloorData, "split_floor");
+            joinPulldown.AddPushButton(splitFloorData);
+
+            // 分割牆
+            PushButtonData splitWallData = new PushButtonData(
+                "SplitWall",
+                "分割牆",
+                assemblyPath,
+                "YD_RevitTools.LicenseManager.Commands.AR.AutoJoin.CmdSplitWall");
+            splitWallData.ToolTip = "分割牆工具";
+            splitWallData.LongDescription =
+                "依切割構件在交接處將牆分割為多段直線牆。\n\n" +
+                "操作步驟：\n" +
+                "  步驟 1：選取要分割的目標牆。\n" +
+                "  步驟 2：選取切割構件（結構柱、梁或其他牆）。\n\n" +
+                "適用於直線基本牆；弧牆或複雜輪廓會自動略過。";
+            SetButtonIcon(splitWallData, "split_wall");
+            joinPulldown.AddPushButton(splitWallData);
+
+            // === 標註工具組 (Pulldown Button) ===
+            if (!HasButton(panel, "AutoDimensionTools"))
+            {
+                PulldownButtonData autoDimensionPulldownData = new PulldownButtonData("AutoDimensionTools", "標註\n工具");
+                autoDimensionPulldownData.ToolTip = "自動標註工具組";
+                autoDimensionPulldownData.LongDescription = "提供柱、梁、軸線與房間內容的快速標註與更新工具。";
+                SetButtonIcon(autoDimensionPulldownData, "schedule_export");
+
+                PulldownButton autoDimensionPulldown = panel.AddItem(autoDimensionPulldownData) as PulldownButton;
+
+                PushButtonData autoDimensionData = new PushButtonData(
+                    "AutoDimensionMain",
+                    "上方自動\n標註",
+                    assemblyPath,
+                    "YDBIM.AutoDimension.App.AutoDimensionCommand");
+                autoDimensionData.ToolTip = "依可見構件快速建立標註";
+                autoDimensionData.LongDescription = "開啟完整標註設定視窗，可選擇模式、方向、偏移量與標註型式。";
+                autoDimensionPulldown.AddPushButton(autoDimensionData);
+
+                PushButtonData columnLineGridData = new PushButtonData(
+                    "AutoDimensionColumnGrid",
+                    "柱線 / 網格\n標註",
+                    assemblyPath,
+                    "YDBIM.AutoDimension.App.ColumnLineGridCommand");
+                columnLineGridData.ToolTip = "建立柱線與軸線標註";
+                columnLineGridData.LongDescription = "依目前視圖可見軸線建立同方向標註，適合快速完成柱線/網格尺寸標註。";
+                autoDimensionPulldown.AddPushButton(columnLineGridData);
+
+                PushButtonData columnDimensionData = new PushButtonData(
+                    "AutoDimensionColumn",
+                    "柱標註",
+                    assemblyPath,
+                    "YDBIM.AutoDimension.App.ColumnDimensionCommand");
+                columnDimensionData.ToolTip = "建立柱邊定位標註";
+                columnDimensionData.LongDescription = "針對可見結構柱建立定位標註，可指定左右/前後方向。";
+                autoDimensionPulldown.AddPushButton(columnDimensionData);
+
+                PushButtonData beamDimensionData = new PushButtonData(
+                    "AutoDimensionBeam",
+                    "梁標註",
+                    assemblyPath,
+                    "YDBIM.AutoDimension.App.BeamDimensionCommand");
+                beamDimensionData.ToolTip = "建立梁寬與間距標註";
+                beamDimensionData.LongDescription = "對可見直線結構梁建立梁寬與梁間距標註，並可調整偏移量。";
+                autoDimensionPulldown.AddPushButton(beamDimensionData);
+
+                PushButtonData roomContentData = new PushButtonData(
+                    "AutoDimensionRoomContent",
+                    "房間內容",
+                    assemblyPath,
+                    "YDBIM.AutoDimension.App.RoomContentCommand");
+                roomContentData.ToolTip = "更新房間內容參數";
+                roomContentData.LongDescription = "批次更新目前視圖可處理房間的內容資訊，若資料已最新則不重複寫入。";
+                autoDimensionPulldown.AddPushButton(roomContentData);
+            }
         }
 
         private void AddMEPToolButtons(RibbonPanel panel)
@@ -328,6 +452,50 @@ namespace YD_RevitTools.LicenseManager
                 panel.AddItem(autoAvoidData);
             }
 
+            // === 支管中心對齊工具 ===
+            if (!HasButton(panel, "PipeCenterAlign"))
+            {
+                PushButtonData pipeCenterAlignData = new PushButtonData(
+                    "PipeCenterAlign",
+                    "支管\n對齊",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdPipeCenterAlign");
+
+                pipeCenterAlignData.ToolTip = "支管中心對齊工具";
+                pipeCenterAlignData.LongDescription = "將支管端點中心對齊到幹管中心線\n\n" +
+                    "功能特色：\n" +
+                    "• 先選擇幹管（平面直管，可帶坡度），再選擇支管\n" +
+                    "• 支援先框選/複選兩支管後直接執行\n" +
+                    "• 自動取支管最靠近幹管的一端\n" +
+                    "• 依支管原本平面角度延伸/修剪到幹管中心線\n" +
+                    "• 可選擇切開幹管並自動建立三通\n" +
+                    "• 已連接的支管端點會提示先斷開，避免破壞既有接頭\n\n" +
+                    "授權要求：Trial+";
+
+                SetButtonIcon(pipeCenterAlignData, "pipe_center_align");
+
+                panel.AddItem(pipeCenterAlignData);
+            }
+
+            // === 支管中心對齊設定 ===
+            if (!HasButton(panel, "PipeCenterAlignSettings"))
+            {
+                PushButtonData pipeCenterAlignSettingsData = new PushButtonData(
+                    "PipeCenterAlignSettings",
+                    "支管\n設定",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdPipeCenterAlignSettings");
+
+                pipeCenterAlignSettingsData.ToolTip = "支管中心對齊設定";
+                pipeCenterAlignSettingsData.LongDescription =
+                    "設定支管中心對齊是否每次詢問、自動建立接頭，或只對齊端點。\n\n" +
+                    "用於避免每次執行都要選擇是否生成三通 / Takeoff / Wye。";
+
+                SetButtonIcon(pipeCenterAlignSettingsData, "pipe_center_align_settings");
+
+                panel.AddItem(pipeCenterAlignSettingsData);
+            }
+
             // === 管線轉 ISO 圖工具 ===
             if (!HasButton(panel, "PipeToISO"))
             {
@@ -347,9 +515,131 @@ namespace YD_RevitTools.LicenseManager
                     "• 支援管件標註與尺寸標記\n\n" +
                     "授權要求：Trial+";
 
-                SetButtonIcon(pipeToISOData, "pipe_sleeve");  // 暫時使用 pipe_sleeve 圖示
+                SetButtonIcon(pipeToISOData, "pipe_iso");
 
                 panel.AddItem(pipeToISOData);
+            }
+
+            // === MEP 自動配管 (Beta) ===
+            if (!HasButton(panel, "AutoPipeRouting"))
+            {
+                PushButtonData autoPipeRoutingData = new PushButtonData(
+                    "AutoPipeRouting",
+                    "自動\n配管",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdAutoPipeRouting");
+
+                autoPipeRoutingData.ToolTip = "MEP 自動配管 (Beta)";
+                autoPipeRoutingData.LongDescription =
+                    "依幹管與設備/支管空間關係自動生成出管段、過渡管並嘗試建立接頭。\n\n" +
+                    "操作：\n" +
+                    "1) 先選幹管 (Axis Pipe)\n" +
+                    "2) 再框選/複選設備或多支管\n" +
+                    "3) 工具會依投影里程排序逐一建立\n\n" +
+                    "目前為 Beta：優先提供幾何排序、過渡管建立與接頭嘗試。";
+                SetButtonIcon(autoPipeRoutingData, "auto_pipe_routing");
+                panel.AddItem(autoPipeRoutingData);
+            }
+
+            // === 排水支管連接幹管 ===
+            if (!HasButton(panel, "DrainBranchConnect"))
+            {
+                PushButtonData drainConnectData = new PushButtonData(
+                    "DrainBranchConnect",
+                    "排水\n連接",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdDrainBranchConnect");
+
+                drainConnectData.ToolTip = "排水支管自動連接幹管";
+                drainConnectData.LongDescription =
+                    "選取一支未連接的排水支管與排水幹管，可選擇「雙 45°偏移＋三通」或「單 45°＋Y 型斜接」；並可設定前後直管長度與接入方向。\n\n" +
+                    "安全限制：\n" +
+                    "• 支管與幹管必須為直線管段\n" +
+                    "• 幹管接入點必須低於支管端點\n" +
+                    "• 支管與幹管必須屬於相同系統類型\n" +
+                    "• 無可用配件時整筆交易回滾";
+                SetButtonIcon(drainConnectData, "auto_pipe_routing");
+                panel.AddItem(drainConnectData);
+            }
+
+            // === MEP 旋轉設定 ===
+            if (!HasButton(panel, "MepRotateSettings"))
+            {
+                PushButtonData rotateSettingsData = new PushButtonData(
+                    "MepRotateSettings",
+                    "旋轉\n設定",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdMepRotateSettings");
+                rotateSettingsData.ToolTip = "MEP 旋轉設定";
+                rotateSettingsData.LongDescription = "設定旋轉元素類型與角度。";
+                SetButtonIcon(rotateSettingsData, "pipe_center_align_settings");
+                panel.AddItem(rotateSettingsData);
+            }
+
+            // === MEP 順時針旋轉 ===
+            if (!HasButton(panel, "MepRotateClockwise"))
+            {
+                PushButtonData rotateCwData = new PushButtonData(
+                    "MepRotateClockwise",
+                    "順時針\n旋轉",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdMepRotateClockwise");
+                rotateCwData.ToolTip = "順時針旋轉 MEP 元素";
+                rotateCwData.LongDescription = "依旋轉設定對選取元素做順時針旋轉。";
+                SetButtonIcon(rotateCwData, "auto_avoid");
+                panel.AddItem(rotateCwData);
+            }
+
+            // === MEP 逆時針旋轉 ===
+            if (!HasButton(panel, "MepRotateCounterClockwise"))
+            {
+                PushButtonData rotateCcwData = new PushButtonData(
+                    "MepRotateCounterClockwise",
+                    "逆時針\n旋轉",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdMepRotateCounterClockwise");
+                rotateCcwData.ToolTip = "逆時針旋轉 MEP 元素";
+                rotateCcwData.LongDescription = "依旋轉設定對選取元素做逆時針旋轉。";
+                SetButtonIcon(rotateCcwData, "auto_avoid");
+                panel.AddItem(rotateCcwData);
+            }
+
+            // === 接點生成管 ===
+            if (!HasButton(panel, "MepPipeFromConnectors"))
+            {
+                PushButtonData connectorPipeData = new PushButtonData(
+                    "MepPipeFromConnectors",
+                    "接點\n生成管",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdMepPipeFromConnectors");
+                connectorPipeData.ToolTip = "接點生成管";
+                connectorPipeData.LongDescription = "點選兩個管件/管段接點，自動建立管段並連接。";
+                SetButtonIcon(connectorPipeData, "pipe_sleeve");
+                panel.AddItem(connectorPipeData);
+            }
+
+            // === MEP 檢查工具 ===
+            if (!HasButton(panel, "MepCheck"))
+            {
+                PushButtonData mepCheckData = new PushButtonData(
+                    "MepCheck",
+                    "MEP\n檢查",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdMepCheck");
+
+                mepCheckData.ToolTip = "MEP 檢查工具";
+                mepCheckData.LongDescription =
+                    "檢查 MEP 模型常見資料與幾何問題。\n\n" +
+                    "目前支援：\n" +
+                    "• 管洩水方向與坡度檢查\n" +
+                    "• 設備樓層分布檢查\n" +
+                    "• Connector 未連接與系統中斷檢查\n" +
+                    "• 系統資料與設備編號重複檢查\n" +
+                    "• 結果表格回查模型元素\n" +
+                    "• CSV 檢查報告匯出";
+
+                SetButtonIcon(mepCheckData, "pipe_iso");
+                panel.AddItem(mepCheckData);
             }
         }
 
@@ -394,38 +684,52 @@ namespace YD_RevitTools.LicenseManager
         {
             string assemblyPath = Assembly.GetExecutingAssembly().Location;
 
-            // COBie 欄位管理按鈕
+            // COBie 欄位設定按鈕
             PushButtonData cobieFieldManagerData = new PushButtonData(
                 "CobieFieldManager",
-                "欄位\n管理",
+                "COBie\n欄位設定",
                 assemblyPath,
                 "YD_RevitTools.LicenseManager.Commands.Data.CmdCobieFieldManager");
-            cobieFieldManagerData.ToolTip = "COBie 欄位管理";
-            cobieFieldManagerData.LongDescription = "管理 COBie 欄位和參數 (Trial+)";
+            cobieFieldManagerData.ToolTip = "COBie 欄位設定";
+            cobieFieldManagerData.LongDescription = "設定自訂 COBie 匯出使用的欄位、參數對照與標準欄位檢核。(Trial+)";
             SetButtonIcon(cobieFieldManagerData, "cobie_field");
             panel.AddItem(cobieFieldManagerData);
 
-            // COBie 範本匯出按鈕
+            // COBie 樣板按鈕
             PushButtonData cobieExportTemplateData = new PushButtonData(
                 "CobieExportTemplate",
-                "範本\n匯出",
+                "COBie\n樣板",
                 assemblyPath,
                 "YD_RevitTools.LicenseManager.Commands.Data.CmdCobieExportTemplate");
-            cobieExportTemplateData.ToolTip = "COBie 範本匯出";
-            cobieExportTemplateData.LongDescription = "匯出 COBie 範本 (Trial+)";
+            cobieExportTemplateData.ToolTip = "COBie 樣板";
+            cobieExportTemplateData.LongDescription = "匯出 COBie 欄位樣板與欄位填寫說明。(Trial+)";
             SetButtonIcon(cobieExportTemplateData, "cobie_template");
             panel.AddItem(cobieExportTemplateData);
 
-            // COBie 匯出按鈕
+            // 自訂 COBie 匯出按鈕
             PushButtonData cobieExportData = new PushButtonData(
                 "CobieExport",
-                "COBie\n匯出",
+                "自訂\nCOBie",
                 assemblyPath,
                 "YD_RevitTools.LicenseManager.Commands.Data.CmdCobieExportEnhanced");
-            cobieExportData.ToolTip = "COBie 匯出";
-            cobieExportData.LongDescription = "匯出 COBie 資料 (Standard+)";
+            cobieExportData.ToolTip = "自訂 COBie";
+            cobieExportData.LongDescription = "依「COBie 欄位設定」中的自訂欄位與參數對照規則匯出資料。(Standard+)";
             SetButtonIcon(cobieExportData, "cobie_export");
             panel.AddItem(cobieExportData);
+
+            // COBie 標準工作簿匯出按鈕
+            PushButtonData cobieStandardExportData = new PushButtonData(
+                "CobieStandardExport",
+                "標準\nCOBie",
+                assemblyPath,
+                "YD_RevitTools.LicenseManager.Commands.Data.CmdCobieStandardExport");
+            cobieStandardExportData.ToolTip = "COBie 標準工作簿匯出";
+            cobieStandardExportData.LongDescription =
+                "依 COBie 資料交換架構匯出固定工作表。\n\n" +
+                "包含 Contact、Facility、Floor、Space、Type、Component、System、Attribute、Coordinate、PickLists 與 Validation 等工作表。\n\n" +
+                "此功能適合交付前檢核與資料交換格式整理。";
+            SetButtonIcon(cobieStandardExportData, "cobie_export");
+            panel.AddItem(cobieStandardExportData);
 
             // COBie 匯入按鈕
             PushButtonData cobieImportData = new PushButtonData(
@@ -437,6 +741,49 @@ namespace YD_RevitTools.LicenseManager
             cobieImportData.LongDescription = "匯入 COBie 資料 (Standard+)";
             SetButtonIcon(cobieImportData, "cobie_import");
             panel.AddItem(cobieImportData);
+
+            // 明細表匯出按鈕
+            if (!HasButton(panel, "ScheduleExport"))
+            {
+                PushButtonData scheduleExportData = new PushButtonData(
+                    "ScheduleExport",
+                    "明細表\n匯出",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.Data.CmdScheduleExport");
+                scheduleExportData.ToolTip = "明細表匯出工具";
+                scheduleExportData.LongDescription =
+                    "將 Revit 明細表匯出為 Excel 或 PDF 格式\n\n" +
+                    "功能特色：\n" +
+                    "• 列出文件中所有明細表供選擇\n" +
+                    "• 支援 Excel (.xlsx) 格式，含格式化樣式\n" +
+                    "• 支援 PDF 格式，使用 Revit 內建匯出引擎\n" +
+                    "• 可選擇合併至單一檔案或各自分開匯出\n" +
+                    "• 支援 Revit 2024 / 2025 / 2026\n\n" +
+                    "授權要求：Standard+";
+                SetButtonIcon(scheduleExportData, "schedule_export");
+                panel.AddItem(scheduleExportData);
+            }
+
+            // 模型資料管理按鈕
+            if (!HasButton(panel, "ModelDataManager"))
+            {
+                PushButtonData modelDataManagerData = new PushButtonData(
+                    "ModelDataManager",
+                    "模型資料\n管理",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.Data.CmdModelDataManager");
+                modelDataManagerData.ToolTip = "模型資料管理";
+                modelDataManagerData.LongDescription =
+                    "批次檢視與調整 Revit 管理介面常用名稱資料。\n\n" +
+                    "目前支援：\n" +
+                    "• 族群名稱\n" +
+                    "• 類型名稱\n" +
+                    "• 視圖名稱\n" +
+                    "• 材料名稱\n\n" +
+                    "可搜尋、篩選、選取後批次套用，適合整理模型命名與交付資料。";
+                SetButtonIcon(modelDataManagerData, "cobie_field");
+                panel.AddItem(modelDataManagerData);
+            }
         }
 
         private void AddAboutButtons(RibbonPanel panel)

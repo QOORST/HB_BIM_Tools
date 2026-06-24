@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using System.ComponentModel;
 
 namespace YD_RevitTools.LicenseManager.Commands.Family
 {
@@ -250,6 +251,13 @@ namespace YD_RevitTools.LicenseManager.Commands.Family
             {
                 MessageBox.Show($"刷新失敗：{ex.Message}", "錯誤", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            _updateTimer?.Stop();
+            _externalEvent?.Dispose();
+            base.OnClosing(e);
         }
     }
 }
