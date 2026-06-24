@@ -12,7 +12,7 @@ Write-Host "Checking source files..." -ForegroundColor Yellow
 
 # Use Release2024 as the base for dependency DLLs (they are the same across versions)
 $baseBinDir = Join-Path $projectRoot "bin\Release2024"
-$sourceIcons = Join-Path $projectRoot "Resources\Icons"
+$sourceResources = Join-Path $projectRoot "Resources"
 
 # 定義所有需要的依賴 DLL（排除 Revit API 和 .NET Framework 內建的）
 $dependencyDlls = @(
@@ -36,9 +36,11 @@ $dependencyDlls = @(
 )
 
 # Version-specific DLLs
+$sourceDll2022 = Join-Path $projectRoot "bin\Release2022\YD_RevitTools.LicenseManager.dll"
 $sourceDll2024 = Join-Path $projectRoot "bin\Release2024\YD_RevitTools.LicenseManager.dll"
 $sourceDll2025 = Join-Path $projectRoot "bin\Release2025\YD_RevitTools.LicenseManager.dll"
-# Revit 2026 uses the same DLL as 2025 (if Release2026 doesn't exist)
+
+# Revit 2026 uses its own DLL when available, otherwise falls back to 2025
 $sourceDll2026Path = Join-Path $projectRoot "bin\Release2026\YD_RevitTools.LicenseManager.dll"
 if (Test-Path $sourceDll2026Path) {
     $sourceDll2026 = $sourceDll2026Path
@@ -47,16 +49,18 @@ if (Test-Path $sourceDll2026Path) {
     Write-Host "[INFO] Using Revit 2025 DLL for Revit 2026 (Release2026 not found)" -ForegroundColor Yellow
 }
 
-if (-not (Test-Path $sourceDll2024)) {
-    Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit 2024" -ForegroundColor Red
-    Write-Host "Path: $sourceDll2024" -ForegroundColor Gray
-    exit 1
-}
+$requiredMainDlls = @(
+    @{ Version = "2022"; Path = $sourceDll2022 },
+    @{ Version = "2024"; Path = $sourceDll2024 },
+    @{ Version = "2025"; Path = $sourceDll2025 }
+)
 
-if (-not (Test-Path $sourceDll2025)) {
-    Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit 2025" -ForegroundColor Red
-    Write-Host "Path: $sourceDll2025" -ForegroundColor Gray
-    exit 1
+foreach ($dllInfo in $requiredMainDlls) {
+    if (-not (Test-Path $dllInfo.Path)) {
+        Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit $($dllInfo.Version)" -ForegroundColor Red
+        Write-Host "Path: $($dllInfo.Path)" -ForegroundColor Gray
+        exit 1
+    }
 }
 
 # Check dependency DLLs exist
@@ -76,37 +80,60 @@ if ($missingDlls.Count -gt 0) {
     Write-Host ""
 }
 
-if (-not (Test-Path $sourceIcons)) {
-    Write-Host "[WARNING] Icons directory not found: $sourceIcons" -ForegroundColor Yellow
-    Write-Host "Icons will not be included in the installer." -ForegroundColor Yellow
+if (-not (Test-Path $sourceResources)) {
+    Write-Host "[WARNING] Resources directory not found: $sourceResources" -ForegroundColor Yellow
+    Write-Host "Resources will not be included in the installer." -ForegroundColor Yellow
     Write-Host ""
 }
 
-Write-Host "[OK] Main DLL found (2024, 2025, 2026)" -ForegroundColor Green
+Write-Host "[OK] Main DLL found (2022, 2024, 2025, 2026)" -ForegroundColor Green
 Write-Host "[OK] Dependency DLLs checked" -ForegroundColor Green
-if (Test-Path $sourceIcons) {
-    Write-Host "[OK] Icons directory found" -ForegroundColor Green
+if (Test-Path $sourceResources) {
+    Write-Host "[OK] Resources directory found" -ForegroundColor Green
 }
 Write-Host ""
 
 # Create shared resources
 Write-Host "Creating shared resources..." -ForegroundColor Yellow
 
-# 1. Icons directory
-$sharedIconsDir = Join-Path $installerDir "Resources\Icons"
-if (Test-Path (Join-Path $installerDir "Resources")) {
-    Remove-Item (Join-Path $installerDir "Resources") -Recurse -Force
-}
-New-Item -ItemType Directory -Path $sharedIconsDir -Force | Out-Null
+# 1. Resources directory
+$sharedResourcesDir = Join-Path $installerDir "Resources"
+New-Item -ItemType Directory -Path $sharedResourcesDir -Force | Out-Null
 
-$iconCount = 0
-if (Test-Path $sourceIcons) {
-    Copy-Item "$sourceIcons\*.png" -Destination $sharedIconsDir -Force -ErrorAction SilentlyContinue
-    $iconCount = (Get-ChildItem $sharedIconsDir -Filter "*.png" -ErrorAction SilentlyContinue).Count
-    Write-Host "[OK] Shared icons ready: $iconCount files" -ForegroundColor Green
-} else {
-    Write-Host "[SKIP] No icons to copy" -ForegroundColor Yellow
+$sourceIconsDir = Join-Path $sourceResources "Icons"
+$installerIconsDir = Join-Path $sharedResourcesDir "Icons"
+$sourceIconCount = 0
+$installerIconCountBeforeSync = 0
+
+if (Test-Path $sourceIconsDir) {
+    $sourceIconCount = (Get-ChildItem $sourceIconsDir -Recurse -File -Include *.png,*.ico,*.jpg,*.jpeg -ErrorAction SilentlyContinue).Count
 }
+
+if (Test-Path $installerIconsDir) {
+    $installerIconCountBeforeSync = (Get-ChildItem $installerIconsDir -Recurse -File -Include *.png,*.ico,*.jpg,*.jpeg -ErrorAction SilentlyContinue).Count
+}
+
+# 保留 Installer\Resources 既有內容，僅從專案 Resources 做增量同步
+$resourceFileCount = 0
+if (Test-Path $sourceResources) {
+    $sourceResourceFileCount = (Get-ChildItem $sourceResources -Recurse -File -ErrorAction SilentlyContinue).Count
+    if ($sourceResourceFileCount -gt 0) {
+        Copy-Item "$sourceResources\*" -Destination $sharedResourcesDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "[OK] Synced project Resources to installer Resources" -ForegroundColor Green
+    } else {
+        Write-Host "[INFO] Project Resources is empty, keeping existing installer Resources" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "[INFO] Project Resources not found, keeping existing installer Resources" -ForegroundColor Yellow
+}
+
+if ($installerIconCountBeforeSync -gt 0 -and $sourceIconCount -eq 0) {
+    Write-Host "WARNING: Installer/Resources/Icons contains image files, but project Resources/Icons has none." -ForegroundColor Yellow
+    Write-Host "WARNING: Existing installer icon files were preserved. Verify whether they should be synced back to project Resources." -ForegroundColor Yellow
+}
+
+$resourceFileCount = (Get-ChildItem $sharedResourcesDir -Recurse -File -ErrorAction SilentlyContinue).Count
+Write-Host "[OK] Shared resources ready: $resourceFileCount files" -ForegroundColor Green
 
 # 2. Copy dependency DLLs
 $copiedCount = 0
@@ -119,10 +146,30 @@ foreach ($dll in $dependencyDlls) {
 }
 Write-Host "[OK] Copied $copiedCount dependency DLLs" -ForegroundColor Green
 
+# 3. Copy installer documentation from project root so packaged files match the current release.
+$readmeSource = Join-Path $projectRoot "README.txt"
+$licenseSource = Join-Path $projectRoot "LICENSE.txt"
+if (Test-Path $readmeSource) {
+    Copy-Item $readmeSource -Destination $installerDir -Force
+}
+if (Test-Path $licenseSource) {
+    Copy-Item $licenseSource -Destination $installerDir -Force
+}
+Write-Host "[OK] Synced README.txt and LICENSE.txt" -ForegroundColor Green
+
 Write-Host ""
 
 # Create version directories
 Write-Host "Creating version directories..." -ForegroundColor Yellow
+
+# Revit 2022
+$versionDir2022 = Join-Path $installerDir "2022"
+if (Test-Path $versionDir2022) {
+    Remove-Item $versionDir2022 -Recurse -Force
+}
+New-Item -ItemType Directory -Path $versionDir2022 -Force | Out-Null
+Copy-Item $sourceDll2022 -Destination $versionDir2022 -Force
+Write-Host "[OK] Revit 2022 ready" -ForegroundColor Green
 
 # Revit 2024
 $versionDir2024 = Join-Path $installerDir "2024"
@@ -158,7 +205,9 @@ Write-Host "===============================================================" -Fo
 Write-Host ""
 Write-Host "Installer\" -ForegroundColor White
 Write-Host "├── Resources\" -ForegroundColor White
-Write-Host "│   └── Icons\ ($iconCount PNG files)" -ForegroundColor Cyan
+Write-Host "│   └── ... ($resourceFileCount files)" -ForegroundColor Cyan
+Write-Host "├── 2022\" -ForegroundColor White
+Write-Host "│   └── YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
 Write-Host "├── 2024\" -ForegroundColor White
 Write-Host "│   └── YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
 Write-Host "├── 2025\" -ForegroundColor White
@@ -178,14 +227,14 @@ Write-Host ""
 
 # Calculate total size
 $totalSize = 0
-$iconsSize = 0
-if (Test-Path $sharedIconsDir) {
-    $iconFiles = Get-ChildItem $sharedIconsDir -Recurse -ErrorAction SilentlyContinue
-    if ($iconFiles) {
-        $iconsSize = ($iconFiles | Measure-Object -Property Length -Sum).Sum
+$resourcesSize = 0
+if (Test-Path $sharedResourcesDir) {
+    $resourceFiles = Get-ChildItem $sharedResourcesDir -Recurse -File -ErrorAction SilentlyContinue
+    if ($resourceFiles) {
+        $resourcesSize = ($resourceFiles | Measure-Object -Property Length -Sum).Sum
     }
 }
-$totalSize += $iconsSize
+$totalSize += $resourcesSize
 
 # Calculate dependency DLLs size
 $dependencySize = 0
@@ -198,7 +247,7 @@ foreach ($dll in $dependencyDlls) {
 $totalSize += $dependencySize
 
 # Calculate version-specific DLLs size
-$versions = @("2024", "2025", "2026")
+$versions = @("2022", "2024", "2025", "2026")
 $dllsSize = 0
 foreach ($version in $versions) {
     $versionDir = Join-Path $installerDir $version
@@ -212,9 +261,9 @@ foreach ($version in $versions) {
 $totalSize += $dllsSize
 
 Write-Host "File Size Statistics:" -ForegroundColor Cyan
-Write-Host "  Icons (shared): $([math]::Round($iconsSize / 1KB, 2)) KB" -ForegroundColor Gray
+Write-Host "  Resources (shared): $([math]::Round($resourcesSize / 1KB, 2)) KB" -ForegroundColor Gray
 Write-Host "  Dependency DLLs (shared): $([math]::Round($dependencySize / 1KB, 2)) KB" -ForegroundColor Gray
-Write-Host "  Main DLL (3 versions): $([math]::Round($dllsSize / 1KB, 2)) KB" -ForegroundColor Gray
+Write-Host "  Main DLL (4 versions): $([math]::Round($dllsSize / 1KB, 2)) KB" -ForegroundColor Gray
 Write-Host "  Total Size: $([math]::Round($totalSize / 1KB, 2)) KB" -ForegroundColor White
 Write-Host ""
 
@@ -227,4 +276,3 @@ Write-Host "  1. Open Inno Setup Compiler" -ForegroundColor White
 Write-Host "  2. Open YD_BIM_Setup.iss" -ForegroundColor White
 Write-Host "  3. Click Build -> Compile" -ForegroundColor White
 Write-Host ""
-

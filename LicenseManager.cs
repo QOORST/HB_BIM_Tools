@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
@@ -91,6 +92,7 @@ namespace YD_RevitTools.LicenseManager
         private static LicenseManager _instance;
         private static readonly object _lock = new object();
         private LicenseInfo _currentLicense;
+        private const string LICENSE_HMAC_SECRET = "YD-BIM-Tools#2025@License-HMAC-SignKey!v1";
 
         // 功能權限映射表
         private static readonly Dictionary<LicenseType, HashSet<string>> FeatureMap = new Dictionary<LicenseType, HashSet<string>>
@@ -107,6 +109,8 @@ namespace YD_RevitTools.LicenseManager
                 "DeleteFormwork",             // 刪除模板 (別名)
                 // AR_Finishings - 裝修工具基本功能
                 "Finishings.Generate",        // 裝修生成
+                "Finishings.Delete",          // 刪除裝修
+                "DeleteFinishings",           // 刪除裝修 (別名)
                 // AR_AutoJoin - 接合工具基本功能
                 "AutoJoin",                   // 自動接合
                 "JoinToPicked",               // 接合到選取
@@ -117,7 +121,10 @@ namespace YD_RevitTools.LicenseManager
                 "Family.ParameterSlider",     // 族參數滑桿
                 "Family.ProjectSlider",       // 專案參數滑桿
                 // MEP - 機電工具基本功能
-                "MEP.PipeSleeve"              // 管線套管
+                "MEP.PipeSleeve",             // 管線套管
+                // Data - 資料工具基本功能
+                "Schedule.Export",            // 明細表匯出
+                "Data.ModelManager"           // 模型資料管理
             },
             [LicenseType.Standard] = new HashSet<string>
             {
@@ -144,6 +151,8 @@ namespace YD_RevitTools.LicenseManager
                 "StructuralAnalysis",         // 結構分析 (別名)
                 // AR_Finishings - 裝修工具標準功能
                 "Finishings.Generate",        // 裝修生成
+                "Finishings.Delete",          // 刪除裝修
+                "DeleteFinishings",           // 刪除裝修 (別名)
                 // AR_AutoJoin - 接合工具標準功能
                 "AutoJoin",                   // 自動接合
                 "JoinToPicked",               // 接合到選取
@@ -156,7 +165,10 @@ namespace YD_RevitTools.LicenseManager
                 "Family.ParameterSlider",     // 族參數滑桿
                 "Family.ProjectSlider",       // 專案參數滑桿
                 // MEP - 機電工具標準功能
-                "MEP.PipeSleeve"              // 管線套管
+                "MEP.PipeSleeve",             // 管線套管
+                // Data - 資料工具標準功能
+                "Schedule.Export",            // 明細表匯出
+                "Data.ModelManager"           // 模型資料管理
             },
             [LicenseType.Professional] = new HashSet<string>
             {
@@ -186,29 +198,64 @@ namespace YD_RevitTools.LicenseManager
             LoadLicense();
         }
 
-        private string LicenseFilePath
+        private string LicenseFilePath => GetPrimaryLicenseFilePath();
+
+        private string GetPrimaryLicenseFilePath()
         {
-            get
-            {
-                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                string licenseFolder = Path.Combine(appData, "YD", "RevitTools");
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string licenseFolder = Path.Combine(appData, "YD", "RevitTools");
 
-                if (!Directory.Exists(licenseFolder))
-                    Directory.CreateDirectory(licenseFolder);
+            if (!Directory.Exists(licenseFolder))
+                Directory.CreateDirectory(licenseFolder);
 
-                return Path.Combine(licenseFolder, "license.dat");
-            }
+            return Path.Combine(licenseFolder, "license.dat");
+        }
+
+        private IEnumerable<string> EnumerateLicenseFileCandidates()
+        {
+            string primary = GetPrimaryLicenseFilePath();
+            yield return primary;
+
+            string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            if (!string.IsNullOrWhiteSpace(programData))
+                yield return Path.Combine(programData, "YD", "RevitTools", "license.dat");
+
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrWhiteSpace(localAppData))
+                yield return Path.Combine(localAppData, "YD", "RevitTools", "license.dat");
         }
 
         private void LoadLicense()
         {
             try
             {
-                if (File.Exists(LicenseFilePath))
+                foreach (var path in EnumerateLicenseFileCandidates().Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    string encryptedData = File.ReadAllText(LicenseFilePath);
-                    string decryptedData = Decrypt(encryptedData);
-                    _currentLicense = JsonConvert.DeserializeObject<LicenseInfo>(decryptedData);
+                    if (!File.Exists(path)) continue;
+                    try
+                    {
+                        string encryptedData = File.ReadAllText(path);
+                        string decryptedData = Decrypt(encryptedData);
+                        var loaded = JsonConvert.DeserializeObject<LicenseInfo>(decryptedData);
+                        if (loaded == null) continue;
+
+                        _currentLicense = loaded;
+
+                        string primary = GetPrimaryLicenseFilePath();
+                        if (!path.Equals(primary, StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                File.WriteAllText(primary, encryptedData);
+                            }
+                            catch { }
+                        }
+                        return;
+                    }
+                    catch
+                    {
+                        // 嘗試下一個候選路徑
+                    }
                 }
             }
             catch (Exception ex)
@@ -362,13 +409,17 @@ namespace YD_RevitTools.LicenseManager
         {
             try
             {
-                if (File.Exists(LicenseFilePath))
+                foreach (var path in EnumerateLicenseFileCandidates().Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    File.Delete(LicenseFilePath);
-                    _currentLicense = null;
-                    return true;
+                    try
+                    {
+                        if (File.Exists(path))
+                            File.Delete(path);
+                    }
+                    catch { }
                 }
-                return false;
+                _currentLicense = null;
+                return true;
             }
             catch (Exception ex)
             {
@@ -443,12 +494,38 @@ namespace YD_RevitTools.LicenseManager
                     };
                 }
 
-                // 解析授權金鑰（Base64 解碼）
+                // 解析授權金鑰（支援 HMAC 簽名格式 base64JSON.base64Sig 及舊格式 base64JSON）
                 string jsonData;
                 try
                 {
-                    byte[] data = Convert.FromBase64String(licenseKey);
-                    jsonData = Encoding.UTF8.GetString(data);
+                    if (licenseKey.Contains('.'))
+                    {
+                        // 新格式：base64(JSON).base64(HMAC-SHA256)
+                        int dotIdx = licenseKey.LastIndexOf('.');
+                        string jsonB64 = licenseKey.Substring(0, dotIdx);
+                        string sigB64 = licenseKey.Substring(dotIdx + 1);
+                        byte[] jsonBytes = Convert.FromBase64String(jsonB64);
+                        byte[] sigBytes = Convert.FromBase64String(sigB64);
+                        using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(LICENSE_HMAC_SECRET)))
+                        {
+                            if (!hmac.ComputeHash(jsonBytes).SequenceEqual(sigBytes))
+                            {
+                                return new LicenseValidationResult
+                                {
+                                    IsValid = false,
+                                    Message = "授權金鑰簽名無效（金鑰可能已被篹改）",
+                                    Severity = ValidationSeverity.Error
+                                };
+                            }
+                        }
+                        jsonData = Encoding.UTF8.GetString(jsonBytes);
+                    }
+                    else
+                    {
+                        // 舊格式（向下相容）
+                        byte[] data = Convert.FromBase64String(licenseKey);
+                        jsonData = Encoding.UTF8.GetString(data);
+                    }
                 }
                 catch (FormatException)
                 {

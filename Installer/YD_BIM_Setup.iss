@@ -1,10 +1,10 @@
 ; YD_BIM 工具安裝腳本 - Inno Setup
-; 版本: 2.3.3
-; 日期: 2026-01-12
-; 支援: Revit 2024, 2025, 2026
+; 版本: 2.5.1
+; 日期: 2026-06-23
+; 支援: Revit 2022, 2024, 2025, 2026
 
 #define MyAppName "YD_BIM Tools"
-#define MyAppVersion "2.3.3"
+#define MyAppVersion "2.5.1"
 #define MyAppPublisher "YD_BIM Owen"
 #define MyAppURL "http://www.ydbim.com"
 #define MyAppExeName "YD_RevitTools.LicenseManager.dll"
@@ -61,86 +61,114 @@ ShowLanguageDialog=no
 Name: "chinesetrad"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
+Name: "revit2022"; Description: "Install to Revit 2022"; GroupDescription: "Select Revit versions to install:"; Check: IsRevitInstalled('2022')
 Name: "revit2024"; Description: "Install to Revit 2024"; GroupDescription: "Select Revit versions to install:"; Check: IsRevitInstalled('2024')
 Name: "revit2025"; Description: "Install to Revit 2025"; GroupDescription: "Select Revit versions to install:"; Check: IsRevitInstalled('2025')
 Name: "revit2026"; Description: "Install to Revit 2026"; GroupDescription: "Select Revit versions to install:"; Check: IsRevitInstalled('2026')
 
 [Files]
-; 共用圖示資源（所有版本共用）- 如果不存在則跳過
-Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2024
-Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2025
-Source: "Resources\Icons\*.png"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM\Resources\Icons"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2026
+; 共用 Resources（所有版本共用）- 如果不存在則跳過
+Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2022
+Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2024
+Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2025
+Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2026
 
 ; 共用依賴項（所有版本共用）
+Source: "Newtonsoft.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion; Tasks: revit2022
 Source: "Newtonsoft.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion; Tasks: revit2024
 Source: "Newtonsoft.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion; Tasks: revit2025
 Source: "Newtonsoft.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion; Tasks: revit2026
 
 ; System.Text.Json 及其依賴項（自動更新功能需要）
+Source: "System.Text.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion; Tasks: revit2022
 Source: "System.Text.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion; Tasks: revit2024
 Source: "System.Text.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion; Tasks: revit2025
 Source: "System.Text.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion; Tasks: revit2026
 
+Source: "System.Text.Encodings.Web.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.Text.Encodings.Web.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.Text.Encodings.Web.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Text.Encodings.Web.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.Memory.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.Memory.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.Memory.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Memory.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.Buffers.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.Buffers.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.Buffers.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Buffers.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+; DocumentFormat.OpenXml（房間裝修功能需要 - Excel 匯出）
+Source: "DocumentFormat.OpenXml.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
+Source: "DocumentFormat.OpenXml.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
+Source: "DocumentFormat.OpenXml.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
+Source: "DocumentFormat.OpenXml.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
 ; EPPlus 及其依賴項（Excel 功能需要）
+Source: "EPPlus.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "EPPlus.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "EPPlus.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "EPPlus.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "EPPlus.Interfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "EPPlus.Interfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "EPPlus.Interfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "EPPlus.Interfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "EPPlus.System.Drawing.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "EPPlus.System.Drawing.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "EPPlus.System.Drawing.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "EPPlus.System.Drawing.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "Microsoft.IO.RecyclableMemoryStream.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "Microsoft.IO.RecyclableMemoryStream.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "Microsoft.IO.RecyclableMemoryStream.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "Microsoft.IO.RecyclableMemoryStream.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.ComponentModel.Annotations.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.ComponentModel.Annotations.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.ComponentModel.Annotations.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.ComponentModel.Annotations.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.Drawing.Common.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.Drawing.Common.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.Drawing.Common.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Drawing.Common.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.Numerics.Vectors.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.Numerics.Vectors.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.Numerics.Vectors.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Numerics.Vectors.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.Text.Encoding.CodePages.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.Text.Encoding.CodePages.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.Text.Encoding.CodePages.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Text.Encoding.CodePages.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.Threading.Tasks.Extensions.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.Threading.Tasks.Extensions.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.Threading.Tasks.Extensions.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.Threading.Tasks.Extensions.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+Source: "System.ValueTuple.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2022
 Source: "System.ValueTuple.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2024
 Source: "System.ValueTuple.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "System.ValueTuple.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
+
+; Revit 2022 DLL
+Source: "2022\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2022
 
 ; Revit 2024 DLL
 Source: "2024\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2024
@@ -152,6 +180,8 @@ Source: "2025\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autod
 Source: "2026\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2026
 
 ; 其他附件 (可選)
+Source: "README.txt"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion; Tasks: revit2022
+Source: "LICENSE.txt"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM"; Flags: ignoreversion; Tasks: revit2022
 Source: "README.txt"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion; Tasks: revit2024
 Source: "LICENSE.txt"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM"; Flags: ignoreversion; Tasks: revit2024
 Source: "README.txt"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM"; Flags: ignoreversion; Tasks: revit2025
@@ -165,6 +195,7 @@ Name: "{group}\Documentation"; Filename: "{app}\README.txt"
 
 [Code]
 var
+  Revit2022Installed: Boolean;
   Revit2024Installed: Boolean;
   Revit2025Installed: Boolean;
   Revit2026Installed: Boolean;
@@ -199,15 +230,17 @@ begin
   Result := True;
 
   // 檢查各版本 Revit 安裝狀態
+  Revit2022Installed := IsRevitInstalled('2022');
   Revit2024Installed := IsRevitInstalled('2024');
   Revit2025Installed := IsRevitInstalled('2025');
   Revit2026Installed := IsRevitInstalled('2026');
 
   // 如果沒有任何版本的 Revit 安裝
-  if not (Revit2024Installed or Revit2025Installed or Revit2026Installed) then
+  if not (Revit2022Installed or Revit2024Installed or Revit2025Installed or Revit2026Installed) then
   begin
-    Message := 'No supported Revit version (2024-2026) detected.' + #13#10 + #13#10 +
+    Message := 'No supported Revit version (2022, 2024-2026) detected.' + #13#10 + #13#10 +
                'This add-in requires one of the following Revit versions:' + #13#10 +
+               '  • Autodesk Revit 2022' + #13#10 +
                '  • Autodesk Revit 2024' + #13#10 +
                '  • Autodesk Revit 2025' + #13#10 +
                '  • Autodesk Revit 2026' + #13#10 + #13#10 +
@@ -270,6 +303,9 @@ begin
   if CurStep = ssInstall then
   begin
     // 安裝前先清理舊版本
+    if WizardIsTaskSelected('revit2022') then
+      CleanOldVersion('2022');
+
     if WizardIsTaskSelected('revit2024') then
       CleanOldVersion('2024');
 
@@ -283,6 +319,9 @@ begin
   if CurStep = ssPostInstall then
   begin
     // 為每個選擇的版本建立 .addin 檔案
+    if WizardIsTaskSelected('revit2022') then
+      CreateAddinFile('2022');
+
     if WizardIsTaskSelected('revit2024') then
       CreateAddinFile('2024');
 
@@ -325,11 +364,13 @@ begin
   if CurUninstallStep = usPostUninstall then
   begin
     // 刪除 .addin 檔案
+    DeleteFile(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2022\YD_RevitTools.LicenseManager.addin'));
     DeleteFile(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2024\YD_RevitTools.LicenseManager.addin'));
     DeleteFile(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2025\YD_RevitTools.LicenseManager.addin'));
     DeleteFile(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2026\YD_RevitTools.LicenseManager.addin'));
 
     // 刪除目錄（如果為空）
+    RemoveDir(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2022\YD_BIM'));
     RemoveDir(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2024\YD_BIM'));
     RemoveDir(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2025\YD_BIM'));
     RemoveDir(ExpandConstant('{commonappdata}\Autodesk\Revit\Addins\2026\YD_BIM'));
@@ -338,6 +379,5 @@ end;
 
 [Messages]
 WelcomeLabel1=歡迎使用 [name] 安裝精靈
-WelcomeLabel2=這將在您的電腦上安裝 [name/ver]。%n%n本安裝程式支援 Revit 2024、2025 和 2026。%n%n建議您在繼續之前關閉所有 Revit 應用程式。
+WelcomeLabel2=這將在您的電腦上安裝 [name/ver]。%n%n本安裝程式支援 Revit 2022、2024、2025 和 2026。%n%n建議您在繼續之前關閉所有 Revit 應用程式。
 FinishedLabel=安裝程式已在您的電腦上安裝 [name]。%n%n請重新啟動 Revit 以載入外掛。%n%n已安裝到以下版本：%n• 您選擇的 Revit 版本
-

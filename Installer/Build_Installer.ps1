@@ -9,6 +9,7 @@ Write-Host ""
 $installerDir = $PSScriptRoot
 $projectRoot = Split-Path $installerDir -Parent
 $issFile = Join-Path $installerDir "YD_BIM_Setup.iss"
+$prepareScript = Join-Path $installerDir "Prepare_Files_Simple.ps1"
 
 # Check if Inno Setup is installed
 $isccPaths = @(
@@ -41,7 +42,25 @@ if (-not (Test-Path $issFile)) {
     exit 1
 }
 
+if (-not (Test-Path $prepareScript)) {
+    Write-Host "[ERROR] Prepare script not found: $prepareScript" -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Setup script: $issFile" -ForegroundColor Gray
+Write-Host ""
+
+# Prepare installer payload before compiling
+Write-Host "Preparing installer payload..." -ForegroundColor Yellow
+Write-Host "" 
+
+& $prepareScript
+if (-not $?) {
+    Write-Host "" 
+    Write-Host "[ERROR] Prepare step failed. Installer build aborted." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host ""
 
 # Compile the installer
