@@ -2,8 +2,8 @@
 
 **專業的 Revit 工具集 - 提升 BIM 工作效率**
 
-[![Version](https://img.shields.io/badge/version-2.2.3-blue.svg)](https://github.com/QOORST/YD_BIM_Tools/releases)
-[![Revit](https://img.shields.io/badge/Revit-2024%20|%202025%20|%202026-orange.svg)](https://www.autodesk.com/products/revit)
+[![Version](https://img.shields.io/badge/version-2.5.1-blue.svg)](https://github.com/QOORST/YD_BIM_Tools/releases)
+[![Revit](https://img.shields.io/badge/Revit-2022%20|%202024%20|%202025%20|%202026-orange.svg)](https://www.autodesk.com/products/revit)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -26,11 +26,14 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 - **管線套管** - 自動為穿牆/穿樓板的管線放置套管
 
 ### 📊 數據工具
-- **COBie 匯出** - 增強版 COBie 匯出，支援連結模型
+- **自訂 COBie** - 依自訂欄位與參數對照匯出，支援連結模型
+- **標準 COBie** - 依標準工作表與必要欄位檢核規則匯出
 - **CSV 匯出** - 批量匯出元素參數到 CSV
 
 ### 🏗️ AR 模板工具
-- **裝修模板** - 快速建立裝修元素
+- **房間裝修** - 依房間設定建立牆、地板、天花與踢腳板，並同步模型實際裝修牆高
+- **房間裝修驗算** - 匯出「驗算報表／明細表驗收」Excel，並建立 `AR_Check_*` 3D 視圖，協助檢查交付明細報表數量是否正確
+- **面生面** - 從選取面快速建立裝修元素
 - **參數滑桿** - 視覺化調整族群參數
 
 ---
@@ -40,7 +43,7 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 ### 系統需求
 
 - **作業系統**: Windows 10/11 (64-bit)
-- **Revit 版本**: 2024 / 2025 / 2026
+- **Revit 版本**: 2022 / 2024 / 2025 / 2026
 - **.NET Framework**: 4.8 或更高版本
 - **磁碟空間**: 至少 50 MB
 
