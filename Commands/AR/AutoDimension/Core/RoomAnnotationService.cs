@@ -4,6 +4,8 @@ using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
 
+#nullable enable
+
 namespace YDBIM.AutoDimension.Core
 {
 

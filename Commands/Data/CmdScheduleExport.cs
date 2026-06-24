@@ -327,7 +327,6 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                         continue;
                     }
 
-                    bool rowUpdated = false;
                     foreach (var kv in headers)
                     {
                         string header = kv.Value;
@@ -358,7 +357,6 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                             NewValue = text,
                             CanApply = true
                         });
-                        rowUpdated = true;
                     }
                 }
             }

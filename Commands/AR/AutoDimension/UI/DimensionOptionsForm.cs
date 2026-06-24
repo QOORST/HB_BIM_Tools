@@ -7,6 +7,8 @@ using System.Windows.Forms;
 using RevitDB = Autodesk.Revit.DB;
 using YDBIM.AutoDimension.Core;
 
+#nullable enable
+
 namespace YDBIM.AutoDimension.UI
 {
 

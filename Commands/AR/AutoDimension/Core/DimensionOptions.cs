@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using Autodesk.Revit.DB;
 
+#nullable enable
+
 namespace YDBIM.AutoDimension.Core
 {
 

@@ -286,8 +286,6 @@ namespace YD_RevitTools.LicenseManager.Helpers.Data
                 System.Diagnostics.Debug.WriteLine($"ElementId 解析失敗: {ex.Message}");
                 return ElementId.InvalidElementId;
             }
-
-            return null;
         }
 
         /// <summary>

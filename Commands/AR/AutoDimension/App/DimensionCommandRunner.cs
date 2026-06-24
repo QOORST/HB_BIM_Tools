@@ -3,6 +3,8 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using YDBIM.AutoDimension.Core;
 
+#nullable enable
+
 namespace YDBIM.AutoDimension.App
 {
 

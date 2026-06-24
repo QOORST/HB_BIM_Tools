@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 
+#nullable enable
+
 namespace YDBIM.AutoDimension.Core
 {
 
@@ -1560,7 +1562,7 @@ internal sealed class AutoDimensionService
         Solid solid,
         XYZ viewNormal,
         ICollection<(PlanarFace Face, XYZ Normal, XYZ Point)> bucket,
-        Transform transform = null)
+        Transform? transform = null)
     {
         foreach (Face face in solid.Faces)
         {
