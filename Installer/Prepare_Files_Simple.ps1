@@ -66,6 +66,7 @@ $dependencyDlls = @(
     "SQLitePCLRaw.batteries_v2.dll",
     "SQLitePCLRaw.core.dll",
     "SQLitePCLRaw.provider.dynamic_cdecl.dll",
+    "e_sqlite3.dll",
     "Microsoft.Bcl.AsyncInterfaces.dll",
     "System.ComponentModel.Annotations.dll",
     "System.Drawing.Common.dll",

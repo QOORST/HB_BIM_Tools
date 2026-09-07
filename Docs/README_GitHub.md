@@ -2,7 +2,7 @@
 
 **專業的 Revit 工具集 - 提升 BIM 工作效率**
 
-[![Version](https://img.shields.io/badge/version-2.5.11-blue.svg)](https://github.com/QOORST/HB_BIM_Tools/releases)
+[![Version](https://img.shields.io/badge/version-2.5.12-blue.svg)](https://github.com/QOORST/HB_BIM_Tools/releases)
 [![Revit](https://img.shields.io/badge/Revit-2022%20|%202024%20|%202025%20|%202026-orange.svg)](https://www.autodesk.com/products/revit)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](../LICENSE.txt)
 
@@ -56,7 +56,7 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 1. **下載安裝程式**
    - 前往 [Releases](https://github.com/QOORST/HB_BIM_Tools/releases) 頁面
-   - 下載最新版本的 `HB_BIM_Tools_v2.5.11_Setup.exe`
+   - 下載最新版本的 `HB_BIM_Tools_v2.5.12_Setup.exe`
 
 2. **執行安裝**
    - 關閉所有 Revit 實例
@@ -112,6 +112,13 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 ---
 
 ## 🔄 更新日誌
+
+### v2.5.12 (2026-09-07)
+
+#### 安全性改進
+- 更新原生 SQLite 相依套件，排除已知高風險弱點。
+- 解除安裝時同步移除 HB_BIM Tools 專用 LAN 自簽憑證。
+- AI 助理維持本地端／選配功能，本版不調整 AI 服務部署。
 
 ### v2.5.11 (2026-08-31)
 
