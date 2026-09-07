@@ -5,6 +5,33 @@
 ## 保留工具
 
 - `GenerateLicenseKey.ps1`：使用授權私鑰產生 HB_BIM Tools 授權碼，並寫入授權紀錄。
+- `Check-DevelopmentEnvironment.ps1`：檢查新電腦的 Git、.NET、Revit API、發版工具、公司族庫 payload 與憑證狀態，不會讀取或複製私鑰內容。
+
+## 新電腦環境檢查
+
+一般開發電腦使用預設模式。公司族庫、Inno Setup 與簽章私鑰不存在時不會阻止其他工具開發：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\Tools\Check-DevelopmentEnvironment.ps1 -Mode Development -RestorePackages
+```
+
+公司電腦在建立正式安裝檔前使用發版模式：
+
+```powershell
+.\Tools\Check-DevelopmentEnvironment.ps1 -Mode Release -RestorePackages
+```
+
+只有需要管理授權的授權電腦才指定外部私鑰路徑：
+
+```powershell
+.\Tools\Check-DevelopmentEnvironment.ps1 `
+    -Mode Release `
+    -CheckLicenseAdministration `
+    -LicensePrivateKeyPath "D:\HB_BIM-Secrets\license-private-key.pfx"
+```
+
+私鑰必須位於 Git 專案外；腳本只確認檔案存在，不會讀取內容。
 
 ## 正式建置與發佈入口
 
