@@ -1383,7 +1383,8 @@ internal sealed class DimensionOptionsForm : Form
 
         var directionLayout = new TableLayoutPanel
         {
-            Dock = DockStyle.Top,
+            Anchor = AnchorStyles.Left,
+            Width = 312,
             ColumnCount = 3,
             RowCount = 3,
             Padding = new Padding(0, 10, 0, 8),
@@ -1415,9 +1416,9 @@ internal sealed class DimensionOptionsForm : Form
 
         var centerBox = new Panel
         {
-            Width = UseDarkTheme ? 96 : 84,
-            Height = UseDarkTheme ? 96 : 84,
-            Margin = new Padding(8),
+            Width = 56,
+            Height = 40,
+            Margin = new Padding(4),
             BorderStyle = BorderStyle.FixedSingle,
             BackColor = UseDarkTheme ? Color.FromArgb(48, 48, 48) : Color.FromArgb(245, 247, 250),
             Anchor = AnchorStyles.None
@@ -1474,14 +1475,16 @@ internal sealed class DimensionOptionsForm : Form
         modePanel.Controls.Add(_placementModeCombo);
         panel.Controls.Add(modePanel, 0, 2);
 
-        panel.Controls.Add(new Label
+        var placementHint = new Label
         {
             Text = "提示：可選擇一個水平側與/或一個垂直側；手動模式會再請你點選放置側。",
             AutoSize = true,
             MaximumSize = new Size(760, 0),
             ForeColor = UseDarkTheme ? Color.FromArgb(205, 205, 205) : Color.FromArgb(80, 80, 80),
             Margin = new Padding(0, 10, 0, 0)
-        }, 0, 3);
+        };
+        panel.Controls.Add(placementHint, 0, 3);
+        panel.SizeChanged += (_, _) => placementHint.MaximumSize = new Size(Math.Max(100, panel.ClientSize.Width - panel.Padding.Horizontal - 12), 0);
 
         var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.Transparent };
         host.Controls.Add(panel);
@@ -1495,13 +1498,14 @@ internal sealed class DimensionOptionsForm : Form
         var button = new Button
         {
             Text = text,
-            Width = UseDarkTheme ? 96 : 124,
-            Height = UseDarkTheme ? 96 : 40,
+            Width = 88,
+            Height = 40,
+            Anchor = AnchorStyles.None,
             FlatStyle = FlatStyle.Flat,
             BackColor = UseDarkTheme ? Color.FromArgb(45, 132, 247) : Color.White,
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(40, 52, 70),
-            Margin = new Padding(8),
-            Font = new Font("Segoe UI", UseDarkTheme ? 12F : 9.5F, FontStyle.Bold, GraphicsUnit.Point)
+            Margin = new Padding(4),
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point)
         };
         button.FlatAppearance.BorderColor = UseDarkTheme ? Color.FromArgb(75, 155, 255) : Color.FromArgb(190, 202, 218);
         button.FlatAppearance.MouseOverBackColor = UseDarkTheme ? Color.FromArgb(65, 150, 255) : Color.FromArgb(232, 242, 255);
@@ -1537,7 +1541,7 @@ internal sealed class DimensionOptionsForm : Form
 
     private static bool IsDarkDirectionButton(Button button)
     {
-        return button.Height >= 90;
+        return UseDarkTheme;
     }
 
     private Control BuildGridPlacementPanel()
@@ -1777,7 +1781,7 @@ internal sealed class DimensionOptionsForm : Form
         {
             Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Padding = new Padding(16),
             AutoSize = true,
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White
@@ -1804,6 +1808,26 @@ internal sealed class DimensionOptionsForm : Form
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.Transparent,
             Margin = new Padding(0, 8, 0, 0)
         }, 0, 1);
+
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var offsetButton = new Button
+        {
+            Text = "調整標註距離（Offsets）",
+            AutoSize = true,
+            Padding = new Padding(12, 6, 12, 6),
+            Margin = new Padding(0, 16, 0, 0),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(45, 132, 247),
+            ForeColor = Color.White
+        };
+        offsetButton.Click += (_, _) => _tabControl.SelectedIndex = 1;
+        panel.Controls.Add(offsetButton, 0, 2);
+        panel.SizeChanged += (_, _) =>
+        {
+            foreach (Control child in panel.Controls)
+                if (child is Label label)
+                    label.MaximumSize = new Size(Math.Max(100, panel.ClientSize.Width - panel.Padding.Horizontal - 12), 0);
+        };
 
         var host = new Panel
         {
