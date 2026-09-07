@@ -10,6 +10,7 @@ $revitApiRoot = Split-Path (Split-Path $projectRoot -Parent) -Parent
 $familyLibraryProjectRoot = Join-Path $revitApiRoot "Codex\work\family-library-management\addin"
 $supportedVersions = @("2022", "2024", "2025", "2026")
 $netStandardOpenXmlVersions = @("2025", "2026")
+$runtimeResourceExtensions = @(".png", ".ico", ".jpg", ".jpeg", ".rfa")
 
 function Resolve-FamilyLibraryDll {
     param(
@@ -136,38 +137,39 @@ Write-Host "Creating shared resources..." -ForegroundColor Yellow
 
 # 1. Resources directory
 $sharedResourcesDir = Join-Path $installerDir "Resources"
+if (Test-Path $sharedResourcesDir) {
+    Remove-Item $sharedResourcesDir -Recurse -Force
+}
 New-Item -ItemType Directory -Path $sharedResourcesDir -Force | Out-Null
 
 $sourceIconsDir = Join-Path $sourceResources "Icons"
-$installerIconsDir = Join-Path $sharedResourcesDir "Icons"
 $sourceIconCount = 0
-$installerIconCountBeforeSync = 0
 
 if (Test-Path $sourceIconsDir) {
     $sourceIconCount = (Get-ChildItem $sourceIconsDir -Recurse -File -Include *.png,*.ico,*.jpg,*.jpeg -ErrorAction SilentlyContinue).Count
 }
 
-if (Test-Path $installerIconsDir) {
-    $installerIconCountBeforeSync = (Get-ChildItem $installerIconsDir -Recurse -File -Include *.png,*.ico,*.jpg,*.jpeg -ErrorAction SilentlyContinue).Count
-}
-
-# Keep existing Installer\Resources content and sync incrementally from project Resources.
+# Rebuild Installer\Resources from runtime assets only. Development scripts and notes stay in source.
 $resourceFileCount = 0
 if (Test-Path $sourceResources) {
-    $sourceResourceFileCount = (Get-ChildItem $sourceResources -Recurse -File -ErrorAction SilentlyContinue).Count
-    if ($sourceResourceFileCount -gt 0) {
-        Copy-Item "$sourceResources\*" -Destination $sharedResourcesDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "[OK] Synced project Resources to installer Resources" -ForegroundColor Green
+    $runtimeResources = Get-ChildItem $sourceResources -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $runtimeResourceExtensions -contains $_.Extension.ToLowerInvariant() }
+
+    if ($runtimeResources.Count -gt 0) {
+        foreach ($resource in $runtimeResources) {
+            $relativePath = $resource.FullName.Substring($sourceResources.Length).TrimStart('\')
+            $targetPath = Join-Path $sharedResourcesDir $relativePath
+            $targetDir = Split-Path $targetPath -Parent
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+            Copy-Item -LiteralPath $resource.FullName -Destination $targetPath -Force
+        }
+
+        Write-Host "[OK] Synced runtime Resources to installer Resources" -ForegroundColor Green
     } else {
-        Write-Host "[INFO] Project Resources is empty, keeping existing installer Resources" -ForegroundColor Yellow
+        Write-Host "[INFO] Project Resources has no runtime assets" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "[INFO] Project Resources not found, keeping existing installer Resources" -ForegroundColor Yellow
-}
-
-if ($installerIconCountBeforeSync -gt 0 -and $sourceIconCount -eq 0) {
-    Write-Host "WARNING: Installer/Resources/Icons contains image files, but project Resources/Icons has none." -ForegroundColor Yellow
-    Write-Host "WARNING: Existing installer icon files were preserved. Verify whether they should be synced back to project Resources." -ForegroundColor Yellow
+    Write-Host "[INFO] Project Resources not found" -ForegroundColor Yellow
 }
 
 $resourceFileCount = (Get-ChildItem $sharedResourcesDir -Recurse -File -ErrorAction SilentlyContinue).Count
