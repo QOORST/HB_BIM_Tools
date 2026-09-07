@@ -191,7 +191,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
             public string GetName()
             {
-                return "YD BIM Tools - COBie 欄位設定";
+                return "HB_BIM Tools - COBie 欄位設定";
             }
         }
 

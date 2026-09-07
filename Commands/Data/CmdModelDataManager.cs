@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
@@ -180,7 +181,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
             public string GetName()
             {
-                return "YD BIM Tools - 模型資料管理";
+                return "HB_BIM Tools - 模型資料管理";
             }
         }
 
@@ -204,6 +205,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             private readonly WinButton _applyAllButton = new WinButton();
             private readonly WinButton _deleteSelectedButton = new WinButton();
             private readonly WinButton _closeButton = new WinButton();
+            private readonly Timer _filterDebounceTimer = new Timer { Interval = 300 };
             private int _lastCheckedRowIndex = -1;
 
             public ModelDataManagerDialog(
@@ -214,7 +216,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 _doc = doc;
                 _externalHandler = externalHandler;
                 _externalEvent = externalEvent;
-                Text = "YD BIM Tools - 模型資料管理";
+                Text = "HB_BIM Tools - 模型資料管理";
                 StartPosition = FormStartPosition.CenterScreen;
                 MinimumSize = new Size(1260, 740);
                 Size = new Size(1480, 860);
@@ -222,6 +224,11 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 Font = new Font("Microsoft JhengHei UI", 9.5F);
 
                 BuildLayout();
+                _filterDebounceTimer.Tick += (s, e) =>
+                {
+                    _filterDebounceTimer.Stop();
+                    ApplyFilter();
+                };
                 LoadRows();
                 ApplyFilter();
             }
@@ -311,7 +318,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 _searchBox.Width = 320;
                 _searchBox.Height = 28;
                 _searchBox.Margin = new Padding(0, 4, 22, 0);
-                _searchBox.TextChanged += (s, e) => ApplyFilter();
+                _searchBox.TextChanged += (s, e) => ScheduleApplyFilter();
                 flow.Controls.Add(_searchBox);
 
                 _changedOnly.Text = "只看已修改";
@@ -841,6 +848,12 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                        Contains(categoryName, "箭號");
             }
 
+            private void ScheduleApplyFilter()
+            {
+                _filterDebounceTimer.Stop();
+                _filterDebounceTimer.Start();
+            }
+
             private void ApplyFilter()
             {
                 var keyword = (_searchBox.Text ?? "").Trim();
@@ -1043,6 +1056,18 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     return;
                 }
 
+                var validationErrors = ValidateRenameTargets(targetRows);
+                if (validationErrors.Count > 0)
+                {
+                    _grid.Refresh();
+                    UpdateSummary();
+                    MessageBox.Show(
+                        "以下項目需要先修正，已列出前 10 筆：\n\n" + string.Join("\n", validationErrors.Take(10)),
+                        "模型資料管理",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
                 var confirm = MessageBox.Show(
                     $"即將套用 {targetRows.Count} 筆名稱變更。\n\n建議先確認沒有重名或命名規則衝突。是否繼續？",
                     "套用變更",
@@ -1054,6 +1079,81 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 RequestApplyChanges(targetRows);
             }
 
+            private List<string> ValidateRenameTargets(List<ModelDataRow> targetRows)
+            {
+                var errors = new List<string>();
+                var duplicateTargets = new HashSet<ModelDataRow>(targetRows
+                    .GroupBy(GetRenameScopeKey, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Count() > 1)
+                    .SelectMany(g => g));
+
+                foreach (var row in targetRows)
+                {
+                    var newName = (row.NewName ?? string.Empty).Trim();
+                    if (string.IsNullOrWhiteSpace(newName))
+                    {
+                        row.Status = "名稱空白";
+                        errors.Add($"{row.KindName}：{row.CurrentName} -> 名稱不可空白");
+                        continue;
+                    }
+
+                    if (HasInvalidRevitNameChars(newName))
+                    {
+                        row.Status = "名稱含非法字元";
+                        errors.Add($"{row.KindName}：{row.CurrentName} -> 名稱含非法字元");
+                        continue;
+                    }
+
+                    if (duplicateTargets.Contains(row))
+                    {
+                        row.Status = "新名稱重複";
+                        errors.Add($"{row.KindName}：{row.CurrentName} -> 新名稱與本次批次項目重複");
+                        continue;
+                    }
+
+                    var key = GetRenameScopeKey(row);
+                    var existing = _allRows.FirstOrDefault(r =>
+                        !IsSameElement(r, row) &&
+                        string.Equals(GetCurrentScopeKey(r), key, StringComparison.OrdinalIgnoreCase));
+                    if (existing != null)
+                    {
+                        row.Status = "已存在同名項目";
+                        errors.Add($"{row.KindName}：{row.CurrentName} -> 已存在同名項目：{existing.CurrentName}");
+                        continue;
+                    }
+
+                    row.Status = row.IsChanged ? "待套用" : row.Status;
+                }
+
+                return errors;
+            }
+
+            private static string GetRenameScopeKey(ModelDataRow row)
+            {
+                return GetScopePrefix(row) + "|" + ((row.NewName ?? string.Empty).Trim());
+            }
+
+            private static string GetCurrentScopeKey(ModelDataRow row)
+            {
+                return GetScopePrefix(row) + "|" + ((row.CurrentName ?? string.Empty).Trim());
+            }
+
+            private static string GetScopePrefix(ModelDataRow row)
+            {
+                return row.Kind == ModelDataKind.Type
+                    ? $"{row.Kind}|{row.Category}|{row.FamilyName}"
+                    : row.Kind.ToString();
+            }
+
+            private static bool IsSameElement(ModelDataRow left, ModelDataRow right)
+            {
+                return left.ElementId.GetIdValue() == right.ElementId.GetIdValue();
+            }
+
+            private static bool HasInvalidRevitNameChars(string name)
+            {
+                return Regex.IsMatch(name ?? string.Empty, @"[\\:{}\[\]|;<>?`~]");
+            }
             private void RequestApplyChanges(List<ModelDataRow> targetRows)
             {
                 _externalHandler.RequestApply(targetRows);

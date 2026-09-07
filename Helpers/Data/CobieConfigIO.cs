@@ -11,7 +11,7 @@ namespace YD_RevitTools.LicenseManager.Helpers.Data
     {
         internal static string ConfigPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "YD_BIM_Tools", "COBieFieldConfig.xml");
+            "HB_BIM_Tools", "COBieFieldConfig.xml");
 
         public static List<CmdCobieFieldManager.CobieFieldConfig> LoadConfig()
         {

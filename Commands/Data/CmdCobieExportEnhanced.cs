@@ -161,7 +161,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
             public string GetName()
             {
-                return "YD BIM Tools - 自訂 COBie";
+                return "HB_BIM Tools - 自訂 COBie";
             }
         }
 
@@ -180,7 +180,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 _requestAction = requestAction;
                 _checkBoxes = new Dictionary<BuiltInCategory, System.Windows.Forms.CheckBox>();
 
-                Text = "YD BIM Tools - 自訂 COBie";
+                Text = "HB_BIM Tools - 自訂 COBie";
                 Width = 460;
                 Height = 540;
                 MinimumSize = new System.Drawing.Size(420, 460);

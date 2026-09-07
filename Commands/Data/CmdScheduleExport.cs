@@ -197,7 +197,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
             public string GetName()
             {
-                return "YD BIM Tools - 明細表匯出";
+                return "HB_BIM Tools - 明細表匯出";
             }
         }
 
@@ -1157,7 +1157,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             {
                 var p = new Dictionary<string, int>();
                 foreach (DataGridViewColumn c in _grid.Columns) p[c.Name] = c.Width;
-                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YD_BIM_Tools");
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HB_BIM_Tools");
                 Directory.CreateDirectory(dir);
                 string file = Path.Combine(dir, "ImportPreviewColumns.txt");
                 File.WriteAllLines(file, p.Select(kv => kv.Key + "=" + kv.Value));
@@ -1169,7 +1169,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
         {
             try
             {
-                string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YD_BIM_Tools", "ImportPreviewColumns.txt");
+                string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HB_BIM_Tools", "ImportPreviewColumns.txt");
                 if (!File.Exists(file)) return;
                 foreach (var line in File.ReadAllLines(file))
                 {
@@ -1232,7 +1232,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             _allInfos = infos;
             _requestAction = requestAction;
 
-            Text = "YD BIM Tools - 明細表匯出";
+            Text = "HB_BIM Tools - 明細表匯出";
             Width = 760;
             Height = 820;
             MinimumSize = new Size(760, 780);
