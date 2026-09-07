@@ -126,13 +126,27 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         continue;
                     }
 
+                    string fingerprint = SleeveFamilyLoadStamp.Fingerprint(path, builtInVersion);
+                    if (SleeveFamilyLoadStamp.WasLoaded(_doc, familyName, fingerprint))
+                    {
+                        loadedNames.Add(familyName);
+                        continue;
+                    }
+
                     using (Transaction transaction = new Transaction(_doc, "載入預設套管族群"))
                     {
                         transaction.Start();
                         Autodesk.Revit.DB.Family loadedFamily;
                         _doc.LoadFamily(path, new OverwriteSleeveFamilyLoadOptions(), out loadedFamily);
                         _doc.Regenerate();
-                        transaction.Commit();
+                        if (!SleeveFamilyLoadStamp.Record(_doc, familyName, fingerprint,
+                            IsLoadedFamilyVersionCurrent(familyName, builtInVersion)))
+                        {
+                            transaction.RollBack();
+                            continue;
+                        }
+                        if (transaction.Commit() != TransactionStatus.Committed)
+                            continue;
                     }
 
                     loadedNames.Add(familyName);

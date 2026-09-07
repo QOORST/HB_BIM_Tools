@@ -168,7 +168,7 @@ internal sealed class DimensionOptionsForm : Form
             Padding = new Padding(18, 18, 18, 14),
             BackColor = Color.FromArgb(39, 39, 39)
         };
-        dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 124));
+        dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
         dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         dimensionsRoot.Controls.Add(BuildTypePanel(dimensionTypeNames), 0, 0);
@@ -196,7 +196,7 @@ internal sealed class DimensionOptionsForm : Form
 
     private Control BuildModeContent(IEnumerable<GridSelectionItem> horizontalGrids, IEnumerable<GridSelectionItem> verticalGrids)
     {
-        _modeTabControl = new TabControl
+        _modeTabControl = new ThemedTabControl
         {
             DrawMode = TabDrawMode.OwnerDrawFixed,
             SizeMode = TabSizeMode.Fixed,
@@ -415,9 +415,26 @@ internal sealed class DimensionOptionsForm : Form
         return host;
     }
 
+    private sealed class ThemedTabControl : TabControl
+    {
+        public ThemedTabControl()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White);
+            for (int i = 0; i < TabCount; i++)
+                OnDrawItem(new DrawItemEventArgs(e.Graphics, Font, GetTabRect(i), i,
+                    i == SelectedIndex ? DrawItemState.Selected : DrawItemState.None));
+        }
+    }
+
     private TabControl CreateDarkTabControl()
     {
-        var control = new TabControl
+        var control = new ThemedTabControl
         {
             DrawMode = TabDrawMode.OwnerDrawFixed,
             SizeMode = TabSizeMode.Fixed,
@@ -470,13 +487,14 @@ internal sealed class DimensionOptionsForm : Form
 
         var board = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            Height = 500,
             ColumnCount = 2,
             RowCount = 1,
             Padding = new Padding(22),
             BackColor = UseDarkTheme ? Color.FromArgb(34, 34, 34) : Color.White,
             BorderStyle = BorderStyle.FixedSingle,
-            MinimumSize = new Size(0, 420)
+            MinimumSize = new Size(0, 500)
         };
         board.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         board.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -484,7 +502,10 @@ internal sealed class DimensionOptionsForm : Form
         board.Controls.Add(BuildLevelOffsetPanel(), 0, 0);
         board.Controls.Add(BuildGridOffsetPanel(), 1, 0);
 
-        return board;
+        var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        host.Controls.Add(board);
+        host.Resize += (_, _) => board.Height = Math.Max(board.MinimumSize.Height, host.ClientSize.Height);
+        return host;
     }
 
     private static Label CreateOffsetUnitLabel()
@@ -638,7 +659,11 @@ internal sealed class DimensionOptionsForm : Form
         var container = CreateOffsetDiagramContainer("一般標註距離", "柱、梁與第一道柱線標註使用此距離。");
         var diagram = CreateLevelOffsetDiagram();
         container.Controls.Add(diagram, 0, 1);
-        container.Controls.Add(CreateOffsetInputRow("第一道距離", _offsetNumeric), 0, 2);
+        var inputs = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
+        inputs.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        inputs.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        inputs.Controls.Add(CreateOffsetInputRow("第一道距離", _offsetNumeric), 0, 0);
+        container.Controls.Add(inputs, 0, 2);
         return container;
     }
 
@@ -791,8 +816,8 @@ internal sealed class DimensionOptionsForm : Form
             int firstY = headY + 64;
             int overallY = headY + 102;
             int x1 = area.Left + 42;
-            int x2 = area.Left + area.Width / 2;
-            int x3 = area.Right - 42;
+            int x2 = area.Left + (area.Width - 108) / 2;
+            int x3 = area.Right - 150;
 
             e.Graphics.DrawLine(mainPen, x1, baseY, x3, baseY);
             e.Graphics.DrawLine(mainPen, x2, headY + 18, x2, baseY);
@@ -821,7 +846,7 @@ internal sealed class DimensionOptionsForm : Form
             Dock = DockStyle.Fill,
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White,
             Margin = new Padding(0, 4, 0, 8),
-            MinimumSize = new Size(0, 150)
+            MinimumSize = new Size(0, 200)
         };
     }
 
@@ -937,11 +962,11 @@ internal sealed class DimensionOptionsForm : Form
         {
             Dock = DockStyle.Fill,
             Text = "標註型式",
-            Padding = new Padding(16, 32, 16, 14),
+            Padding = new Padding(12, 20, 12, 8),
             Margin = new Padding(0, 4, 0, 4),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(28, 48, 74),
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White,
-            MinimumSize = new Size(0, 112)
+            MinimumSize = new Size(0, 74)
         };
 
         var layout = new TableLayoutPanel
@@ -952,7 +977,7 @@ internal sealed class DimensionOptionsForm : Form
             AutoSize = false,
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.Controls.Add(new Label
@@ -1553,15 +1578,15 @@ internal sealed class DimensionOptionsForm : Form
             grid.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33F));
         }
 
-        AddGridDirectionButton(grid, PlacementDirection.NorthWest, "↖\r\n左上", 0, 0);
-        AddGridDirectionButton(grid, PlacementDirection.North, "↑\r\n上", 1, 0);
-        AddGridDirectionButton(grid, PlacementDirection.NorthEast, "↗\r\n右上", 2, 0);
-        AddGridDirectionButton(grid, PlacementDirection.West, "←\r\n左", 0, 1);
-        AddGridDirectionButton(grid, PlacementDirection.NorthEast, "全選\r\n預設", 1, 1, isDefault: true);
-        AddGridDirectionButton(grid, PlacementDirection.East, "→\r\n右", 2, 1);
-        AddGridDirectionButton(grid, PlacementDirection.SouthWest, "↙\r\n左下", 0, 2);
-        AddGridDirectionButton(grid, PlacementDirection.South, "↓\r\n下", 1, 2);
-        AddGridDirectionButton(grid, PlacementDirection.SouthEast, "↘\r\n右下", 2, 2);
+        AddGridDirectionButton(grid, PlacementDirection.NorthWest, "↖ 左上", 0, 0);
+        AddGridDirectionButton(grid, PlacementDirection.North, "↑ 上", 1, 0);
+        AddGridDirectionButton(grid, PlacementDirection.NorthEast, "↗ 右上", 2, 0);
+        AddGridDirectionButton(grid, PlacementDirection.West, "← 左", 0, 1);
+        AddGridDirectionButton(grid, PlacementDirection.NorthEast, "預設", 1, 1, isDefault: true);
+        AddGridDirectionButton(grid, PlacementDirection.East, "→ 右", 2, 1);
+        AddGridDirectionButton(grid, PlacementDirection.SouthWest, "↙ 左下", 0, 2);
+        AddGridDirectionButton(grid, PlacementDirection.South, "↓ 下", 1, 2);
+        AddGridDirectionButton(grid, PlacementDirection.SouthEast, "↘ 右下", 2, 2);
         root.Controls.Add(grid, 0, 0);
 
         root.Controls.Add(new Label
@@ -1638,9 +1663,9 @@ internal sealed class DimensionOptionsForm : Form
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 154));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 10));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 152));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
 
         var placementPanel = BuildGridPlacementPanel();

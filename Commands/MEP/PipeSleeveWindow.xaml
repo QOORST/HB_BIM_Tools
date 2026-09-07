@@ -29,7 +29,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <GroupBox Header="管篩選模式" Margin="0,0,0,14">
                         <StackPanel Margin="10">
@@ -86,28 +86,23 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-
-                <StackPanel Grid.Row="0">
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
                     <TextBlock Text="穿梁/牆套管流程" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
                     <Border Background="#EEF3F7" BorderBrush="#D5DDE5" BorderThickness="1" Padding="14" Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock Text="1. 選取管線或風管" Margin="0,0,0,6"/>
-                            <TextBlock Text="2. 檢測當前或連結建築模型的牆、樓板、樑" Margin="0,0,0,6"/>
-                            <TextBlock Text="3. 依 DN 大一級套用套管類型" Margin="0,0,0,6"/>
-                            <TextBlock Text="4. 依對應建築構件厚度設定套管長度"/>
+                            <TextBlock Text="1. 選取管線或風管" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <TextBlock Text="2. 檢測當前或連結建築模型的牆、樓板、樑" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <TextBlock Text="3. 依 DN 大一級套用套管類型" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <TextBlock Text="4. 依對應建築構件厚度設定套管長度" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
                     <Border Background="#FFFDF8" BorderBrush="#E4D7B7" BorderThickness="1" Padding="12" Margin="0,0,0,14">
                         <StackPanel>
                             <TextBlock Text="穿梁原則示意" FontSize="16" FontWeight="Bold" Margin="0,0,0,8"/>
-                            <Grid Height="178" MinWidth="430">
-                                <Canvas ClipToBounds="True">
+                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                <Canvas Width="430" Height="154">
                                     <Rectangle Canvas.Left="20" Canvas.Top="50" Width="390" Height="46" Fill="#D9DEE3" Stroke="#89919A" StrokeThickness="1"/>
                                     <Rectangle Canvas.Left="20" Canvas.Top="46" Width="390" Height="4" Fill="#8A929B"/>
                                     <Rectangle Canvas.Left="20" Canvas.Top="96" Width="390" Height="4" Fill="#8A929B"/>
@@ -129,14 +124,12 @@
                                     <Ellipse Canvas.Left="190" Canvas.Top="104" Width="16" Height="16" Fill="#FFFFFF" Stroke="#D9534F" StrokeThickness="3"/>
                                     <Ellipse Canvas.Left="236" Canvas.Top="104" Width="16" Height="16" Fill="#FFFFFF" Stroke="#D9534F" StrokeThickness="3"/>
                                     <TextBlock Canvas.Left="181" Canvas.Top="124" Text="孔距 &lt; 3D 或 300mm" Foreground="#B00020" FontSize="11"/>
-                                    <TextBlock Canvas.Left="78" Canvas.Top="154" Text="紅色：梁端/柱邊 2H、孔徑、梁深比例或孔距不符，仍生成但標示為需複核。" Foreground="#555" FontSize="12"/>
                                 </Canvas>
-                            </Grid>
+                            </Viewbox>
+                            <TextBlock Text="紅色：梁端/柱邊 2H、孔徑、梁深比例或孔距不符，仍生成但標示為需複核。"
+                                       TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#555" FontSize="12"/>
                         </StackPanel>
                     </Border>
-                </StackPanel>
-
-                <StackPanel Grid.Row="1">
                     <Expander Header="進階尺寸對應" IsExpanded="False" Margin="0,0,0,14">
                         <DataGrid x:Name="gridSleeveSizes"
                                   ItemsSource="{Binding SleeveSizeRows}"
@@ -170,7 +163,7 @@
                         </StackPanel>
                     </GroupBox>
                 </StackPanel>
-            </Grid>
+            </ScrollViewer>
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,18,0,0">

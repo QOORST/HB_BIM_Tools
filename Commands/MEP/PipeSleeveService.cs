@@ -1546,10 +1546,28 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         continue;
                     }
 
-                    Autodesk.Revit.DB.Family loadedFamily;
-                    doc.LoadFamily(path, new OverwriteSleeveFamilyLoadOptions(), out loadedFamily);
-                    attemptedNames.Add(familyName);
-                    doc.Regenerate();
+                    string fingerprint = SleeveFamilyLoadStamp.Fingerprint(path, builtInVersion);
+                    if (SleeveFamilyLoadStamp.WasLoaded(doc, familyName, fingerprint))
+                    {
+                        attemptedNames.Add(familyName);
+                        continue;
+                    }
+
+                    using (var loadTransaction = new SubTransaction(doc))
+                    {
+                        loadTransaction.Start();
+                        Autodesk.Revit.DB.Family loadedFamily;
+                        doc.LoadFamily(path, new OverwriteSleeveFamilyLoadOptions(), out loadedFamily);
+                        doc.Regenerate();
+                        if (!SleeveFamilyLoadStamp.Record(doc, familyName, fingerprint,
+                            IsLoadedFamilyVersionCurrent(doc, familyName, builtInVersion)))
+                        {
+                            loadTransaction.RollBack();
+                            continue;
+                        }
+                        if (loadTransaction.Commit() == TransactionStatus.Committed)
+                            attemptedNames.Add(familyName);
+                    }
                 }
                 catch (Exception ex)
                 {
