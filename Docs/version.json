@@ -1,8 +1,8 @@
 {
-  "version": "2.5.10",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.10/HB_BIM_Tools_v2.5.10_Setup.exe",
-  "releaseNotes": "Pipe Sleeve adds first-stage architectural opening sync: architectural models can read linked MEP auto sleeves and create/update separate cutting opening families. Opening family selection now auto-matches DN/nominal diameter and does not reuse MEP sleeve families. Includes synchronized Revit 2022/2024/2025/2026 builds, manual updates, and installer documentation.",
-  "releaseDate": "2026-08-27T12:00:00Z",
+  "version": "2.5.11",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.11/HB_BIM_Tools_v2.5.11_Setup.exe",
+  "releaseNotes": "Security improvements: (1) Enhanced machine code fingerprint using CPU ID + BaseBoard Serial + MachineName; backward compatible with existing licenses. (2) Fixed TOCTOU risk in installer launch by removing temp script. (3) Upgraded RSA API from RSACryptoServiceProvider to RSA.Create().",
+  "releaseDate": "2026-08-31T12:00:00Z",
   "isCritical": false,
   "minimumVersion": "2.0.0"
 }
