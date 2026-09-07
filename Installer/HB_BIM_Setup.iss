@@ -1,12 +1,13 @@
 ; HB_BIM Tools 安裝腳本 - Inno Setup
-; 版本: 2.5.11
+; 版本: 2.5.12
 ; 日期: 2026-08-31
 ; 支援: Revit 2022, 2024, 2025, 2026
 
 #define MyAppName "HB_BIM Tools"
-#define MyAppVersion "2.5.11"
+#define MyAppVersion "2.5.12"
 #define MyAppPublisher "LAN"
 #define MyAppURL "https://www.ydbim.com"
+#define LanCertificateThumbprint "5EBE6DDEEBEBE5194CBDC9E71CDE8E6BB91AB166"
 #define MyAppExeName "YD_RevitTools.LicenseManager.dll"
 #define MyAppSupportEmail "qoorst123@yesdir.com.tw"
 
@@ -158,6 +159,12 @@ Source: "SQLitePCLRaw.provider.dynamic_cdecl.dll"; DestDir: "{commonappdata}\Aut
 Source: "SQLitePCLRaw.provider.dynamic_cdecl.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2025
 Source: "SQLitePCLRaw.provider.dynamic_cdecl.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM"; Flags: ignoreversion skipifsourcedoesntexist; Tasks: revit2026
 
+; Patched native SQLite library. Keep this at the add-in root where dynamic_cdecl resolves it.
+Source: "e_sqlite3.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM"; Flags: ignoreversion; Tasks: revit2022
+Source: "e_sqlite3.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM"; Flags: ignoreversion; Tasks: revit2024
+Source: "e_sqlite3.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM"; Flags: ignoreversion; Tasks: revit2025
+Source: "e_sqlite3.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM"; Flags: ignoreversion; Tasks: revit2026
+
 Source: "runtimes\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM\runtimes"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2022
 Source: "runtimes\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM\runtimes"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2024
 Source: "runtimes\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM\runtimes"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2025
@@ -236,6 +243,12 @@ Name: "{group}\Documentation"; Filename: "{app}\README.txt"
 ; Trust LAN self-signed code signing certificate for Revit add-in signature validation on target computers.
 Filename: "{sys}\certutil.exe"; Parameters: "-addstore -f Root ""{app}\Certificates\LAN_CodeSigning.cer"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing LAN root certificate..."
 Filename: "{sys}\certutil.exe"; Parameters: "-addstore -f TrustedPublisher ""{app}\Certificates\LAN_CodeSigning.cer"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing LAN trusted publisher certificate..."
+
+[UninstallRun]
+; Remove only the dedicated HB_BIM Tools certificate installed above.
+Filename: "{sys}\certutil.exe"; Parameters: "-delstore Root {#LanCertificateThumbprint}"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveLanRootCertificate"
+Filename: "{sys}\certutil.exe"; Parameters: "-delstore TrustedPublisher {#LanCertificateThumbprint}"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveLanPublisherCertificate"
+
 [Code]
 var
   Revit2022Installed: Boolean;
