@@ -29,9 +29,27 @@ dotnet build -c Debug2025
 dotnet build -c Debug2026
 
 # 編譯 Release 版本（用於發布）
+dotnet build -c Release2022
 dotnet build -c Release2024
 dotnet build -c Release2025
 dotnet build -c Release2026
+```
+
+---
+
+## 建立正式安裝檔
+
+正式發佈請使用安裝檔建置腳本，不再使用舊式手動部署包：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\Installer\Build_Installer.ps1
+```
+
+輸出位置：
+
+```text
+Output\HB_BIM_Tools_v*_Setup.exe
 ```
 
 ---
@@ -126,8 +144,8 @@ cd Tools
 # 生成專業版授權（不綁定機器碼）
 .\GenerateLicenseKey.ps1 -PrivateKeyPath "C:\path\to\private_key.xml" -LicenseType Professional -UserName "TestUser" -Company "TestCorp" -Days 365
 
-# 生成標準版授權（綁定當前機器）
-.\GenerateLicenseKey.ps1 -PrivateKeyPath "C:\path\to\private_key.xml" -LicenseType Standard -UserName "TestUser" -Company "TestCorp" -Days 365 -MachineCode "$(Get-Content env:USERPROFILE)\.machine_code.txt"
+# 生成標準版授權（綁定指定機器碼）
+.\GenerateLicenseKey.ps1 -PrivateKeyPath "C:\path\to\private_key.xml" -LicenseType Standard -UserName "TestUser" -Company "TestCorp" -Days 365 -MachineCode "XXXX-XXXX-XXXX-XXXX"
 ```
 
 ---
