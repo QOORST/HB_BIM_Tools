@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // 組件的一般資訊是由下列的屬性集控制。
 // 變更這些屬性的值即可修改組件的相關資訊。
 [assembly: AssemblyTitle("YD_RevitTools.LicenseManager")]
-[assembly: AssemblyDescription("YD BIM Tools - Revit 插件工具集")]
+[assembly: AssemblyDescription("HB_BIM Tools - Revit 插件工具集")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("YD_BIM Tools Team")]
-[assembly: AssemblyProduct("YD BIM Tools")]
-[assembly: AssemblyCopyright("Copyright © 2025 YD_BIM Owen. All rights reserved.")]
+[assembly: AssemblyCompany("LAN")]
+[assembly: AssemblyProduct("HB_BIM Tools")]
+[assembly: AssemblyCopyright("Copyright © 2025 LAN. All rights reserved.")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -31,7 +31,8 @@ using System.Runtime.InteropServices;
 // 您可以指定所有的值，也可以使用 '*' 將組建和修訂編號
 // 設為預設，如下所示:
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("2.3.2.0")]
-[assembly: AssemblyFileVersion("2.3.2.0")]
-[assembly: AssemblyInformationalVersion("2.3.2")]
+[assembly: AssemblyVersion("2.5.11.0")]
+[assembly: AssemblyFileVersion("2.5.11.0")]
+[assembly: AssemblyInformationalVersion("2.5.11")]
+
 

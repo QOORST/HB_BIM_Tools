@@ -9,6 +9,7 @@ using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
 using System.Windows.Threading;
 using YD_RevitTools.LicenseManager;
+using YD_RevitTools.LicenseManager.Helpers;
 
 // WPF 別名（避免與 Autodesk.Revit.UI.* 名稱衝突）
 using WpfWindow = System.Windows.Window;
@@ -88,15 +89,22 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             }
 
                             var host = doc.GetElement(r.ElementId);
-                            var pf = host?.GetGeometryObjectFromReference(r) as PlanarFace;
-                            if (pf == null)
+                            // 接受平面和曲面（CylindricalFace、RuledFace 等）
+                            var selectedFace = host?.GetGeometryObjectFromReference(r) as Face;
+                            if (selectedFace == null)
                             {
-                                TaskDialog.Show("面生面", "僅支援『平面(PlanarFace)』的面。");
+                                TaskDialog.Show("面生面", "未能取得有效的面，請重新選取。");
                                 continue;
                             }
 
+                            // 非平面面給予提示（但仍繼續處理）
+                            if (!(selectedFace is PlanarFace))
+                            {
+                                Debug.WriteLine($"選取到非平面（曲面），將使用曲面模板生成流程");
+                            }
+
                             // 檢查是否已選取過這個面
-                            var faceKey = GetFaceKey(host, pf);
+                            var faceKey = GetFaceKey(host, selectedFace);
                             if (_selectedFaces.Contains(faceKey))
                             {
                                 // 提供視覺反饋，顯示該面已選取（紅色閃爍，持續 500ms 確保用戶看到）
@@ -111,11 +119,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                 ElementId id = ElementId.InvalidElementId;
 
                                 // 直接為選中的面生成模板
-                                id = CreateSingleFaceFormworkDirectly(doc, host, pf, _currentThickness, _currentMaterial);
+                                id = CreateSingleFaceFormworkDirectly(doc, host, selectedFace, _currentThickness, _currentMaterial);
                                 
                                 if (id != ElementId.InvalidElementId)
                                 {
-                                    Debug.WriteLine($"成功為選中面生成模板 ID: {id.Value}");
+                                    Debug.WriteLine($"成功為選中面生成模板 ID: {id.GetIdValue()}");
                                 }
                                 else
                                 {
@@ -125,17 +133,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                 if (id != ElementId.InvalidElementId) 
                                 {
                                     created++;
-                                    _selectedFaces.Add(GetFaceKey(host, pf)); // 記錄已選取的面
+                                    _selectedFaces.Add(GetFaceKey(host, selectedFace)); // 記錄已選取的面
                                     
                                     // 計算並設定模板面積
                                     var element = doc.GetElement(id);
                                     double areaM2 = 0;
                                     if (element is DirectShape ds)
                                     {
-                                        Debug.WriteLine($"🔍 開始處理DirectShape元素 ID: {id.Value}");
-                                        
+                                        Debug.WriteLine($"🔍 開始處理DirectShape元素 ID: {id.GetIdValue()}");
+
                                         // 先計算面積（包含詳細除錯）
-                                        areaM2 = CalculateFormworkAreaWithDebug(doc, ds, pf);
+                                        areaM2 = CalculateFormworkAreaWithDebug(doc, ds, selectedFace);
                                         Debug.WriteLine($"📏 計算得到面積: {areaM2:F6} m²");
                                         
                                         // 設定材質和顏色
@@ -229,13 +237,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             {
                 if (e?.Category?.Id == null) return false;
 #if REVIT2024 || REVIT2025 || REVIT2026
-                long v = e.Category.Id.Value;
+                long v = e.Category.Id.GetIdValue();
 #else
                 long v = e.Category.Id.IntegerValue;
 #endif
                 if (v == (long)BuiltInCategory.OST_Walls) return true;
                 if (v == (long)BuiltInCategory.OST_StructuralColumns) return true;
                 if (v == (long)BuiltInCategory.OST_StructuralFraming) return true;
+                if (ElementCategorizer.IsStairCategory(v)) return true;
                 if (_allowFloor && v == (long)BuiltInCategory.OST_Floors) return true;
                 return false;
             }
@@ -245,6 +254,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         // 材料 + 厚度的小視窗（中文 UI）
         private class PickFacePalette : WpfWindow
         {
+            private static ElementId _lastMaterialId = ElementId.InvalidElementId;
+            private static double _lastThicknessMm = 20.0;
             private readonly Document _doc;
             private readonly WpfComboBox _cmb;
             private readonly WpfTextBox _tbThk;
@@ -274,7 +285,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 _cmb.Items.Add(new MatItem("＜不指定＞", ElementId.InvalidElementId));
                 var mats = new FilteredElementCollector(doc).OfClass(typeof(Material)).Cast<Material>().OrderBy(m => m.Name);
                 foreach (var m in mats) _cmb.Items.Add(new MatItem(m.Name, m.Id));
-                _cmb.SelectedIndex = 0;
+                int materialIndex = _cmb.Items.Cast<MatItem>()
+                    .ToList()
+                    .FindIndex(x => x.Id == _lastMaterialId);
+                _cmb.SelectedIndex = materialIndex >= 0 ? materialIndex : 0;
                 row1.Children.Add(_cmb);
                 root.Children.Add(row1);
                 System.Windows.Controls.Grid.SetRow(row1, 0);
@@ -282,7 +296,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // row2：厚度
                 var row2 = new WpfStackPanel { Orientation = WpfOrientation.Horizontal, Margin = new WpfThickness(0, 0, 0, 8) };
                 row2.Children.Add(new WpfLabel { Content = "厚度 (mm)：", Width = 60, VerticalAlignment = System.Windows.VerticalAlignment.Center });
-                _tbThk = new WpfTextBox { Width = 80, Text = "20" };
+                _tbThk = new WpfTextBox
+                {
+                    Width = 80,
+                    Text = _lastThicknessMm.ToString(CultureInfo.InvariantCulture)
+                };
                 row2.Children.Add(_tbThk);
                 root.Children.Add(row2);
                 System.Windows.Controls.Grid.SetRow(row2, 1);
@@ -300,8 +318,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         return;
                     }
                     ThicknessMm = mm;
+                    _lastThicknessMm = mm;
 
                     var item = _cmb.SelectedItem as MatItem;
+                    _lastMaterialId = item?.Id ?? ElementId.InvalidElementId;
                     SelectedMaterial = (item != null && item.Id != ElementId.InvalidElementId)
                         ? _doc.GetElement(item.Id) as Material
                         : null;
@@ -450,7 +470,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 // 建立 DirectShape
                 var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                directShape.ApplicationId = "YD_BIM_Formwork";
+                directShape.ApplicationId = "HB_BIM_Formwork";
                 directShape.ApplicationDataId = "ImprovedPickFace";
                 directShape.SetShape(new GeometryObject[] { finalFormwork });
                 directShape.Name = $"面選改進模板_{hostElement.Id}";
@@ -465,23 +485,29 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         }
 
         /// <summary>
-        /// 產生面的唯一識別碼，避免重複選取同一個面
+        /// 產生面的唯一識別碼，避免重複選取同一個面（支援平面和曲面）
         /// </summary>
-        private string GetFaceKey(Element hostElement, PlanarFace face)
+        private string GetFaceKey(Element hostElement, Face face)
         {
             try
             {
-                // 使用元素ID + 面的幾何特徵作為唯一識別
-                var origin = face.Origin;
-                var normal = face.FaceNormal;
-                var area = face.Area;
-                
-                return $"{hostElement.Id.Value}_{origin.X:F3}_{origin.Y:F3}_{origin.Z:F3}_{normal.X:F3}_{normal.Y:F3}_{normal.Z:F3}_{area:F6}";
+                if (face is PlanarFace pf)
+                {
+                    var origin = pf.Origin;
+                    var normal = pf.FaceNormal;
+                    var area   = pf.Area;
+                    return $"{hostElement.Id.GetIdValue()}_{origin.X:F3}_{origin.Y:F3}_{origin.Z:F3}_{normal.X:F3}_{normal.Y:F3}_{normal.Z:F3}_{area:F6}";
+                }
+                else
+                {
+                    // 曲面：使用中心法向量 + 面積
+                    XYZ normal = face.ComputeNormal(new UV(0.5, 0.5));
+                    return $"{hostElement.Id.GetIdValue()}_curved_{normal.X:F3}_{normal.Y:F3}_{normal.Z:F3}_{face.Area:F6}";
+                }
             }
             catch
             {
-                // 如果失敗，至少使用元素ID
-                return $"{hostElement.Id.Value}_{DateTime.Now.Ticks}";
+                return $"{hostElement.Id.GetIdValue()}_{DateTime.Now.Ticks}";
             }
         }
 
@@ -524,7 +550,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <summary>
         /// 計算模板面積（平方公尺）- 帶詳細除錯資訊
         /// </summary>
-        private double CalculateFormworkAreaWithDebug(Document doc, DirectShape formworkElement, PlanarFace originalFace)
+        private double CalculateFormworkAreaWithDebug(Document doc, DirectShape formworkElement, Face originalFace)
         {
             try
             {
@@ -533,7 +559,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // 🚀 重構: 優先使用原始面面積
                 if (originalFace != null)
                 {
-                    double originalAreaM2 = AreaCalculator.CalculateFacePickedFormworkArea(originalFace);
+                    double originalAreaM2 = UnitUtils.ConvertFromInternalUnits(originalFace.Area, UnitTypeId.SquareMeters);
                     Debug.WriteLine($"📐 原始面面積: {originalAreaM2:F6} m²");
                     
                     if (originalAreaM2 > 0)
@@ -636,7 +662,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
-                Debug.WriteLine($"🔧 開始設定面積參數: {areaM2:F6} m² 到元素 {element.Id.Value}");
+                Debug.WriteLine($"🔧 開始設定面積參數: {areaM2:F6} m² 到元素 {element.Id.GetIdValue()}");
                 
                 // 🚀 重構: 使用 AreaCalculator 的單位轉換方法
                 double areaInSquareFeet = AreaCalculator.ConvertToSquareFeet(areaM2);
@@ -799,7 +825,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 // 建立預覽 DirectShape
                 var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                directShape.ApplicationId = "YD_BIM_Formwork_Preview";
+                directShape.ApplicationId = "HB_BIM_Formwork_Preview";
                 directShape.ApplicationDataId = "Preview";
                 directShape.SetShape(new GeometryObject[] { previewSolid });
                 directShape.Name = $"預覽模板_{hostElement.Id}";
@@ -866,32 +892,32 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         }
 
         /// <summary>
-        /// 直接為選中的面生成模板（不使用傳統架構的全面掃描）
+        /// 直接為選中的面生成模板（支援平面和曲面）
         /// </summary>
-        private ElementId CreateSingleFaceFormworkDirectly(Document doc, Element hostElement, PlanarFace face, double thicknessMm, Material material)
+        private ElementId CreateSingleFaceFormworkDirectly(Document doc, Element hostElement, Face face, double thicknessMm, Material material)
         {
             try
             {
-                Debug.WriteLine($"為面生成模板：面積 {face.Area * 0.092903:F2} m²");
+                // ─ 曲面 ─ 交由 FormworkEngine 內建的曲面路徑處理
+                if (!(face is PlanarFace planarFace))
+                {
+                    Debug.WriteLine($"曲面模板生成：使用 BuildFromAnyFace 路徑，面積 {face.Area * 0.092903:F2} m²");
+                    return FormworkEngine.BuildFromAnyFace(doc, hostElement, face, thicknessMm, material);
+                }
+
+                // ─ 平面 ─ 以下為既有的平面臉邏輯
+                Debug.WriteLine($"為面生成模板：面積 {planarFace.Area * 0.092903:F2} m²");
                 
                 // 檢查面積
-                var areaM2 = face.Area * 0.092903;
+                var areaM2 = planarFace.Area * 0.092903;
                 if (areaM2 < 0.01)
                 {
                     Debug.WriteLine("面積過小，跳過");
                     return ElementId.InvalidElementId;
                 }
 
-                // 🎯 關鍵改進：取得柱子及相鄰元件的實體交集後的面
-                // 策略：
-                // 1. 取得宿主元素（柱子）的實體
-                // 2. 取得相鄰元件（牆、樓板等）的實體
-                // 3. 將柱子與相鄰元件進行布林扣除，得到柱子暴露在外的部分
-                // 4. 用選取面的輪廓裁切，只保留紅框區域
-                // 5. 從裁切後的面生成模板
-
                 var thickness = thicknessMm / 304.8; // 轉換為英尺
-                var normal = face.FaceNormal;
+                var normal = planarFace.FaceNormal;
 
                 // 步驟 1: 取得宿主元素的實體
                 Solid hostSolid = GetElementSolid(hostElement);
@@ -907,7 +933,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var searchRadiusMm = thicknessMm + 3000.0;
                 Debug.WriteLine($"🔍 搜尋半徑: {searchRadiusMm:F0}mm ({searchRadiusMm/304.8:F2}ft)");
 
-                var nearbyElements = GeometryExtractor.GetNearbyStructuralElementsFromFace(doc, hostElement, face, searchRadiusMm);
+                var nearbyElements = GeometryExtractor.GetNearbyStructuralElementsFromFace(doc, hostElement, planarFace, searchRadiusMm);
                 Debug.WriteLine($"✅ 找到 {nearbyElements.Count} 個相鄰元件");
 
                 // 從柱子實體中扣除相鄰元件，得到暴露在外的部分
@@ -925,20 +951,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             if (tempSolid?.Volume > 1e-6)
                             {
                                 exposedHostSolid = tempSolid;
-                                Debug.WriteLine($"  ✅ 扣除元件 {nearbyElem.Id.Value}，剩餘體積: {exposedHostSolid.Volume:F6}");
+                                Debug.WriteLine($"  ✅ 扣除元件 {nearbyElem.Id.GetIdValue()}，剩餘體積: {exposedHostSolid.Volume:F6}");
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"  ⚠️ 扣除元件 {nearbyElem.Id.Value} 失敗: {ex.Message}");
+                        Debug.WriteLine($"  ⚠️ 扣除元件 {nearbyElem.Id.GetIdValue()} 失敗: {ex.Message}");
                     }
                 }
 
                 Debug.WriteLine($"✅ 布林扣除完成，暴露部分體積: {exposedHostSolid.Volume:F6}");
 
                 // 步驟 3: 取得選取面的邊界曲線環
-                var curveLoops = face.GetEdgesAsCurveLoops();
+                var curveLoops = planarFace.GetEdgesAsCurveLoops();
                 if (curveLoops.Count == 0)
                 {
                     Debug.WriteLine("❌ 無法取得面的邊界");
@@ -1016,13 +1042,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             if (tempSolid?.Volume > 1e-6)
                             {
                                 finalFormwork = tempSolid;
-                                Debug.WriteLine($"  ✅ 從模板扣除元件 {nearbyElem.Id.Value}，剩餘體積: {finalFormwork.Volume:F6}");
+                                Debug.WriteLine($"  ✅ 從模板扣除元件 {nearbyElem.Id.GetIdValue()}，剩餘體積: {finalFormwork.Volume:F6}");
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"  ⚠️ 從模板扣除元件 {nearbyElem.Id.Value} 失敗: {ex.Message}");
+                        Debug.WriteLine($"  ⚠️ 從模板扣除元件 {nearbyElem.Id.GetIdValue()} 失敗: {ex.Message}");
                     }
                 }
 
@@ -1041,7 +1067,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 try
                 {
                     var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                    directShape.ApplicationId = "YD_BIM_Formwork";
+                    directShape.ApplicationId = "HB_BIM_Formwork";
                     directShape.ApplicationDataId = "SingleFace";
                     directShape.SetShape(new GeometryObject[] { finalFormwork });
 
@@ -1077,7 +1103,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         var hostIdParam = directShape.LookupParameter(SharedParams.P_HostId);
                         if (hostIdParam != null && !hostIdParam.IsReadOnly)
                         {
-                            hostIdParam.Set(hostElement.Id.Value.ToString());
+                            hostIdParam.Set(hostElement.Id.GetIdValue().ToString());
                         }
                     }
                     catch (Exception ex)
@@ -1085,7 +1111,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         Debug.WriteLine($"  ⚠️ 設定宿主ID參數失敗: {ex.Message}");
                     }
 
-                    Debug.WriteLine($"✅ 成功創建完整模板，ID: {directShape.Id.Value}，體積: {finalFormwork.Volume:F6}");
+                    Debug.WriteLine($"✅ 成功創建完整模板，ID: {directShape.Id.GetIdValue()}，體積: {finalFormwork.Volume:F6}");
 
                     // 返回創建的模板 ID
                     return directShape.Id;
@@ -1468,7 +1494,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
-                Debug.WriteLine($"🔍 開始取得元素實體: {element.Name} (ID: {element.Id.Value})");
+                Debug.WriteLine($"🔍 開始取得元素實體: {element.Name} (ID: {element.Id.GetIdValue()})");
 
                 var options = new Options
                 {
@@ -1759,7 +1785,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     summaryMsg += "\n\n📋 詳細項目:";
                     foreach (var item in _createdFormworkItems.Take(5)) // 最多顯示5個項目
                     {
-                        summaryMsg += $"\n• ID:{item.ElementId.Value}, 面積:{item.Area:F2} m²";
+                        summaryMsg += $"\n• ID:{item.ElementId.GetIdValue()}, 面積:{item.Area:F2} m²";
                     }
                     if (_createdFormworkItems.Count > 5)
                     {
@@ -1787,7 +1813,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 return "其他";
 
 #if REVIT2024 || REVIT2025 || REVIT2026
-            var categoryId = hostElement.Category.Id.Value;
+            var categoryId = hostElement.Category.Id.GetIdValue();
 #else
             var categoryId = hostElement.Category.Id.IntegerValue;
 #endif
@@ -1802,7 +1828,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 return "牆模板";
             else if (categoryId == (long)BuiltInCategory.OST_StructuralFoundation)
                 return "基礎模板";
-            else if (categoryId == (long)BuiltInCategory.OST_Stairs)
+            else if (ElementCategorizer.IsStairCategory(categoryId))
                 return "樓梯模板";
             else
                 return "其他";

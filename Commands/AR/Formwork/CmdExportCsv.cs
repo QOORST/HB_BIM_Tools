@@ -6,8 +6,12 @@ using System.Linq;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using OfficeOpenXml;
+using OfficeOpenXml.Drawing.Chart;
+using OfficeOpenXml.Style;
 using Microsoft.Win32;
 using YD_RevitTools.LicenseManager;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -43,26 +47,28 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // 儲存位置
                 var sfd = new SaveFileDialog
                 {
-                    Title = "匯出準確模板分析結果 (CSV)",
-                    Filter = "CSV (*.csv)|*.csv",
-                    FileName = $"AccurateFormwork_Report_{DateTime.Now:yyyyMMdd_HHmm}.csv"
+                    Title = "匯出準確模板分析結果 (Excel)",
+                    Filter = "Excel 檔案 (*.xlsx)|*.xlsx|CSV (*.csv)|*.csv",
+                    FileName = $"AccurateFormwork_Report_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+                    DefaultExt = "xlsx"
                 };
                 if (sfd.ShowDialog() != true) return Result.Cancelled;
 
-                // 寫出準確的分析結果
-                using (var sw = new StreamWriter(sfd.FileName, false, new System.Text.UTF8Encoding(true)))
+                var extension = Path.GetExtension(sfd.FileName)?.ToLowerInvariant();
+                var detailDataList = CollectDetailData(doc, analysisResult);
+
+                if (extension == ".csv")
                 {
-                    // 寫入標題行
-                    WriteHeader(sw);
-                    
-                    // 先收集所有實際模板數據用於總計
-                    var detailDataList = CollectDetailData(doc, analysisResult);
-                    
-                    // 寫入總計資訊 (使用實際模板面積)
-                    WriteSummary(sw, analysisResult, detailDataList);
-                    
-                    // 寫入詳細資料
-                    WriteDetailData(sw, detailDataList);
+                    using (var sw = new StreamWriter(sfd.FileName, false, new System.Text.UTF8Encoding(true)))
+                    {
+                        WriteHeader(sw);
+                        WriteSummary(sw, analysisResult, detailDataList);
+                        WriteDetailData(sw, detailDataList);
+                    }
+                }
+                else
+                {
+                    ExportToExcel(sfd.FileName, analysisResult, detailDataList, doc.ActiveView?.Name);
                 }
 
                 TaskDialog.Show("匯出完成", 
@@ -184,12 +190,253 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 sw.WriteLine($"{Q(item.Name)}," +
                            $"{Q(item.Level)}," +
                            $"{Q(elementType)}," +
-                           $"{item.Element.Id.Value}," +
+                           $"{item.Element.Id.GetIdValue()}," +
                            $"{item.FormworkCount}," +
                            $"{Q(item.Formula)}," +
                            $"{item.ActualFormworkArea:F3}," +
                            $"{item.Analysis.ConcreteVolume:F3}");
             }
+        }
+
+        private void ExportToExcel(string filePath, StructuralAnalysisResult result, List<DetailDataItem> detailData, string activeViewName)
+        {
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+
+            var file = new FileInfo(filePath);
+            if (file.Exists)
+            {
+                file.Delete();
+            }
+
+            using (var package = new ExcelPackage(file))
+            {
+                var summarySheet = package.Workbook.Worksheets.Add("總覽");
+                var detailSheet = package.Workbook.Worksheets.Add("詳細資料");
+
+                WriteSummaryWorksheet(summarySheet, result, detailData, activeViewName);
+                WriteDetailWorksheet(detailSheet, detailData);
+                WriteTypeWorksheets(package, detailData);
+
+                package.Save();
+            }
+        }
+
+        private void WriteSummaryWorksheet(ExcelWorksheet ws, StructuralAnalysisResult result, List<DetailDataItem> detailData, string activeViewName)
+        {
+            double totalActualArea = detailData.Sum(d => d.ActualFormworkArea);
+            int totalFormworkCount = detailData.Sum(d => d.FormworkCount);
+
+            ws.Cells[1, 1].Value = "BIM 結構模板準確分析報告";
+            ws.Cells[1, 1, 1, 6].Merge = true;
+            ws.Cells[2, 1].Value = "分析時間";
+            ws.Cells[2, 2].Value = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            ws.Cells[3, 1].Value = "分析系統";
+            ws.Cells[3, 2].Value = "Formwork_V1 準確計算系統";
+            ws.Cells[4, 1].Value = "目前視圖";
+            ws.Cells[4, 2].Value = string.IsNullOrWhiteSpace(activeViewName) ? "未指定" : activeViewName;
+            ws.Cells[5, 1].Value = "模板掃描範圍";
+            ws.Cells[5, 2].Value = "整份模型";
+
+            ws.Cells[7, 1].Value = "總計統計";
+            ws.Cells[8, 1].Value = "分析構件總數";
+            ws.Cells[8, 2].Value = result.TotalElements;
+            ws.Cells[9, 1].Value = "生成模板總數";
+            ws.Cells[9, 2].Value = totalFormworkCount;
+            ws.Cells[10, 1].Value = "模板總面積 (m2)";
+            ws.Cells[10, 2].Value = totalActualArea;
+            ws.Cells[11, 1].Value = "混凝土總體積 (m3)";
+            ws.Cells[11, 2].Value = result.TotalConcreteVolume;
+            ws.Cells[12, 1].Value = "鋼筋估算重量 (t)";
+            ws.Cells[12, 2].Value = result.EstimatedRebarWeight;
+
+            ws.Cells[14, 1].Value = "分類統計";
+            var categoryHeaders = new[] { "構件類型", "數量", "模板數量", "模板面積 (m2)", "混凝土體積 (m3)", "平均模板面積 (m2/構件)" };
+            for (int i = 0; i < categoryHeaders.Length; i++)
+            {
+                ws.Cells[15, i + 1].Value = categoryHeaders[i];
+            }
+
+            var categoryStats = detailData
+                .GroupBy(d => d.Type)
+                .Select(g => new
+                {
+                    Type = g.Key,
+                    Count = g.Count(),
+                    FormworkCount = g.Sum(d => d.FormworkCount),
+                    FormworkArea = g.Sum(d => d.ActualFormworkArea),
+                    ConcreteVolume = g.Sum(d => d.Analysis.ConcreteVolume),
+                    AvgArea = g.Sum(d => d.ActualFormworkArea) / g.Count()
+                })
+                .OrderBy(s => s.Type)
+                .ToList();
+
+            int row = 16;
+            foreach (var stat in categoryStats)
+            {
+                ws.Cells[row, 1].Value = GetElementTypeDisplayName(stat.Type);
+                ws.Cells[row, 2].Value = stat.Count;
+                ws.Cells[row, 3].Value = stat.FormworkCount;
+                ws.Cells[row, 4].Value = stat.FormworkArea;
+                ws.Cells[row, 5].Value = stat.ConcreteVolume;
+                ws.Cells[row, 6].Value = stat.AvgArea;
+                row++;
+            }
+
+            StyleTitle(ws.Cells[1, 1, 1, 6]);
+            StyleSection(ws.Cells[7, 1, 7, 2]);
+            StyleSection(ws.Cells[14, 1, 14, 6]);
+            StyleHeader(ws.Cells[15, 1, 15, 6]);
+            StyleDataArea(ws.Cells[8, 1, 12, 2]);
+            if (row > 16)
+            {
+                StyleDataArea(ws.Cells[16, 1, row - 1, 6]);
+                ws.Cells[15, 1, row - 1, 6].AutoFilter = true;
+                AddCategoryChart(ws, row - 1);
+            }
+
+            ws.Column(2).Style.Numberformat.Format = "0.000";
+            ws.Column(4).Style.Numberformat.Format = "0.000";
+            ws.Column(5).Style.Numberformat.Format = "0.000";
+            ws.Column(6).Style.Numberformat.Format = "0.000";
+            ws.View.FreezePanes(15, 1);
+            ws.Cells[ws.Dimension.Address].AutoFitColumns();
+        }
+
+        private void WriteDetailWorksheet(ExcelWorksheet ws, List<DetailDataItem> detailData)
+        {
+            WriteDetailWorksheet(ws, detailData, "詳細構件分析");
+        }
+
+        private void WriteDetailWorksheet(ExcelWorksheet ws, List<DetailDataItem> detailData, string title)
+        {
+            var headers = new[] { "構件名稱", "樓層", "類型", "構件ID", "模板數量", "模板面積計算式", "模板面積 (m2)", "混凝土體積 (m3)" };
+            ws.Cells[1, 1].Value = title;
+            ws.Cells[1, 1, 1, headers.Length].Merge = true;
+
+            for (int i = 0; i < headers.Length; i++)
+            {
+                ws.Cells[2, i + 1].Value = headers[i];
+            }
+
+            var sortedData = detailData
+                .OrderBy(x => x.Level)
+                .ThenBy(x => x.Type)
+                .ThenBy(x => x.Name)
+                .ToList();
+
+            int row = 3;
+            foreach (var item in sortedData)
+            {
+                ws.Cells[row, 1].Value = item.Name;
+                ws.Cells[row, 2].Value = item.Level;
+                ws.Cells[row, 3].Value = GetElementTypeDisplayName(item.Type);
+                ws.Cells[row, 4].Value = item.Element.Id.GetIdValue();
+                ws.Cells[row, 5].Value = item.FormworkCount;
+                ws.Cells[row, 6].Value = item.Formula;
+                ws.Cells[row, 7].Value = item.ActualFormworkArea;
+                ws.Cells[row, 8].Value = item.Analysis.ConcreteVolume;
+                row++;
+            }
+
+            StyleTitle(ws.Cells[1, 1, 1, headers.Length]);
+            StyleHeader(ws.Cells[2, 1, 2, headers.Length]);
+            if (row > 3)
+            {
+                StyleDataArea(ws.Cells[3, 1, row - 1, headers.Length]);
+                ws.Cells[2, 1, row - 1, headers.Length].AutoFilter = true;
+            }
+
+            ws.Column(4).Style.Numberformat.Format = "0";
+            ws.Column(5).Style.Numberformat.Format = "0";
+            ws.Column(7).Style.Numberformat.Format = "0.000";
+            ws.Column(8).Style.Numberformat.Format = "0.000";
+            ws.View.FreezePanes(3, 1);
+            ws.Cells[ws.Dimension.Address].AutoFitColumns();
+            ws.Column(1).Width = Math.Max(ws.Column(1).Width, 20);
+            ws.Column(6).Width = Math.Max(ws.Column(6).Width, 28);
+        }
+
+        private void WriteTypeWorksheets(ExcelPackage package, List<DetailDataItem> detailData)
+        {
+            var groupedData = detailData
+                .GroupBy(item => item.Type)
+                .OrderBy(group => group.Key)
+                .ToList();
+
+            foreach (var group in groupedData)
+            {
+                var worksheet = package.Workbook.Worksheets.Add(GetWorksheetName(group.Key));
+                WriteDetailWorksheet(worksheet, group.ToList(), $"{GetElementTypeDisplayName(group.Key)}詳細資料");
+            }
+        }
+
+        private void AddCategoryChart(ExcelWorksheet ws, int lastDataRow)
+        {
+            var chart = ws.Drawings.AddChart("CategoryAreaChart", eChartType.ColumnClustered);
+            chart.Title.Text = "各類型模板面積統計";
+            chart.SetPosition(1, 0, 7, 0);
+            chart.SetSize(720, 320);
+            chart.YAxis.Title.Text = "模板面積 (m2)";
+            chart.XAxis.Title.Text = "構件類型";
+            chart.Legend.Remove();
+
+            var series = chart.Series.Add(ws.Cells[16, 4, lastDataRow, 4], ws.Cells[16, 1, lastDataRow, 1]);
+            series.Header = "模板面積";
+        }
+
+        private string GetWorksheetName(StructuralElementType type)
+        {
+            switch (type)
+            {
+                case StructuralElementType.Beam:
+                    return "梁";
+                case StructuralElementType.Column:
+                    return "柱";
+                case StructuralElementType.Slab:
+                    return "板";
+                case StructuralElementType.Wall:
+                    return "牆";
+                case StructuralElementType.Foundation:
+                    return "基礎";
+                default:
+                    return "其他";
+            }
+        }
+
+        private void StyleTitle(ExcelRange range)
+        {
+            range.Style.Font.Bold = true;
+            range.Style.Font.Size = 16;
+            range.Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
+            range.Style.Fill.PatternType = ExcelFillStyle.Solid;
+            range.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.FromArgb(31, 78, 121));
+            range.Style.Font.Color.SetColor(System.Drawing.Color.White);
+        }
+
+        private void StyleSection(ExcelRange range)
+        {
+            range.Style.Font.Bold = true;
+            range.Style.Fill.PatternType = ExcelFillStyle.Solid;
+            range.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.FromArgb(221, 235, 247));
+        }
+
+        private void StyleHeader(ExcelRange range)
+        {
+            range.Style.Font.Bold = true;
+            range.Style.Fill.PatternType = ExcelFillStyle.Solid;
+            range.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.FromArgb(91, 155, 213));
+            range.Style.Font.Color.SetColor(System.Drawing.Color.White);
+            range.Style.Border.BorderAround(ExcelBorderStyle.Thin, System.Drawing.Color.FromArgb(68, 114, 196));
+            range.Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
+        }
+
+        private void StyleDataArea(ExcelRange range)
+        {
+            range.Style.Border.Top.Style = ExcelBorderStyle.Thin;
+            range.Style.Border.Left.Style = ExcelBorderStyle.Thin;
+            range.Style.Border.Right.Style = ExcelBorderStyle.Thin;
+            range.Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
+            range.Style.VerticalAlignment = ExcelVerticalAlignment.Center;
         }
 
         /// <summary>
@@ -205,7 +452,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var formworkCollector = new FilteredElementCollector(doc)
                     .OfCategory(BuiltInCategory.OST_GenericModel)
                     .WhereElementIsNotElementType()
-                    .Where(e => e is DirectShape);
+                    .Cast<DirectShape>()
+                    .Where(ds => ds.ApplicationId == "HB_BIM_Formwork");
 
                 var relatedFormworks = new List<(ElementId FormworkId, double EffectiveArea)>();
 
@@ -226,7 +474,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                 double areaFt2 = effectiveAreaParam.AsDouble();
                                 double areaM2 = AreaCalculator.ConvertToSquareMeters(areaFt2);
 
-                                System.Diagnostics.Debug.WriteLine($"📐 讀取模板面積: ID={formwork.Id.Value}, {areaFt2:F6} ft² = {areaM2:F6} m²");
+                                System.Diagnostics.Debug.WriteLine($"📐 讀取模板面積: ID={formwork.Id.GetIdValue()}, {areaFt2:F6} ft² = {areaM2:F6} m²");
                                 relatedFormworks.Add((formwork.Id, areaM2));
                             }
                         }
@@ -243,12 +491,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     {
                         // 單一模板：直接顯示面積
                         var formwork = relatedFormworks[0];
-                        formula = $"{formwork.EffectiveArea:F3}m² (ID:{formwork.FormworkId.Value})";
+                        formula = $"{formwork.EffectiveArea:F3}m² (ID:{formwork.FormworkId.GetIdValue()})";
                     }
                     else
                     {
                         // 多個模板：顯示計算式
-                        var formulas = relatedFormworks.Select(f => $"{f.EffectiveArea:F3}(ID:{f.FormworkId.Value})");
+                        var formulas = relatedFormworks.Select(f => $"{f.EffectiveArea:F3}(ID:{f.FormworkId.GetIdValue()})");
                         formula = string.Join(" + ", formulas) + $" = {totalArea:F3}m²";
                     }
 
@@ -290,11 +538,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     return element.Name;
 
                 // 最後: 使用 ID
-                return $"ID_{element.Id.Value}";
+                return $"ID_{element.Id.GetIdValue()}";
             }
             catch
             {
-                return $"ID_{element.Id.Value}";
+                return $"ID_{element.Id.GetIdValue()}";
             }
         }
 

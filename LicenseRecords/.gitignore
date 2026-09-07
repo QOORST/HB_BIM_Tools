@@ -1,0 +1,5 @@
+# Keep the license workflow, not issued secrets.
+*
+!.gitignore
+!README.md
+!issued_licenses.template.csv

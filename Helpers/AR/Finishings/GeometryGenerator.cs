@@ -5,6 +5,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
 using Autodesk.Revit.UI;
 using System.Text;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
 {
@@ -549,6 +550,11 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                 var mergedCurves = MergeContinuousLines(curves);
                 Logger.Log($"原始 {curves.Count} 條曲線合併為 {mergedCurves.Count} 條");
 
+                // 🔑 使用 Finish 邊界直接建牆，並以「外部完成面」作定位線對齊邊界。
+                // 這樣可避免手動退半厚造成的角點誤差與縫隙。
+                var roomCenter = CalculateRoomCenter(curves);
+                Logger.Log("粉刷牆將使用外部完成面定位線，不執行半厚內縮");
+
                 // 創建牆面
                 foreach (var c in mergedCurves)
                 {
@@ -558,8 +564,7 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                     Logger.Log($"牆段起點: ({c.GetEndPoint(0).X * MM_TO_FEET:F2}, {c.GetEndPoint(0).Y * MM_TO_FEET:F2})");
                     Logger.Log($"牆段終點: ({c.GetEndPoint(1).X * MM_TO_FEET:F2}, {c.GetEndPoint(1).Y * MM_TO_FEET:F2})");
 
-                    // 計算房間中心點用於方向判斷
-                    XYZ roomCenter = CalculateRoomCenter(curves);
+                    // 使用前面計算的房間中心點用於方向判斷
                     Logger.Log($"房間中心點: ({roomCenter.X * MM_TO_FEET:F2}, {roomCenter.Y * MM_TO_FEET:F2})");
 
                     // 創建牆面，offset=0 表示定位線在牆中心
@@ -568,11 +573,11 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                     {
                         Logger.Log($"牆面創建完成，ID: {wall.Id}");
 
-                        // 設定牆面的基本屬性
-                        SetFinishWallProperties(wall);
+                        // 設定牆面的基本屬性與定位線（外部完成面）
+                        SetFinishWallProperties(wall, WallLocationLine.FinishFaceExterior);
 
-                        // 檢查並調整牆面方向，確保面向房間內部
-                        AdjustWallOrientation(wall, roomCenter);
+                        // 外部完成面需貼齊原牆面，因此牆外側應背向房間中心
+                        AdjustWallOrientation(wall, roomCenter, false);
 
                         Logger.Log($"牆面 {wall.Id} 屬性和方向設定完成");
 
@@ -593,22 +598,8 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                     JoinAdjacentWalls(createdWalls);
                 }
 
-                // 處理與結構牆的接合關係
-                if (createdWalls.Any())
-                {
-                    Logger.Log("開始處理與結構牆的接合關係");
-                    var allWalls = new FilteredElementCollector(Doc)
-                        .OfCategory(BuiltInCategory.OST_Walls)
-                        .WhereElementIsNotElementType()
-                        .Cast<Wall>()
-                        .Where(w => w.StructuralUsage != Autodesk.Revit.DB.Structure.StructuralWallUsage.NonBearing)
-                        .ToList();
-                    
-                    foreach (var finishWall in createdWalls)
-                    {
-                        TryJoinWithStructuralWalls(finishWall, allWalls);
-                    }
-                }
+                // 依需求：僅接合相鄰粉刷牆，不與結構牆接合，避免接合導致位置被拉偏。
+                Logger.Log("略過與結構牆接合（僅保留相鄰粉刷牆接合）");
 
                 // 多次重新生成文檔以確保所有變更生效
                 for (int i = 0; i < 2; i++)
@@ -669,7 +660,56 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                 // 合併連續的直線段以減少踢腳板數量
                 var mergedCurves = MergeContinuousLines(curves);
                 Logger.Log($"原始 {curves.Count} 條曲線合併為 {mergedCurves.Count} 條");
-                
+
+                // 🔑 踢腳板應貼緊粉刷牆的室內側，而非與粉刷牆重疊
+                // 基準線＝房間 Finish 邊界（= 結構牆室內面）
+                // 向室內偏移距離 = 粉刷牆半厚 + 踢腳板半厚
+                double plasterHalfThick = 0;
+                if (settings.SelectedWallTypeId != ElementId.InvalidElementId)
+                {
+                    var plasterWt = GetWallType(settings.SelectedWallTypeId);
+                    if (plasterWt != null) plasterHalfThick = plasterWt.Width / 2.0;
+                }
+                double skirtingHalfThick = wt.Width / 2.0;
+                double inwardOffset = plasterHalfThick + skirtingHalfThick;
+                Logger.Log($"踢腳板向室內偏移：粉刷牆半厚 {plasterHalfThick * 304.8:F1}mm + 踢腳板半厚 {skirtingHalfThick * 304.8:F1}mm = {inwardOffset * 304.8:F1}mm");
+
+                if (inwardOffset > 1e-6)
+                {
+                    // 直接以「指向房間中心」為偏移方向，逐條計算，不依賴 CurveLoop 方向假設
+                    var roomCenter = CalculateRoomCenter(mergedCurves);
+                    var shiftedCurves = new List<Curve>();
+                    foreach (var c in mergedCurves)
+                    {
+                        try
+                        {
+                            if (c is Line line)
+                            {
+                                var dir    = (line.GetEndPoint(1) - line.GetEndPoint(0)).Normalize();
+                                var normal = new XYZ(-dir.Y, dir.X, 0); // 垂直於線段的水平法向量
+                                var mid    = line.Evaluate(0.5, true);
+                                // 讓法向量永遠指向房間中心（室內方向）
+                                if (normal.DotProduct(roomCenter - mid) < 0)
+                                    normal = normal.Negate();
+                                var shift  = normal * inwardOffset;
+                                shiftedCurves.Add(Line.CreateBound(
+                                    line.GetEndPoint(0) + shift,
+                                    line.GetEndPoint(1) + shift));
+                            }
+                            else
+                            {
+                                shiftedCurves.Add(c); // 非直線段保留原樣
+                            }
+                        }
+                        catch (Exception shiftEx)
+                        {
+                            Logger.Log($"踢腳板曲線偏移失敗，保留原曲線: {shiftEx.Message}");
+                            shiftedCurves.Add(c);
+                        }
+                    }
+                    mergedCurves = shiftedCurves;
+                }
+
                 // 創建踢腳板
                 foreach (var c in mergedCurves)
                 {
@@ -770,11 +810,11 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                 }
                 
                 // 根據類別設定預設寬度
-                if (opening.Category.Id.Value == (int)BuiltInCategory.OST_Doors)
+                if (opening.Category.Id.GetIdValue() == (int)BuiltInCategory.OST_Doors)
                 {
                     return 900.0 / 304.8; // 預設門寬 900mm
                 }
-                else if (opening.Category.Id.Value == (int)BuiltInCategory.OST_Windows)
+                else if (opening.Category.Id.GetIdValue() == (int)BuiltInCategory.OST_Windows)
                 {
                     return 1200.0 / 304.8; // 預設窗寬 1200mm
                 }
@@ -1354,9 +1394,9 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
         }
 
         /// <summary>
-        /// 設定粉刷牆的基本屬性，確保定位線為核心面:內部
+        /// 設定粉刷牆的基本屬性，可指定定位線模式
         /// </summary>
-        private void SetFinishWallProperties(Wall wall)
+        private void SetFinishWallProperties(Wall wall, WallLocationLine locationMode = WallLocationLine.WallCenterline)
         {
             try
             {
@@ -1382,20 +1422,19 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                     Logger.Log($"無法設定粉刷牆 {wall.Id} 的房間邊界屬性");
                 }
 
-                // 關鍵：設定牆定位線為核心面:內部
+                // 依流程指定牆定位線（例如外部完成面 / 中心線）
                 try
                 {
                     var locationLine = wall.get_Parameter(BuiltInParameter.WALL_KEY_REF_PARAM);
                     if (locationLine != null && !locationLine.IsReadOnly)
                     {
-                        // 確保使用核心面:內部定位線
-                        var coreInteriorValue = (int)WallLocationLine.CoreInterior;
-                        locationLine.Set(coreInteriorValue);
-                        Logger.Log($"✓ 已將粉刷牆 {wall.Id} 的定位線設為核心面:內部 (值: {coreInteriorValue})");
+                        var locationModeValue = (int)locationMode;
+                        locationLine.Set(locationModeValue);
+                        Logger.Log($"✓ 已將粉刷牆 {wall.Id} 的定位線設為 {locationMode} (值: {locationModeValue})");
                         
                         // 驗證設定是否成功
                         var currentValue = locationLine.AsInteger();
-                        if (currentValue == coreInteriorValue)
+                        if (currentValue == locationModeValue)
                         {
                             Logger.Log($"✓ 粉刷牆 {wall.Id} 定位線設定驗證成功");
                         }
@@ -1581,6 +1620,99 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 將邊界線向房間內側偏移，並在角點做延伸/修剪，避免牆段間產生縫隙。
+        /// </summary>
+        List<Curve> InsetAndMiterCurvesTowardsRoom(List<Curve> curves, XYZ roomCenter, double inwardOffset)
+        {
+            try
+            {
+                if (curves == null || curves.Count == 0 || inwardOffset <= 1e-6)
+                    return curves ?? new List<Curve>();
+
+                // 先逐段向室內平移
+                var shiftedLines = new List<Line>();
+                foreach (var curve in curves)
+                {
+                    if (!(curve is Line line) || line.Length < 1e-6)
+                    {
+                        Logger.Log("偵測到非直線或無效線段，略過角點修剪並回傳原偏移結果");
+                        return curves;
+                    }
+
+                    var dir = (line.GetEndPoint(1) - line.GetEndPoint(0)).Normalize();
+                    var normal = new XYZ(-dir.Y, dir.X, 0);
+                    var mid = line.Evaluate(0.5, true);
+                    if (normal.DotProduct(roomCenter - mid) < 0)
+                        normal = normal.Negate();
+
+                    var shift = normal * inwardOffset;
+                    shiftedLines.Add(Line.CreateBound(
+                        line.GetEndPoint(0) + shift,
+                        line.GetEndPoint(1) + shift));
+                }
+
+                // 再做角點延伸/修剪（miter）
+                int n = shiftedLines.Count;
+                if (n < 2)
+                    return shiftedLines.Cast<Curve>().ToList();
+
+                var result = new List<Curve>(n);
+                for (int i = 0; i < n; i++)
+                {
+                    var current = shiftedLines[i];
+                    var prev = shiftedLines[(i - 1 + n) % n];
+                    var next = shiftedLines[(i + 1) % n];
+
+                    var pStart = TryGetUnboundIntersection(prev, current) ?? current.GetEndPoint(0);
+                    var pEnd = TryGetUnboundIntersection(current, next) ?? current.GetEndPoint(1);
+
+                    // 依原本方向配對起終點，避免倒向
+                    var oldStart = current.GetEndPoint(0);
+                    var oldEnd = current.GetEndPoint(1);
+                    double direct = oldStart.DistanceTo(pStart) + oldEnd.DistanceTo(pEnd);
+                    double swapped = oldStart.DistanceTo(pEnd) + oldEnd.DistanceTo(pStart);
+                    if (swapped < direct)
+                    {
+                        var tmp = pStart;
+                        pStart = pEnd;
+                        pEnd = tmp;
+                    }
+
+                    if (pStart.DistanceTo(pEnd) > 1e-6)
+                        result.Add(Line.CreateBound(pStart, pEnd));
+                    else
+                        result.Add(current);
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"角點延伸/修剪失敗，回退原曲線: {ex.Message}");
+                return curves;
+            }
+        }
+
+        XYZ TryGetUnboundIntersection(Line lineA, Line lineB)
+        {
+            try
+            {
+                var a = Line.CreateUnbound(lineA.GetEndPoint(0), lineA.Direction);
+                var b = Line.CreateUnbound(lineB.GetEndPoint(0), lineB.Direction);
+
+                IntersectionResultArray ira;
+                var result = a.Intersect(b, out ira);
+                if (result == SetComparisonResult.Overlap && ira != null && ira.Size > 0)
+                    return ira.get_Item(0).XYZPoint;
+            }
+            catch
+            {
+                // 交點計算失敗就回傳 null 讓呼叫端 fallback
+            }
+            return null;
         }
 
         void JoinAdjacentWalls(List<Wall> walls)
@@ -2257,9 +2389,9 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
         }
 
         /// <summary>
-        /// 調整牆面方向，確保面向房間內部
+        /// 調整牆面方向，可指定是否面向房間內部
         /// </summary>
-        void AdjustWallOrientation(Wall wall, XYZ roomCenter)
+        void AdjustWallOrientation(Wall wall, XYZ roomCenter, bool faceTowardRoom = true)
         {
             try
             {
@@ -2285,14 +2417,14 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                 // 檢查牆面是否需要翻轉
                 var dotProduct = normal.DotProduct(toRoomCenter);
                 Logger.Log($"牆面法向量與房間中心方向的點積: {dotProduct:F3}");
-                
-                // 如果點積為負，說明牆面背向房間，需要翻轉
-                if (dotProduct < 0)
+
+                bool shouldFlip = faceTowardRoom ? (dotProduct < 0) : (dotProduct > 0);
+                if (shouldFlip)
                 {
                     try
                     {
                         wall.Flip();
-                        Logger.Log($"牆面 {wall.Id} 已翻轉，現在面向房間內部");
+                        Logger.Log($"牆面 {wall.Id} 已翻轉，目標方向: {(faceTowardRoom ? "面向房間" : "背向房間")}");
                     }
                     catch (Exception flipEx)
                     {
@@ -2301,7 +2433,7 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                 }
                 else
                 {
-                    Logger.Log($"牆面 {wall.Id} 方向正確，面向房間內部");
+                    Logger.Log($"牆面 {wall.Id} 方向正確，目標方向: {(faceTowardRoom ? "面向房間" : "背向房間")}");
                 }
             }
             catch (Exception ex)
@@ -2555,7 +2687,7 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
             try
             {
                 var p = e.LookupParameter("AR_RoomId");
-                if (p != null && !p.IsReadOnly) p.Set(r.Id.Value);
+                if (p != null && !p.IsReadOnly) p.Set(r.Id.GetIdValue());
             }
             catch { }
         }

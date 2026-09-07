@@ -3,6 +3,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -17,12 +18,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
         private static double _volThresholdMM3 = 200.0;
 
-        private static readonly ICollection<BuiltInCategory> _catsStruct = new[] {
-            BuiltInCategory.OST_StructuralFraming,
-            BuiltInCategory.OST_StructuralColumns,
-            BuiltInCategory.OST_StructuralFoundation,
-            BuiltInCategory.OST_Floors
-        };
+        private static readonly ICollection<BuiltInCategory> _catsStruct = ElementCategorizer.GetStructuralCategories(includeFoundation: true);
 
         private static readonly SolidOptions NoMatOpt = new SolidOptions(
             ElementId.InvalidElementId, 
@@ -250,6 +246,508 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             }
         }
 
+        /// <summary>
+        /// 取得面的主要法向量（平面臉直接用 FaceNormal，曲面臉用中心點法向量）
+        /// </summary>
+        internal static XYZ GetFaceDominantNormal(Face face)
+        {
+            if (face is PlanarFace pf) return pf.FaceNormal;
+            try
+            {
+                return face.ComputeNormal(new UV(0.5, 0.5)).Normalize();
+            }
+            catch
+            {
+                try { return face.ComputeNormal(new UV(0, 0)).Normalize(); }
+                catch { return XYZ.BasisZ; }
+            }
+        }
+
+        /// <summary>
+        /// 統一的面→模板擠出：平面用傳統擠出，曲面用網格偏移法
+        /// </summary>
+        private static Solid ExtrudeOrOffsetFace(Face face, double thickness, bool grow, SolidOptions opt, XYZ direction = null)
+        {
+            if (face is PlanarFace pf)
+                return ExtrudeFromFace(pf, thickness, grow, opt, direction);
+            return CreateCurvedFormworkSolid(face, thickness);
+        }
+
+        /// <summary>
+        /// 為曲面（非平面，如圓弧牆、曲梁）建立模板實體或 Mesh。
+        /// 優先返回 Solid；若只有 Mesh，返回 null（呼叫端應使用 CreateCurvedFormworkGeometries 直接取幾何）。
+        /// </summary>
+        internal static Solid CreateCurvedFormworkSolid(Face face, double thickness)
+        {
+            // 優先嘗試 TessellatedShapeBuilder 方式，取 Solid
+            var geoms = CreateCurvedFormworkGeometries(face, thickness);
+            if (geoms != null)
+            {
+                var solid = geoms.OfType<Solid>().Where(s => !IsNullOrTiny(s))
+                                 .OrderByDescending(s => s.Volume).FirstOrDefault();
+                if (!IsNullOrTiny(solid))
+                {
+                    Debug.Log("CreateCurvedFormworkSolid: TessellatedShapeBuilder Solid 成功，體積={0:F6}", solid.Volume);
+                    return solid;
+                }
+                // 有幾何但都是 Mesh（AnyGeometry fallback）→ 回傳 null，由呼叫端直接使用 geoms
+                if (geoms.Count > 0)
+                {
+                    Debug.Log("CreateCurvedFormworkSolid: 幾何為 Mesh（非 Solid），呼叫端需改用 geoms 直接建立 DirectShape");
+                    return null;
+                }
+            }
+
+            // 退路：三角稜柱合併法（保留相容性）
+            return CreateCurvedFormworkSolidFallback(face, thickness);
+        }
+
+        /// <summary>
+        /// 為曲面建立模板幾何物件列表（使用 TessellatedShapeBuilder）。
+        /// 核心演算法：
+        ///   1. 三角化曲面取得網格
+        ///   2. 計算每個頂點面積加權平均法向量
+        ///   3. 沿頂點法向量偏移建立外側頂點
+        ///   4. 用 TessellatedShapeBuilder 建立「內側面 + 外側面 + 側邊面」的封閉實體
+        /// 優點：避免大量 Boolean Union 產生的幾何縫隙與視覺瑕疵。
+        /// </summary>
+        private static IList<GeometryObject> CreateCurvedFormworkGeometries(Face face, double thickness)
+        {
+            // ── 策略 1：高精度 Tessellation + AnyGeometry/Mesh（仿 Dynamo PolySurface.Surfaces 邏輯）
+            // Dynamo 邏輯：PolySurface.BySolid → Surfaces → DirectShape.ByGeometry(Surface)
+            // 等效 C# 作法：高精度三角化 → TessellatedShapeBuilder(AnyGeometry, Mesh)
+            // 優點：不要求封閉實體，徹底消除 Salvage 產出的破面/碎片問題
+            var result = TryBuildTessellatedFormwork(face, thickness, levelOfDetail: 0.02);
+            if (result != null) return result;
+
+            // ── 策略 2：降低精度重試（相容性兜底）
+            result = TryBuildTessellatedFormwork(face, thickness, levelOfDetail: 0.1);
+            if (result != null) return result;
+
+            return null;
+        }
+
+        /// <summary>
+        /// 仿 Dynamo DirectShape.ByGeometry(Surface) 的核心方法：
+        /// 高精度三角化 → 雙層（內+外）+ 側壁 → TessellatedShapeBuilder(AnyGeometry, Mesh)
+        /// AnyGeometry+Mesh 不要求封閉實體，即使拓撲有缺陷也能產出乾淨 mesh，無破面問題。
+        /// </summary>
+        private static IList<GeometryObject> TryBuildTessellatedFormwork(Face face, double thickness, double levelOfDetail)
+        {
+            try
+            {
+                Mesh mesh = face.Triangulate(levelOfDetail);
+                if (mesh == null || mesh.NumTriangles == 0) return null;
+
+                var meshVerts = mesh.Vertices;
+                int nv = meshVerts.Count;
+                int nt = mesh.NumTriangles;
+                if (nv < 3 || nt == 0) return null;
+
+                XYZ dominantNormal = GetFaceDominantNormal(face);
+
+                // 步驟 1：收集三角形索引
+                var triIdx = new int[nt][];
+                for (int t = 0; t < nt; t++)
+                {
+                    var tri = mesh.get_Triangle(t);
+                    triIdx[t] = new[] { (int)tri.get_Index(0), (int)tri.get_Index(1), (int)tri.get_Index(2) };
+                }
+
+                // 步驟 2：計算每個頂點的面積加權平均法向量（確保偏移方向一致）
+                var accumX = new double[nv];
+                var accumY = new double[nv];
+                var accumZ = new double[nv];
+                for (int t = 0; t < nt; t++)
+                {
+                    int i0 = triIdx[t][0], i1 = triIdx[t][1], i2 = triIdx[t][2];
+                    XYZ v0 = meshVerts[i0], v1 = meshVerts[i1], v2 = meshVerts[i2];
+                    XYZ cross = (v1 - v0).CrossProduct(v2 - v0);
+                    double area = cross.GetLength() / 2.0;
+                    if (area < 1e-10) continue;
+                    XYZ n = cross.Divide(cross.GetLength());
+                    if (n.DotProduct(dominantNormal) < 0) n = n.Negate();
+                    accumX[i0] += n.X * area; accumX[i1] += n.X * area; accumX[i2] += n.X * area;
+                    accumY[i0] += n.Y * area; accumY[i1] += n.Y * area; accumY[i2] += n.Y * area;
+                    accumZ[i0] += n.Z * area; accumZ[i1] += n.Z * area; accumZ[i2] += n.Z * area;
+                }
+
+                // 步驟 3：建立內側與外側偏移頂點
+                var innerVerts = new XYZ[nv];
+                var outerVerts = new XYZ[nv];
+                for (int i = 0; i < nv; i++)
+                {
+                    innerVerts[i] = meshVerts[i];
+                    double len = Math.Sqrt(accumX[i] * accumX[i] + accumY[i] * accumY[i] + accumZ[i] * accumZ[i]);
+                    XYZ vn = len > 1e-10 ? new XYZ(accumX[i] / len, accumY[i] / len, accumZ[i] / len) : dominantNormal;
+                    outerVerts[i] = meshVerts[i] + vn.Multiply(thickness);
+                }
+
+                // 步驟 4：找出邊界邊（只出現一次的有向邊，即網格外輪廓）
+                var edgeSet = new HashSet<long>();
+                long maxV = (long)nv + 1L;
+                for (int t = 0; t < nt; t++)
+                    for (int e = 0; e < 3; e++)
+                    {
+                        int a = triIdx[t][e], b = triIdx[t][(e + 1) % 3];
+                        edgeSet.Add((long)a * maxV + b);
+                    }
+
+                var boundaryEdges = new List<(int from, int to)>();
+                for (int t = 0; t < nt; t++)
+                    for (int e = 0; e < 3; e++)
+                    {
+                        int a = triIdx[t][e], b = triIdx[t][(e + 1) % 3];
+                        if (!edgeSet.Contains((long)b * maxV + a))
+                            boundaryEdges.Add((a, b));
+                    }
+
+                // 步驟 5：用 TessellatedShapeBuilder 建立幾何
+                // ─ 關鍵修正（仿 Dynamo）─
+                // Target.AnyGeometry + Fallback.Mesh：
+                //   不要求封閉實體（Solid），拓撲不完美時回退為 Mesh 而非 Salvage
+                //   → 徹底消除 Salvage 產出的破面/透明/碎片問題
+                var builder = new TessellatedShapeBuilder();
+                builder.OpenConnectedFaceSet(false); // false = 開放殼體（不強制封閉）
+                var matId = ElementId.InvalidElementId;
+
+                // 內側面（反向繞向）
+                for (int t = 0; t < nt; t++)
+                {
+                    var idx = triIdx[t];
+                    XYZ p0 = innerVerts[idx[0]], p1 = innerVerts[idx[1]], p2 = innerVerts[idx[2]];
+                    if (p0.DistanceTo(p1) < 1e-6 || p1.DistanceTo(p2) < 1e-6 || p2.DistanceTo(p0) < 1e-6) continue;
+                    try { builder.AddFace(new TessellatedFace(new[] { p0, p2, p1 }, matId)); }
+                    catch { }
+                }
+
+                builder.CloseConnectedFaceSet(); // 關閉內側面集合
+
+                // 外側面（正向繞向）
+                builder.OpenConnectedFaceSet(false);
+                for (int t = 0; t < nt; t++)
+                {
+                    var idx = triIdx[t];
+                    XYZ p0 = outerVerts[idx[0]], p1 = outerVerts[idx[1]], p2 = outerVerts[idx[2]];
+                    if (p0.DistanceTo(p1) < 1e-6 || p1.DistanceTo(p2) < 1e-6 || p2.DistanceTo(p0) < 1e-6) continue;
+                    try { builder.AddFace(new TessellatedFace(new[] { p0, p1, p2 }, matId)); }
+                    catch { }
+                }
+
+                builder.CloseConnectedFaceSet(); // 關閉外側面集合
+
+                // 側邊面（邊界邊 → 四邊形，分 ConnectedFaceSet 避免拓撲錯誤）
+                if (boundaryEdges.Count > 0)
+                {
+                    builder.OpenConnectedFaceSet(false);
+                    foreach (var (fromIdx, toIdx) in boundaryEdges)
+                    {
+                        XYZ p0 = innerVerts[fromIdx], p1 = innerVerts[toIdx];
+                        XYZ p2 = outerVerts[toIdx],   p3 = outerVerts[fromIdx];
+                        if (p0.DistanceTo(p1) < 1e-6 || p1.DistanceTo(p2) < 1e-6 ||
+                            p2.DistanceTo(p3) < 1e-6 || p3.DistanceTo(p0) < 1e-6) continue;
+                        try { builder.AddFace(new TessellatedFace(new[] { p0, p3, p2, p1 }, matId)); }
+                        catch { }
+                    }
+                    builder.CloseConnectedFaceSet();
+                }
+
+                // ─ 核心修正：AnyGeometry + Mesh（不強制 Solid，避免破面）─
+                builder.Target   = TessellatedShapeBuilderTarget.AnyGeometry;
+                builder.Fallback = TessellatedShapeBuilderFallback.Mesh;
+
+                builder.Build();
+                var buildResult = builder.GetBuildResult();
+                if (buildResult != null && buildResult.Outcome != TessellatedShapeBuilderOutcome.Nothing)
+                {
+                    var geoms = buildResult.GetGeometricalObjects().ToList();
+                    if (geoms.Count > 0)
+                    {
+                        Debug.Log("TryBuildTessellatedFormwork(lod={0}): 成功，{1} 個幾何物件，成果={2}",
+                            levelOfDetail, geoms.Count, buildResult.Outcome);
+                        return geoms;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.Log($"TryBuildTessellatedFormwork(lod={levelOfDetail}) 失敗: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 退路：三角稜柱合併法（原始方式，保留為備用）
+        /// </summary>
+        private static Solid CreateCurvedFormworkSolidFallback(Face face, double thickness)
+        {
+            try
+            {
+                Mesh mesh = face.Triangulate(0.8);
+                if (mesh == null || mesh.NumTriangles == 0) return null;
+
+                var meshVerts = mesh.Vertices;
+                int nt = mesh.NumTriangles;
+                if (meshVerts.Count < 3) return null;
+
+                XYZ dominantNormal = GetFaceDominantNormal(face);
+                var prisms = new List<Solid>();
+
+                for (int t = 0; t < nt; t++)
+                {
+                    try
+                    {
+                        var tri = mesh.get_Triangle(t);
+                        XYZ v0 = meshVerts[(int)tri.get_Index(0)];
+                        XYZ v1 = meshVerts[(int)tri.get_Index(1)];
+                        XYZ v2 = meshVerts[(int)tri.get_Index(2)];
+
+                        XYZ triNormal = (v1 - v0).CrossProduct(v2 - v0);
+                        double len = triNormal.GetLength();
+                        if (len < 1e-10) continue;
+                        triNormal = triNormal.Divide(len);
+                        if (triNormal.DotProduct(dominantNormal) < 0)
+                            triNormal = triNormal.Negate();
+
+                        var loop = new CurveLoop();
+                        loop.Append(Line.CreateBound(v0, v1));
+                        loop.Append(Line.CreateBound(v1, v2));
+                        loop.Append(Line.CreateBound(v2, v0));
+
+                        var prism = GeometryCreationUtilities.CreateExtrusionGeometry(
+                            new List<CurveLoop> { loop }, triNormal, thickness);
+
+                        if (!IsNullOrTiny(prism))
+                            prisms.Add(prism);
+                    }
+                    catch { }
+                }
+
+                if (prisms.Count == 0) return null;
+                return BooleanUnionMany(prisms);
+            }
+            catch (Exception ex)
+            {
+                Debug.Log($"CreateCurvedFormworkSolidFallback 失敗: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 為 CylindricalFace（弧牆曲面）建立旋轉體模板實體。
+        /// 使用 CreateRevolvedGeometry 產生真正的圓柱 BREP 曲面，完全消除條紋/破面。
+        /// </summary>
+        private static Solid TryCreateRevolutionFormwork(Face face, double thicknessFt)
+        {
+            try
+            {
+                var loops = face.GetEdgesAsCurveLoops();
+                if (loops == null || loops.Count == 0) return null;
+
+                // 收集水平圓弧（頂/底圓弧），並取得 Z 範圍
+                Arc refArc = null;
+                double minZ = double.MaxValue, maxZ = double.MinValue;
+
+                foreach (var loop in loops)
+                {
+                    foreach (var curve in loop)
+                    {
+                        double z0 = curve.GetEndPoint(0).Z;
+                        double z1 = curve.GetEndPoint(1).Z;
+                        minZ = Math.Min(minZ, Math.Min(z0, z1));
+                        maxZ = Math.Max(maxZ, Math.Max(z0, z1));
+
+                        if (curve is Arc arc)
+                        {
+                            // 近似水平弧（Z 跨度 < 0.01 ft ≈ 3 mm）
+                            double dzSpan = Math.Abs(z1 - z0);
+                            if (dzSpan < 0.01)
+                            {
+                                // 選最低位的水平弧作為參考
+                                if (refArc == null || z0 < refArc.GetEndPoint(0).Z)
+                                    refArc = arc;
+                            }
+                        }
+                    }
+                }
+
+                if (refArc == null) return null;
+                double height = maxZ - minZ;
+                if (height < 1e-6) return null;
+
+                // 判斷模板方向：面法向量是否「朝外」（遠離圓心）
+                XYZ arcCenter = refArc.Center;
+                XYZ arcMidPt  = refArc.Evaluate(0.5, true);
+                XYZ radialDir = new XYZ(arcMidPt.X - arcCenter.X, arcMidPt.Y - arcCenter.Y, 0).Normalize();
+
+                XYZ fn = face.ComputeNormal(new UV(0.5, 0.5));
+                XYZ fn2D = new XYZ(fn.X, fn.Y, 0);
+                if (fn2D.GetLength() < 1e-6) fn2D = radialDir;
+                else fn2D = fn2D.Normalize();
+
+                double dot = radialDir.DotProduct(fn2D);
+                double faceR = refArc.Radius;
+                // dot > 0 → 外側面，模板向外；dot < 0 → 內側面，模板向外（遠離牆）
+                double r0 = dot >= 0 ? faceR : Math.Max(1e-4, faceR - thicknessFt);
+                double r1 = dot >= 0 ? faceR + thicknessFt : faceR;
+                if (r0 < 1e-4) return null;
+
+                // 起始徑向方向（旋轉 Frame 的 X 軸）
+                XYZ startPt  = refArc.GetEndPoint(0);
+                XYZ startDir = new XYZ(startPt.X - arcCenter.X, startPt.Y - arcCenter.Y, 0).Normalize();
+                XYZ tanDir   = new XYZ(-startDir.Y, startDir.X, 0); // CCW 90° 切線方向
+
+                // 弧總角度（length / radius；始終為正）
+                double sweepAngle = refArc.Length / faceR;
+                if (sweepAngle < 1e-4 || sweepAngle > Math.PI * 2 - 1e-4) return null;
+
+                // 如果弧是 CW（cross.Z < 0），用終點方向作為 Frame X 軸，讓革命方向對齊
+                XYZ endPt  = refArc.GetEndPoint(1);
+                XYZ endDir = new XYZ(endPt.X - arcCenter.X, endPt.Y - arcCenter.Y, 0).Normalize();
+                double crossZ = startDir.X * endDir.Y - startDir.Y * endDir.X;
+                if (crossZ < 0)
+                {
+                    // CW 弧：以終點為起始方向
+                    startDir = endDir;
+                    tanDir   = new XYZ(-startDir.Y, startDir.X, 0);
+                }
+
+                // 旋轉 Frame（Z = 世界 Z，為旋轉軸）
+                var revFrame = new Frame(
+                    new XYZ(arcCenter.X, arcCenter.Y, minZ),
+                    startDir,
+                    tanDir,
+                    XYZ.BasisZ
+                );
+
+                // 旋轉剖面（矩形：r0~r1 × 0~height，位於 Frame XZ 平面）
+                XYZ orig = new XYZ(arcCenter.X, arcCenter.Y, minZ);
+                XYZ q00 = orig + startDir.Multiply(r0);
+                XYZ q10 = orig + startDir.Multiply(r1);
+                XYZ q11 = orig + startDir.Multiply(r1) + XYZ.BasisZ.Multiply(height);
+                XYZ q01 = orig + startDir.Multiply(r0) + XYZ.BasisZ.Multiply(height);
+
+                var profile = new CurveLoop();
+                profile.Append(Line.CreateBound(q00, q10));
+                profile.Append(Line.CreateBound(q10, q11));
+                profile.Append(Line.CreateBound(q11, q01));
+                profile.Append(Line.CreateBound(q01, q00));
+
+                var solid = GeometryCreationUtilities.CreateRevolvedGeometry(
+                    revFrame, new[] { profile }, 0.0, sweepAngle);
+
+                return (!IsNullOrTiny(solid)) ? solid : null;
+            }
+            catch (Exception ex)
+            {
+                Debug.Log("TryCreateRevolutionFormwork 失敗: {0}", ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 公開入口：為曲面或平面單一面建立模板 DirectShape（供 CmdPickFace 呼叫）
+        /// </summary>
+        public static ElementId BuildFromAnyFace(Document doc, Element host, Face face, double thicknessMm, Material mat)
+        {
+            if (doc == null || host == null || face == null) return ElementId.InvalidElementId;
+
+            if (face is PlanarFace pf)
+                return BuildFromFace(doc, host, pf, thicknessMm, mat);
+
+            // 曲面路徑
+            Debug.Log("BuildFromAnyFace: 曲面，Host:{0}, 厚度:{1}mm", host.Id.GetIdValue(), thicknessMm);
+
+            double thk = Mm(thicknessMm);
+
+            // ── 優先 1：CylindricalFace → CreateRevolvedGeometry（真正圓柱 BREP，完全無條紋/破面）
+            if (face is CylindricalFace)
+            {
+                var revolvedSolid = TryCreateRevolutionFormwork(face, thk);
+                if (!IsNullOrTiny(revolvedSolid))
+                {
+                    var revolvedId = CreateDS(doc, revolvedSolid, host, "CurvedFace", mat);
+                    if (revolvedId != ElementId.InvalidElementId)
+                    {
+                        XYZ rn = GetFaceDominantNormal(face);
+                        double rAreaM2 = ToM2(face.Area);
+                        double rSide   = Math.Abs(Math.Abs(rn.Z) - 1.0) < 0.15 ? 0 : rAreaM2;
+                        double rBottom = rAreaM2 - rSide;
+                        WriteForDS(doc.GetElement(revolvedId), host, rSide, rBottom);
+                        Debug.Log("BuildFromAnyFace: 旋轉體模板成功（無條紋）- 面積:{0:F3}m²", rAreaM2);
+                        return revolvedId;
+                    }
+                }
+                Debug.Log("BuildFromAnyFace: 旋轉體失敗，降級到 Tessellation");
+            }
+
+            // ── 優先 2：TessellatedShapeBuilder Solid（其他曲面或旋轉體失敗時使用）
+            var tessGeoms = CreateCurvedFormworkGeometries(face, thk);
+            if (tessGeoms != null && tessGeoms.Count > 0)
+            {
+                // 過濾出有效的幾何物件（Solid 優先，Mesh 備用）
+                var validGeoms = tessGeoms
+                    .Where(g => g != null)
+                    .Where(g => !(g is Solid s) || !IsNullOrTiny(s))
+                    .ToList();
+
+                if (validGeoms.Count > 0)
+                {
+                    var ds = Autodesk.Revit.DB.DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
+                    ds.ApplicationId = SharedParams.AppId;
+                    ds.Name = "CurvedFace";
+                    ds.SetShape(validGeoms);
+                    if (mat != null && mat.Id != ElementId.InvalidElementId)
+                    {
+                        var param = ds.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM);
+                        if (param != null && !param.IsReadOnly)
+                            param.Set(mat.Id);
+                    }
+
+                    XYZ dominantNormal = GetFaceDominantNormal(face);
+                    double areaM2 = ToM2(face.Area);
+                    double sideM2   = Math.Abs(Math.Abs(dominantNormal.Z) - 1.0) < 0.15 ? 0 : areaM2;
+                    double bottomM2 = Math.Abs(Math.Abs(dominantNormal.Z) - 1.0) < 0.15 ? areaM2 : 0;
+
+                    WriteForDS(doc.GetElement(ds.Id), host, sideM2, bottomM2);
+                    bool isSolid = validGeoms.Any(g => g is Solid);
+                    Debug.Log("BuildFromAnyFace: 曲面模板建立成功（{0}）- 側:{1:F3}m², 底:{2:F3}m²",
+                        isSolid ? "Solid" : "Mesh", sideM2, bottomM2);
+                    return ds.Id;
+                }
+            }
+
+            // 退路：三角稜柱合併法（最後手段，有縫隙但至少能生成）
+            var formworkSolid = CreateCurvedFormworkSolidFallback(face, thk);
+            if (IsNullOrTiny(formworkSolid))
+            {
+                Debug.Log("BuildFromAnyFace: 無法建立曲面模板實體（面積={0:F3}m²）", ToM2(face.Area));
+                return ElementId.InvalidElementId;
+            }
+
+            // 鄰近結構裁切（退路才做，Mesh 路徑不做 Boolean）
+            double eps    = Mm(SHELL_EPS_MM);
+            double growFb = Mm(AABB_GROW_MM);
+            var neighborInfosFb = GetNeighborSolidsWithElements(doc, host, thk + growFb);
+            var neighborsFb     = neighborInfosFb.Select(n => n.Solid).ToList();
+            var unionCutterFb   = BooleanUnionMany(neighborsFb);
+            formworkSolid = ApplyDynamoLikeCut(formworkSolid, unionCutterFb, neighborsFb, eps, true);
+
+            if (IsNullOrTiny(formworkSolid)) return ElementId.InvalidElementId;
+
+            var id = CreateDS(doc, formworkSolid, host, "CurvedFace", mat);
+
+            XYZ dominantNormal2 = GetFaceDominantNormal(face);
+            double areaM2b = ToM2(face.Area);
+            double sideM2b  = Math.Abs(Math.Abs(dominantNormal2.Z) - 1.0) < 0.15 ? 0 : areaM2b;
+            double bottomM2b = Math.Abs(Math.Abs(dominantNormal2.Z) - 1.0) < 0.15 ? areaM2b : 0;
+
+            WriteForDS(doc.GetElement(id), host, sideM2b, bottomM2b);
+            Debug.Log("BuildFromAnyFace: 曲面模板建立成功（退路）- 側:{0:F3}m², 底:{1:F3}m²", sideM2b, bottomM2b);
+
+            return id;
+        }
+
         // 補上缺失的 ApplyDynamoLikeCut 方法 - 平衡的接觸面扣除
         private static Solid ApplyDynamoLikeCut(
             Solid target,
@@ -404,7 +902,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         private static bool IsFaceExposed(Document doc, Element host, PlanarFace pf, double extraDepthInternal)
         {
             Debug.Log("檢查面是否需要模板 - Host:{0}, Face.Normal:({1:F2},{2:F2},{3:F2})",
-                host.Id.Value,
+                host.Id.GetIdValue(),
                 pf.FaceNormal.X, pf.FaceNormal.Y, pf.FaceNormal.Z);
 
             // 實務模板邏輯：大部分面都需要模板，除非是特殊情況
@@ -487,7 +985,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var solids = GetElementSolids(e);
                 if (solids == null || solids.Count == 0)
                 {
-                    Debug.Log("元素 {0} 無實體", e.Id.Value);
+                    Debug.Log("元素 {0} 無實體", e.Id.GetIdValue());
                     return false;
                 }
 
@@ -539,7 +1037,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             var lines = new List<string>();
             double grand = 0;
-            string[] cats = { "牆", "結構柱", "結構梁", "板" };
+            string[] cats = { "牆", "結構柱", "結構梁", "板", "樓梯" };
             string[] kinds = { "側", "底" };
 
             foreach (var c in cats)
@@ -598,7 +1096,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 double totalAreaFt2 = sideAreaFt2 + bottomAreaFt2;
 
                 ds.LookupParameter(SharedParams.P_Category)?.Set(cat);
-                ds.LookupParameter(SharedParams.P_HostId)?.Set(host.Id.Value.ToString());
+                ds.LookupParameter(SharedParams.P_HostId)?.Set(host.Id.GetIdValue().ToString());
                 ds.LookupParameter(SharedParams.P_Total)?.Set(totalAreaFt2);
                 ds.LookupParameter(SharedParams.P_EffectiveArea)?.Set(totalAreaFt2);
             }
@@ -672,19 +1170,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             if (IsStructuralColumn(host)) return "結構柱";
             if (IsStructuralFraming(host)) return "結構梁";
             if (host is Floor) return "板";
+            if (ElementCategorizer.IsStairs(host)) return "樓梯";
             return host.Category?.Name ?? "未知";
         }
 
         private static bool IsStructuralColumn(Element host)
         {
             return host != null && host.Category != null &&
-                   host.Category.Id.Value == (int)BuiltInCategory.OST_StructuralColumns;
+                   host.Category.Id.GetIdValue() == (int)BuiltInCategory.OST_StructuralColumns;
         }
 
         private static bool IsStructuralFraming(Element host)
         {
             return host != null && host.Category != null &&
-                   host.Category.Id.Value == (int)BuiltInCategory.OST_StructuralFraming;
+                   host.Category.Id.GetIdValue() == (int)BuiltInCategory.OST_StructuralFraming;
         }
 
         private static bool IsBeamShortSideAgainstColumn(Document doc, Element host, PlanarFace face)
@@ -711,8 +1210,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         { 
             public Element Host { get; set; }
             public IList<Solid> HostSolids { get; set; } = new List<Solid>();
-            public IList<PlanarFace> SideFaces { get; set; } = new List<PlanarFace>();
-            public IList<PlanarFace> BottomFaces { get; set; } = new List<PlanarFace>();
+            public IList<Face> SideFaces { get; set; } = new List<Face>();
+            public IList<Face> BottomFaces { get; set; } = new List<Face>();
         }
         
         public static FormworkInfo AnalyzeHost(Document doc, Element host, bool includeBottom)
@@ -724,17 +1223,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 
                 foreach (var solid in info.HostSolids)
                 {
-                    foreach (var face in solid.Faces.Cast<Face>().OfType<PlanarFace>())
+                    foreach (Face face in solid.Faces)
                     {
-                        var normal = face.FaceNormal;
+                        XYZ normal = GetFaceDominantNormal(face);
                         
                         // 垂直面（側面）
-                        if (Math.Abs(normal.Z) < 0.1)
+                        if (Math.Abs(normal.Z) < 0.15)
                         {
                             info.SideFaces.Add(face);
                         }
                         // 水平面（底面）
-                        else if (includeBottom && Math.Abs(Math.Abs(normal.Z) - 1) < 0.1 && normal.Z < 0)
+                        else if (includeBottom && Math.Abs(Math.Abs(normal.Z) - 1) < 0.15 && normal.Z < 0)
                         {
                             info.BottomFaces.Add(face);
                         }
@@ -788,11 +1287,41 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 if (host is Wall)
                 {
                     var w = (Wall)host;
-                    foreach (var f in GetWallSidePlanarFaces(w))
+                    foreach (var f in GetWallSideFaces(w))
                     {
-                        if (!IsFaceExposed(doc, host, f, thk)) continue;
+                        // 平面臉才做詳細曝露檢查；曲面臉保守假設需要模板
+                        if (f is PlanarFace pfWall && !IsFaceExposed(doc, host, pfWall, thk)) continue;
 
-                        var s = ExtrudeFromFace(f, thk, true, opt);
+                        double faceAreaM2 = ToM2(f.Area);
+
+                        if (!(f is PlanarFace))
+                        {
+                            // 曲面：直接用 TessBuilder Mesh，跳過 Boolean 運算（Boolean 會失敗）
+                            var tessGeoms = CreateCurvedFormworkGeometries(f, thk);
+                            if (tessGeoms == null || tessGeoms.Count == 0) continue;
+                            if (generate)
+                            {
+                                var dsCurved = Autodesk.Revit.DB.DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
+                                dsCurved.ApplicationId = SharedParams.AppId;
+                                dsCurved.Name = "Wall-Side";
+                                dsCurved.SetShape(tessGeoms.ToList());
+                                if (mat != null && mat.Id != ElementId.InvalidElementId)
+                                {
+                                    var pm = dsCurved.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM);
+                                    if (pm != null && !pm.IsReadOnly) pm.Set(mat.Id);
+                                }
+                                results.Add(dsCurved.Id);
+                                WriteForDS(doc.GetElement(dsCurved.Id), host, faceAreaM2, 0);
+                            }
+                            else
+                            {
+                                WriteForDS(null, host, faceAreaM2, 0);
+                            }
+                            continue;
+                        }
+
+                        // 平面臉：原有 Boolean 管線
+                        var s = ExtrudeOrOffsetFace(f, thk, true, opt);
                         s = ApplyDynamoLikeCut(s, unionCutter, neighbors, eps, true);
                         if (IsNullOrTiny(s)) continue;
 
@@ -800,12 +1329,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         {
                             var id = CreateDS(doc, s, host, "Wall-Side", mat);
                             results.Add(id);
-                            var newElement = doc.GetElement(id);
-                            WriteForDS(newElement, host, LateralAreaM2(s), 0);
+                            WriteForDS(doc.GetElement(id), host, faceAreaM2, 0);
                         }
                         else
                         {
-                            WriteForDS(null, host, LateralAreaM2(s), 0);
+                            WriteForDS(null, host, faceAreaM2, 0);
                         }
                     }
                     return results;
@@ -814,23 +1342,24 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // ── 柱：四側 ─────────────────────────────────────────────
                 if (IsStructuralColumn(host))
                 {
-                    foreach (var f in GetVerticalPlanarFaces(hostSolids))
+                    foreach (var f in GetVerticalFaces(hostSolids))
                     {
-                        if (!IsFaceExposed(doc, host, f, thk)) continue;
+                        if (f is PlanarFace pfCol && !IsFaceExposed(doc, host, pfCol, thk)) continue;
 
-                        var s = ExtrudeFromFace(f, thk, true, opt);
+                        var s = ExtrudeOrOffsetFace(f, thk, f is PlanarFace, opt);
                         s = ApplyDynamoLikeCut(s, unionCutter, neighbors, eps, true);
                         if (IsNullOrTiny(s)) continue;
 
+                        double faceAreaM2 = ToM2(f.Area);
                         if (generate)
                         {
                             var id = CreateDS(doc, s, host, "Column-Side", mat);
                             results.Add(id);
-                            WriteForDS(doc.GetElement(id), host, LateralAreaM2(s), 0);
+                            WriteForDS(doc.GetElement(id), host, faceAreaM2, 0);
                         }
                         else
                         {
-                            WriteForDS(null, host, LateralAreaM2(s), 0);
+                            WriteForDS(null, host, faceAreaM2, 0);
                         }
                     }
                     return results;
@@ -839,48 +1368,53 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // ── 梁：側 + 底 ──────────────────────────────────────────
                 if (IsStructuralFraming(host))
                 {
-                    // 側板（短邊貼柱不生）
-                    foreach (var f in GetVerticalPlanarFaces(hostSolids))
+                    // 側板（平面臉短邊貼柱不生；曲面臉不做貼柱判斷）
+                    foreach (var f in GetVerticalFaces(hostSolids))
                     {
-                        if (!IsFaceExposed(doc, host, f, thk)) continue;
-                        if (IsBeamShortSideAgainstColumn(doc, host, f)) continue;
+                        if (f is PlanarFace pfBeam)
+                        {
+                            if (!IsFaceExposed(doc, host, pfBeam, thk)) continue;
+                            if (IsBeamShortSideAgainstColumn(doc, host, pfBeam)) continue;
+                        }
 
-                        var s = ExtrudeFromFace(f, thk, true, opt);
+                        var s = ExtrudeOrOffsetFace(f, thk, f is PlanarFace, opt);
                         s = ApplyDynamoLikeCut(s, unionCutter, neighbors, eps, true);
                         if (IsNullOrTiny(s)) continue;
 
+                        double faceAreaM2 = ToM2(f.Area);
                         if (generate)
                         {
                             var id = CreateDS(doc, s, host, "Beam-Side", mat);
                             results.Add(id);
-                            WriteForDS(doc.GetElement(id), host, LateralAreaM2(s), 0);
+                            WriteForDS(doc.GetElement(id), host, faceAreaM2, 0);
                         }
                         else
                         {
-                            WriteForDS(null, host, LateralAreaM2(s), 0);
+                            WriteForDS(null, host, faceAreaM2, 0);
                         }
                     }
 
                     // 底模
                     if (includeBottom)
                     {
-                        foreach (var bf in GetHorizontalPlanarFaces(hostSolids, true))
+                        foreach (var bf in GetHorizontalFaces(hostSolids, true))
                         {
-                            if (!IsFaceExposed(doc, host, bf, thk)) continue;
+                            if (bf is PlanarFace pfBmBot && !IsFaceExposed(doc, host, pfBmBot, thk)) continue;
 
-                            var s = ExtrudeFromFace(bf, thk, true, opt, -XYZ.BasisZ);
+                            var s = ExtrudeOrOffsetFace(bf, thk, bf is PlanarFace, opt, -XYZ.BasisZ);
                             s = ApplyDynamoLikeCut(s, unionCutter, neighbors, eps, true);
                             if (IsNullOrTiny(s)) continue;
 
+                            double faceAreaM2 = ToM2(bf.Area);
                             if (generate)
                             {
                                 var id = CreateDS(doc, s, host, "Beam-Bottom", mat);
                                 results.Add(id);
-                                WriteForDS(doc.GetElement(id), host, 0, OneCapAreaM2(s));
+                                WriteForDS(doc.GetElement(id), host, 0, faceAreaM2);
                             }
                             else
                             {
-                                WriteForDS(null, host, 0, OneCapAreaM2(s));
+                                WriteForDS(null, host, 0, faceAreaM2);
                             }
                         }
                     }
@@ -893,47 +1427,116 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     // 底
                     if (includeBottom)
                     {
-                        foreach (var bf in GetHorizontalPlanarFaces(hostSolids, true))
+                        foreach (var bf in GetHorizontalFaces(hostSolids, true))
                         {
-                            if (!IsFaceExposed(doc, host, bf, thk)) continue;
+                            if (bf is PlanarFace pfSlabBot && !IsFaceExposed(doc, host, pfSlabBot, thk)) continue;
 
-                            var loops = bf.GetEdgesAsCurveLoops();
-                            var grown = OffsetLoops(loops, off, bf.FaceNormal);
-                            var s = CreateExtrusion(grown, -XYZ.BasisZ, thk, opt);
+                            Solid s;
+                            if (bf is PlanarFace pf2)
+                            {
+                                // 平面底面：帶底部偏移量擠出
+                                var loops = pf2.GetEdgesAsCurveLoops();
+                                var grown = OffsetLoops(loops, off, pf2.FaceNormal);
+                                s = CreateExtrusion(grown, -XYZ.BasisZ, thk, opt);
+                            }
+                            else
+                            {
+                                // 曲面底面：直接用偏移網格法
+                                s = ExtrudeOrOffsetFace(bf, thk, false, opt, -XYZ.BasisZ);
+                            }
                             s = ApplyDynamoLikeCut(s, unionCutter, neighbors, eps, true);
                             if (IsNullOrTiny(s)) continue;
 
+                            double faceAreaM2 = ToM2(bf.Area);
                             if (generate)
                             {
                                 var id = CreateDS(doc, s, host, "Slab-Bottom", mat);
                                 results.Add(id);
-                                WriteForDS(doc.GetElement(id), host, 0, OneCapAreaM2(s));
+                                WriteForDS(doc.GetElement(id), host, 0, faceAreaM2);
                             }
                             else
                             {
-                                WriteForDS(null, host, 0, OneCapAreaM2(s));
+                                WriteForDS(null, host, 0, faceAreaM2);
                             }
                         }
                     }
 
                     // 懸臂側板：只有「外露的垂直面」才做，若邊有梁/牆則 IsFaceExposed 會擋掉
-                    foreach (var vf in GetVerticalPlanarFaces(hostSolids))
+                    foreach (var vf in GetVerticalFaces(hostSolids))
                     {
-                        if (!IsFaceExposed(doc, host, vf, thk)) continue;
+                        if (vf is PlanarFace pfSlabSide && !IsFaceExposed(doc, host, pfSlabSide, thk)) continue;
 
-                        var s = ExtrudeFromFace(vf, thk, true, opt);
+                        var s = ExtrudeOrOffsetFace(vf, thk, vf is PlanarFace, opt);
                         s = ApplyDynamoLikeCut(s, unionCutter, neighbors, eps, true);
                         if (IsNullOrTiny(s)) continue;
 
+                        double slabSideAreaM2 = ToM2(vf.Area);
                         if (generate)
                         {
                             var id = CreateDS(doc, s, host, "Slab-Side", mat);
                             results.Add(id);
-                            WriteForDS(doc.GetElement(id), host, LateralAreaM2(s), 0);
+                            WriteForDS(doc.GetElement(id), host, slabSideAreaM2, 0);
                         }
                         else
                         {
-                            WriteForDS(null, host, LateralAreaM2(s), 0);
+                            WriteForDS(null, host, slabSideAreaM2, 0);
+                        }
+                    }
+
+                    return results;
+                }
+
+                // ── 樓梯：梯段 / 平台 / 支撐，依外露垂直面與底面產生模板 ──
+                if (ElementCategorizer.IsStairs(host))
+                {
+                    var stairNeighbors = neighborInfos
+                        .Where(n => !ElementCategorizer.IsStairs(n.Element))
+                        .Select(n => n.Solid)
+                        .ToList();
+                    var stairUnionCutter = BooleanUnionMany(stairNeighbors);
+
+                    foreach (var f in GetVerticalFaces(hostSolids))
+                    {
+                        if (f is PlanarFace pfStairSide && !IsFaceExposed(doc, host, pfStairSide, thk)) continue;
+
+                        var s = ExtrudeOrOffsetFace(f, thk, f is PlanarFace, opt);
+                        s = ApplyDynamoLikeCut(s, stairUnionCutter, stairNeighbors, eps, true);
+                        if (IsNullOrTiny(s)) continue;
+
+                        double faceAreaM2 = ToM2(f.Area);
+                        if (generate)
+                        {
+                            var id = CreateDS(doc, s, host, "Stair-Side", mat);
+                            results.Add(id);
+                            WriteForDS(doc.GetElement(id), host, faceAreaM2, 0);
+                        }
+                        else
+                        {
+                            WriteForDS(null, host, faceAreaM2, 0);
+                        }
+                    }
+
+                    if (includeBottom)
+                    {
+                        foreach (var bf in GetHorizontalFaces(hostSolids, true))
+                        {
+                            if (bf is PlanarFace pfStairBot && !IsFaceExposed(doc, host, pfStairBot, thk)) continue;
+
+                            var s = ExtrudeOrOffsetFace(bf, thk, bf is PlanarFace, opt, -XYZ.BasisZ);
+                            s = ApplyDynamoLikeCut(s, stairUnionCutter, stairNeighbors, eps, true);
+                            if (IsNullOrTiny(s)) continue;
+
+                            double faceAreaM2 = ToM2(bf.Area);
+                            if (generate)
+                            {
+                                var id = CreateDS(doc, s, host, "Stair-Bottom", mat);
+                                results.Add(id);
+                                WriteForDS(doc.GetElement(id), host, 0, faceAreaM2);
+                            }
+                            else
+                            {
+                                WriteForDS(null, host, 0, faceAreaM2);
+                            }
                         }
                     }
 
@@ -955,7 +1558,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             if (doc == null || host == null || face == null) return ElementId.InvalidElementId;
 
-            Debug.Log("開始從面建立模板 - Host:{0}, 厚度:{1}mm", host.Id.Value, thicknessMm);
+            Debug.Log("開始從面建立模板 - Host:{0}, 厚度:{1}mm", host.Id.GetIdValue(), thicknessMm);
 
             double thk = Mm(thicknessMm);
             var opt = (mat != null && mat.Id != ElementId.InvalidElementId)
@@ -1014,7 +1617,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             if (doc == null || host == null || face == null) return ElementId.InvalidElementId;
 
-            Debug.Log("開始精確面生面 - Host:{0}, 厚度:{1}mm", host.Id.Value, thicknessMm);
+            Debug.Log("開始精確面生面 - Host:{0}, 厚度:{1}mm", host.Id.GetIdValue(), thicknessMm);
 
             double thk = Mm(thicknessMm);
             var opt = (mat != null && mat.Id != ElementId.InvalidElementId)
@@ -1069,7 +1672,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         // 精確版面外露檢查 - 類似油漆功能，正確判斷交集後的面
         private static bool IsFaceExposedAccurate(Document doc, Element host, PlanarFace pf, double thickness)
         {
-            Debug.Log("精確檢查面是否暴露 - Host:{0}", host.Id.Value);
+            Debug.Log("精確檢查面是否暴露 - Host:{0}", host.Id.GetIdValue());
 
             var normal = pf.FaceNormal;
             
@@ -1118,7 +1721,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         {
                             totalCoveredVolume += intersection.Volume;
                             Debug.Log("  => 被 {0} 部分覆蓋，體積: {1:F6}", 
-                                neighborInfo.Element.Id.Value, intersection.Volume);
+                                neighborInfo.Element.Id.GetIdValue(), intersection.Volume);
                         }
                     }
                     catch (Exception ex)
@@ -1191,10 +1794,26 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                         double intersectionRatio = intersection.Volume / result.Volume;
                         Debug.Log("與 {0} 的交集比例: {1:P1}", 
-                            neighborInfo.Element.Id.Value, intersectionRatio);
+                            neighborInfo.Element.Id.GetIdValue(), intersectionRatio);
 
-                        // 如果有明顯交集，進行裁切
-                        if (intersectionRatio > 0.01) // 1% 以上才裁切
+                        // 接合類型偵測 — 下列情況使用極低閾值 0.1%：
+                        //   牆對牆: 交集比率 = 牆A厚/牆B長
+                        //   樓板對牆: 交集比率 = 牆截面/樓板面積
+                        //   牆對樓板/梁: 交集比率 = 板厚/牆高（高牆時 < 1%）
+                        bool isHostWallFb    = host?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_Walls;
+                        bool isHostFloorFb   = host?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_Floors;
+                        bool isHostBeamFb    = host?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralFraming;
+                        bool isNeighborWallFb  = neighborInfo.Element?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_Walls;
+                        bool isNeighborSlabFb  = neighborInfo.Element?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_Floors ||
+                                                 neighborInfo.Element?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralFraming;
+                        bool needsLowCutThresholdFb = (isHostWallFb  && isNeighborWallFb)  ||  // 牆對牆
+                                                      (isHostFloorFb && isNeighborWallFb)  ||  // 樓板對牆
+                                                      (isHostWallFb  && isNeighborSlabFb)  ||  // 牆對樓板/梁
+                                                      (isHostBeamFb  && isNeighborWallFb)  ||  // 梁對牆: 交集比率 = 牆厚/梁長
+                                                      (isHostBeamFb  && isNeighborSlabFb);     // 梁穿樓板
+                        double effectiveCutThreshold = needsLowCutThresholdFb ? 0.001 : 0.01;
+
+                        if (intersectionRatio > effectiveCutThreshold)
                         {
                             var cut = BooleanOperationsUtils.ExecuteBooleanOperation(
                                 result, neighborInfo.Solid, BooleanOperationsType.Difference);
@@ -1203,8 +1822,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             {
                                 result = cut;
                                 processedCount++;
-                                Debug.Log("成功裁切 {0}，交集比例: {1:P1}", 
-                                    neighborInfo.Element.Id.Value, intersectionRatio);
+                                Debug.Log("成功裁切 {0}，交集比例: {1:P1}（閾值: {2:P1}）", 
+                                    neighborInfo.Element.Id.GetIdValue(), intersectionRatio, effectiveCutThreshold);
                             }
                         }
 
@@ -1214,7 +1833,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     catch (Exception ex)
                     {
                         Debug.Log("處理鄰近結構 {0} 失敗: {1}", 
-                            neighborInfo.Element.Id.Value, ex.Message);
+                            neighborInfo.Element.Id.GetIdValue(), ex.Message);
                     }
                 }
 
@@ -1251,7 +1870,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         private static bool IsFaceExposedFast(Document doc, Element host, PlanarFace pf, double extraDepthInternal)
         {
 #if REVIT2024 || REVIT2025 || REVIT2026
-            Debug.Log("檢查面是否需要模板 - Host:{0}", host.Id.Value);
+            Debug.Log("檢查面是否需要模板 - Host:{0}", host.Id.GetIdValue());
 #else
             Debug.Log("檢查面是否需要模板 - Host:{0}", host.Id.IntegerValue);
 #endif
@@ -1310,7 +1929,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         bbox.Min.Z <= probePoint.Z && probePoint.Z <= bbox.Max.Z)
                     {
 #if REVIT2024 || REVIT2025 || REVIT2026
-                        Debug.Log("  => 面可能被 {0} 遮擋", neighborInfo.Element.Id.Value);
+                        Debug.Log("  => 面可能被 {0} 遮擋", neighborInfo.Element.Id.GetIdValue());
 #else
                         Debug.Log("  => 面可能被 {0} 遮擋", neighborInfo.Element.Id.IntegerValue);
 #endif
@@ -1493,6 +2112,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var hostType = GetStructuralElementType(host);
 
                 // 根據結構類型和面的方向採用不同的裁切策略
+                var originalVolume = formworkSolid.Volume; // 保存原始模板體積用於計算比例
+
                 foreach (var neighborInfo in neighbors)
                 {
                     if (IsNullOrTiny(neighborInfo.Solid)) continue;
@@ -1505,15 +2126,18 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         // 計算相交體積
                         var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(
                             result, neighborInfo.Solid, BooleanOperationsType.Intersect);
-                        
+
                         if (IsNullOrTiny(intersection)) continue;
 
-                        // 使用改進的相接判斷邏輯
-                        double intersectionRatio = intersection.Volume / result.Volume;
+                        // 使用原始模板體積計算相交比例，避免隨著裁切而變化
+                        double intersectionRatio = intersection.Volume / originalVolume;
                         var neighborType = GetStructuralElementType(neighborInfo.Element);
-                        
+
+                        Debug.Log("  檢查 {0}-{1} 相接：相交體積={2:F6}, 原始體積={3:F6}, 比例={4:P2}",
+                            hostType, neighborType, intersection.Volume, originalVolume, intersectionRatio);
+
                         bool shouldCut = ShouldCutFormwork(hostType, neighborType, intersectionRatio, normal, face, neighborInfo);
-                        
+
                         if (shouldCut)
                         {
                             var cut = BooleanOperationsUtils.ExecuteBooleanOperation(
@@ -1521,19 +2145,23 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             if (!IsNullOrTiny(cut))
                             {
                                 result = cut;
-                                Debug.Log("執行裁切 {0}-{1}，相交比例: {2:P1}", 
+                                Debug.Log("  ✅ 執行裁切 {0}-{1}，相交比例: {2:P2}",
                                     hostType, neighborType, intersectionRatio);
+                            }
+                            else
+                            {
+                                Debug.Log("  ⚠️ 裁切後模板過小，跳過");
                             }
                         }
                         else
                         {
-                            Debug.Log("保留連接 {0}-{1}，相交比例: {2:P1}", 
+                            Debug.Log("  ❌ 保留連接 {0}-{1}，相交比例: {2:P2} (未達閾值)",
                                 hostType, neighborType, intersectionRatio);
                         }
                     }
                     catch (Exception ex)
                     {
-                        Debug.Log("裁切失敗: {0}", ex.Message);
+                        Debug.Log("  ❌ 裁切失敗: {0}", ex.Message);
                         // 繼續處理下一個鄰近結構
                     }
                 }
@@ -1548,24 +2176,35 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         }
 
         // 改進的相接判斷邏輯
-        private static bool ShouldCutFormwork(StructuralElementType hostType, StructuralElementType neighborType, 
+        private static bool ShouldCutFormwork(StructuralElementType hostType, StructuralElementType neighborType,
             double intersectionRatio, XYZ normal, PlanarFace face, NeighborInfo neighborInfo)
         {
             // 根據實際施工經驗決定是否需要裁切模板
-            
-            // 1. 柱與梁相接：梁的模板通常被柱部分遮擋，需要裁切
+
+            // ⚠️ 重要：特定規則必須在一般規則之前檢查，避免被覆蓋
+
+            // 1. 牆與牆相接：兩面牆相接處通常不需要模板（最優先處理）
+            if (hostType == StructuralElementType.Wall && neighborType == StructuralElementType.Wall)
+            {
+                // 牆與牆相接時，只要有任何相交就應該裁切
+                // 使用非常低的閾值（0.1%），幾乎任何接觸都會裁切
+                Debug.Log("  🔍 牆與牆相接檢測：相交比例 {0:P2}", intersectionRatio);
+                return intersectionRatio > 0.001; // 0.1% 以上相交就裁切
+            }
+
+            // 2. 柱與梁相接：梁的模板通常被柱部分遮擋，需要裁切
             if (hostType == StructuralElementType.Beam && neighborType == StructuralElementType.Column)
             {
                 return intersectionRatio > 0.05; // 5% 以上相交就裁切
             }
-            
-            // 2. 梁與柱相接：柱的模板在梁的位置需要裁切
+
+            // 3. 梁與柱相接：柱的模板在梁的位置需要裁切
             if (hostType == StructuralElementType.Column && neighborType == StructuralElementType.Beam)
             {
                 return intersectionRatio > 0.03; // 3% 以上相交就裁切
             }
-            
-            // 3. 板與梁相接：板底模板被梁遮擋的部分需要裁切
+
+            // 4. 板與梁相接：板底模板被梁遮擋的部分需要裁切
             if (hostType == StructuralElementType.Slab && neighborType == StructuralElementType.Beam)
             {
                 // 檢查是否為板底面
@@ -1575,8 +2214,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 }
                 return intersectionRatio > 0.1; // 其他面 10% 以上才裁切
             }
-            
-            // 4. 梁與板相接：梁的頂面通常被板覆蓋
+
+            // 5. 梁與板相接：梁的頂面通常被板覆蓋
             if (hostType == StructuralElementType.Beam && neighborType == StructuralElementType.Slab)
             {
                 // 檢查是否為梁頂面
@@ -1586,31 +2225,31 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 }
                 return intersectionRatio > 0.08; // 側面 8% 以上才裁切
             }
-            
-            // 5. 板與柱相接：板在柱位置的開口
+
+            // 6. 板與柱相接：板在柱位置的開口
             if (hostType == StructuralElementType.Slab && neighborType == StructuralElementType.Column)
             {
                 return intersectionRatio > 0.01; // 1% 以上相交就裁切（柱穿板）
             }
-            
-            // 6. 柱與板相接：柱被板包圍的部分
+
+            // 7. 柱與板相接：柱被板包圍的部分
             if (hostType == StructuralElementType.Column && neighborType == StructuralElementType.Slab)
             {
                 return intersectionRatio > 0.05; // 5% 以上相交就裁切
             }
-            
-            // 7. 牆與其他結構相接
+
+            // 8. 牆與其他結構相接
             if (hostType == StructuralElementType.Wall)
             {
                 return intersectionRatio > 0.05; // 5% 以上相交就裁切
             }
-            
-            // 8. 相同類型結構相接（通常不需要模板）
+
+            // 9. 相同類型結構相接（通常不需要模板）- 一般規則，放在最後
             if (hostType == neighborType)
             {
                 return intersectionRatio > 0.02; // 2% 以上相交就裁切
             }
-            
+
             // 默認情況：較保守的裁切
             return intersectionRatio > 0.15; // 15% 以上相交才裁切
         }
@@ -1618,10 +2257,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         private static StructuralElementType GetStructuralElementType(Element element)
         {
 #if REVIT2024 || REVIT2025 || REVIT2026
-            var categoryId = element.Category?.Id?.Value;
+            var categoryId = element.Category?.Id?.GetIdValue();
 #else
             var categoryId = element.Category?.Id?.IntegerValue;
 #endif
+            if (categoryId.HasValue && ElementCategorizer.IsStairCategory(categoryId.Value))
+                return StructuralElementType.Stair;
+
             switch (categoryId)
             {
                 case (int)BuiltInCategory.OST_StructuralFraming:
@@ -1644,6 +2286,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             Column, 
             Slab,
             Wall,
+            Stair,
             Other
         }
 
@@ -1736,6 +2379,25 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             return result;
         }
 
+        /// <summary>
+        /// 取得牆的側面（含曲面壁、弧形牆的圓柱面等非平面）
+        /// </summary>
+        private static IList<Face> GetWallSideFaces(Wall wall)
+        {
+            var result = new List<Face>();
+            var solids = GetElementSolids(wall);
+            foreach (var s in solids)
+            {
+                foreach (Face f in s.Faces)
+                {
+                    XYZ normal = GetFaceDominantNormal(f);
+                    if (Math.Abs(normal.Z) < 0.15) // 近乎垂直的面（容差稍大以包含曲面）
+                        result.Add(f);
+                }
+            }
+            return result;
+        }
+
         private static IList<PlanarFace> GetVerticalPlanarFaces(IList<Solid> solids)
         {
             var result = new List<PlanarFace>();
@@ -1751,6 +2413,24 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             result.Add(pf);
                         }
                     }
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 取得元素的垂直面（含曲面）
+        /// </summary>
+        private static IList<Face> GetVerticalFaces(IList<Solid> solids)
+        {
+            var result = new List<Face>();
+            foreach (var s in solids)
+            {
+                foreach (Face f in s.Faces)
+                {
+                    XYZ normal = GetFaceDominantNormal(f);
+                    if (Math.Abs(normal.Z) < 0.15)
+                        result.Add(f);
                 }
             }
             return result;
@@ -1773,6 +2453,27 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                 result.Add(pf);
                             }
                         }
+                    }
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 取得元素的水平面（含曲面）
+        /// </summary>
+        private static IList<Face> GetHorizontalFaces(IList<Solid> solids, bool bottomOnly)
+        {
+            var result = new List<Face>();
+            foreach (var s in solids)
+            {
+                foreach (Face f in s.Faces)
+                {
+                    XYZ normal = GetFaceDominantNormal(f);
+                    if (Math.Abs(Math.Abs(normal.Z) - 1) < 0.15)
+                    {
+                        if (!bottomOnly || normal.Z < 0)
+                            result.Add(f);
                     }
                 }
             }

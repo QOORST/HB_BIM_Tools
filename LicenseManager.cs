@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
@@ -84,6 +85,31 @@ namespace YD_RevitTools.LicenseManager
                     return false;
             }
         }
+
+        internal static bool VerifyLicenseSignature(byte[] payload, byte[] signature)
+        {
+            using (var rsa = RSA.Create())
+            {
+                rsa.ImportParameters(ParseRsaPublicKeyXml(LicenseManager.LICENSE_PUBLIC_KEY_XML));
+                return rsa.VerifyData(payload, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            }
+        }
+
+        /// <summary>
+        /// 將 RSAKeyValue XML 格式解析為 RSAParameters（公鑰：Modulus + Exponent）
+        /// </summary>
+        private static RSAParameters ParseRsaPublicKeyXml(string xml)
+        {
+            var doc = new XmlDocument();
+            doc.LoadXml(xml);
+            string modulusB64 = doc.SelectSingleNode("//Modulus")?.InnerText ?? throw new CryptographicException("XML 中缺少 Modulus");
+            string exponentB64 = doc.SelectSingleNode("//Exponent")?.InnerText ?? throw new CryptographicException("XML 中缺少 Exponent");
+            return new RSAParameters
+            {
+                Modulus = Convert.FromBase64String(modulusB64),
+                Exponent = Convert.FromBase64String(exponentB64)
+            };
+        }
     }
 
     public class LicenseManager
@@ -91,6 +117,7 @@ namespace YD_RevitTools.LicenseManager
         private static LicenseManager _instance;
         private static readonly object _lock = new object();
         private LicenseInfo _currentLicense;
+        internal const string LICENSE_PUBLIC_KEY_XML = "<RSAKeyValue><Modulus>vOabCDg4iCCKhHUjKis6vYfyL89Q0znE50X+/LOINwnakq672O8e2lvBtcXyWClJMmhNJ9v6hG8C9uZbPvsWKJss1Ng0hBs7OHxns/2qauAXxzxvmnoS5VpS8W6avea1nViUi7HAf5qPbm/XfTGXVlk841IV0c0hSHHpK4RwwB/PvtCupOavFy6QPf2LKEPXrODJhur2vD348NkXfVGlBxIjhCOeKPlXNSFfHo79CEr4Hcy/3Y5j9veIZNPchZ7zI7DrJ+s7w/ek/ySwXQOM+i5pimp1505nsuX41mhh0nAA3GU5v8+WhDITyIGzgHxhoVqr8j6DCJaDtL/K1VyWqQ==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
 
         // 功能權限映射表
         private static readonly Dictionary<LicenseType, HashSet<string>> FeatureMap = new Dictionary<LicenseType, HashSet<string>>
@@ -107,6 +134,8 @@ namespace YD_RevitTools.LicenseManager
                 "DeleteFormwork",             // 刪除模板 (別名)
                 // AR_Finishings - 裝修工具基本功能
                 "Finishings.Generate",        // 裝修生成
+                "Finishings.Delete",          // 刪除裝修
+                "DeleteFinishings",           // 刪除裝修 (別名)
                 // AR_AutoJoin - 接合工具基本功能
                 "AutoJoin",                   // 自動接合
                 "JoinToPicked",               // 接合到選取
@@ -117,7 +146,11 @@ namespace YD_RevitTools.LicenseManager
                 "Family.ParameterSlider",     // 族參數滑桿
                 "Family.ProjectSlider",       // 專案參數滑桿
                 // MEP - 機電工具基本功能
-                "MEP.PipeSleeve"              // 管線套管
+                "MEP.PipeSleeve",             // 管線套管
+                // Data - 資料工具基本功能
+                "Schedule.Export",            // 明細表匯出
+                "Data.ModelManager",          // 模型資料管理
+                "Data.BimStandardAudit"       // BIM 標準檢查
             },
             [LicenseType.Standard] = new HashSet<string>
             {
@@ -144,6 +177,8 @@ namespace YD_RevitTools.LicenseManager
                 "StructuralAnalysis",         // 結構分析 (別名)
                 // AR_Finishings - 裝修工具標準功能
                 "Finishings.Generate",        // 裝修生成
+                "Finishings.Delete",          // 刪除裝修
+                "DeleteFinishings",           // 刪除裝修 (別名)
                 // AR_AutoJoin - 接合工具標準功能
                 "AutoJoin",                   // 自動接合
                 "JoinToPicked",               // 接合到選取
@@ -156,7 +191,13 @@ namespace YD_RevitTools.LicenseManager
                 "Family.ParameterSlider",     // 族參數滑桿
                 "Family.ProjectSlider",       // 專案參數滑桿
                 // MEP - 機電工具標準功能
-                "MEP.PipeSleeve"              // 管線套管
+                "MEP.PipeSleeve",             // 管線套管
+                // Data - 資料工具標準功能
+                "Schedule.Export",            // 明細表匯出
+                "Data.ModelManager",          // 模型資料管理
+                "Data.BimStandardAudit",      // BIM 標準檢查
+                "Data.BimStandardReport",     // BIM 標準檢查報告匯出
+                "Data.ClarificationDeckExport" // 釋疑簡報快速產出
             },
             [LicenseType.Professional] = new HashSet<string>
             {
@@ -186,29 +227,65 @@ namespace YD_RevitTools.LicenseManager
             LoadLicense();
         }
 
-        private string LicenseFilePath
+        private string LicenseFilePath => GetPrimaryLicenseFilePath();
+
+        private string GetPrimaryLicenseFilePath()
         {
-            get
-            {
-                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                string licenseFolder = Path.Combine(appData, "YD", "RevitTools");
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string licenseFolder = Path.Combine(appData, "YD", "RevitTools");
 
-                if (!Directory.Exists(licenseFolder))
-                    Directory.CreateDirectory(licenseFolder);
+            if (!Directory.Exists(licenseFolder))
+                Directory.CreateDirectory(licenseFolder);
 
-                return Path.Combine(licenseFolder, "license.dat");
-            }
+            return Path.Combine(licenseFolder, "license.dat");
+        }
+
+        private IEnumerable<string> EnumerateLicenseFileCandidates()
+        {
+            string primary = GetPrimaryLicenseFilePath();
+            yield return primary;
+
+            string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            if (!string.IsNullOrWhiteSpace(programData))
+                yield return Path.Combine(programData, "YD", "RevitTools", "license.dat");
+
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrWhiteSpace(localAppData))
+                yield return Path.Combine(localAppData, "YD", "RevitTools", "license.dat");
         }
 
         private void LoadLicense()
         {
             try
             {
-                if (File.Exists(LicenseFilePath))
+                foreach (var path in EnumerateLicenseFileCandidates().Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    string encryptedData = File.ReadAllText(LicenseFilePath);
-                    string decryptedData = Decrypt(encryptedData);
-                    _currentLicense = JsonConvert.DeserializeObject<LicenseInfo>(decryptedData);
+                    if (!File.Exists(path)) continue;
+                    try
+                    {
+                        string encryptedData = File.ReadAllText(path);
+                        string decryptedData = Decrypt(encryptedData);
+                        var loaded = JsonConvert.DeserializeObject<LicenseInfo>(decryptedData);
+                        if (loaded == null) continue;
+                        if (!VerifyStoredLicense(loaded, out _)) continue;
+
+                        _currentLicense = loaded;
+
+                        string primary = GetPrimaryLicenseFilePath();
+                        if (!path.Equals(primary, StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                File.WriteAllText(primary, encryptedData);
+                            }
+                            catch { }
+                        }
+                        return;
+                    }
+                    catch
+                    {
+                        // 嘗試下一個候選路徑
+                    }
                 }
             }
             catch (Exception ex)
@@ -236,6 +313,16 @@ namespace YD_RevitTools.LicenseManager
                 {
                     IsValid = false,
                     Message = "授權未啟用",
+                    Severity = ValidationSeverity.Error
+                };
+            }
+
+            if (!VerifyStoredLicense(_currentLicense, out string storedLicenseError))
+            {
+                return new LicenseValidationResult
+                {
+                    IsValid = false,
+                    Message = storedLicenseError,
                     Severity = ValidationSeverity.Error
                 };
             }
@@ -335,6 +422,15 @@ namespace YD_RevitTools.LicenseManager
         {
             try
             {
+                if (license == null)
+                    return false;
+
+                if (license.IsEnabled && !VerifyStoredLicense(license, out string validationError))
+                {
+                    System.Diagnostics.Debug.WriteLine($"授權儲存前驗證失敗: {validationError}");
+                    return false;
+                }
+
                 string jsonData = JsonConvert.SerializeObject(license, Newtonsoft.Json.Formatting.Indented);
                 string encryptedData = Encrypt(jsonData);
                 File.WriteAllText(LicenseFilePath, encryptedData);
@@ -362,13 +458,17 @@ namespace YD_RevitTools.LicenseManager
         {
             try
             {
-                if (File.Exists(LicenseFilePath))
+                foreach (var path in EnumerateLicenseFileCandidates().Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    File.Delete(LicenseFilePath);
-                    _currentLicense = null;
-                    return true;
+                    try
+                    {
+                        if (File.Exists(path))
+                            File.Delete(path);
+                    }
+                    catch { }
                 }
-                return false;
+                _currentLicense = null;
+                return true;
             }
             catch (Exception ex)
             {
@@ -391,10 +491,172 @@ namespace YD_RevitTools.LicenseManager
             return Encoding.UTF8.GetString(decrypted);
         }
 
+        private bool TryReadSignedLicense(string licenseKey, out LicenseInfo license, out string errorMessage)
+        {
+            license = null;
+            errorMessage = null;
+
+            if (string.IsNullOrWhiteSpace(licenseKey))
+            {
+                errorMessage = "授權金鑰不存在。";
+                return false;
+            }
+
+            string cleanKey = licenseKey.Replace("\r", "").Replace("\n", "").Replace(" ", "").Trim();
+            int dotIdx = cleanKey.LastIndexOf('.');
+            if (dotIdx <= 0 || dotIdx >= cleanKey.Length - 1)
+            {
+                errorMessage = "授權金鑰格式錯誤，請使用新版簽章授權碼。";
+                return false;
+            }
+
+            try
+            {
+                string jsonB64 = cleanKey.Substring(0, dotIdx);
+                string sigB64 = cleanKey.Substring(dotIdx + 1);
+                byte[] jsonBytes = Convert.FromBase64String(jsonB64);
+                byte[] sigBytes = Convert.FromBase64String(sigB64);
+
+                if (!LicenseInfo.VerifyLicenseSignature(jsonBytes, sigBytes))
+                {
+                    errorMessage = "授權金鑰簽章無效。";
+                    return false;
+                }
+
+                license = JsonConvert.DeserializeObject<LicenseInfo>(Encoding.UTF8.GetString(jsonBytes));
+                if (license == null)
+                {
+                    errorMessage = "授權金鑰解析失敗。";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (FormatException)
+            {
+                errorMessage = "授權金鑰格式錯誤（無效的 Base64 編碼）。";
+                return false;
+            }
+            catch (JsonException ex)
+            {
+                errorMessage = $"授權金鑰格式錯誤（無效的 JSON）：{ex.Message}";
+                return false;
+            }
+            catch (CryptographicException ex)
+            {
+                errorMessage = $"授權金鑰簽章驗證失敗：{ex.Message}";
+                return false;
+            }
+        }
+
+        private bool VerifyStoredLicense(LicenseInfo storedLicense, out string errorMessage)
+        {
+            errorMessage = null;
+
+            if (storedLicense == null)
+            {
+                errorMessage = "找不到授權文件";
+                return false;
+            }
+
+            if (!TryReadSignedLicense(storedLicense.LicenseKey, out LicenseInfo signedLicense, out errorMessage))
+            {
+                return false;
+            }
+
+            if (storedLicense.LicenseType != signedLicense.LicenseType ||
+                !StringEquals(storedLicense.UserName, signedLicense.UserName) ||
+                !StringEquals(storedLicense.Company, signedLicense.Company) ||
+                storedLicense.StartDate != signedLicense.StartDate ||
+                storedLicense.ExpiryDate != signedLicense.ExpiryDate)
+            {
+                errorMessage = "授權文件內容與簽章授權碼不一致，可能已被修改。";
+                return false;
+            }
+
+            // 取得當前機器碼（含 backward compatibility）
+            string[] currentCodes = GetMachineCodes();
+            string currentMachineCodeV2 = currentCodes[0];
+            string currentMachineCodeLegacy = currentCodes[1];
+
+            // 比對授權文件中的機器碼（支援新版和舊版）
+            if (!string.IsNullOrWhiteSpace(storedLicense.MachineCode))
+            {
+                bool matchesV2 = string.Equals(storedLicense.MachineCode, currentMachineCodeV2, StringComparison.OrdinalIgnoreCase);
+                bool matchesLegacy = currentMachineCodeLegacy != null &&
+                                    string.Equals(storedLicense.MachineCode, currentMachineCodeLegacy, StringComparison.OrdinalIgnoreCase);
+
+                if (!matchesV2 && !matchesLegacy)
+                {
+                    errorMessage = "授權文件已綁定到其他電腦，請重新啟用授權。";
+                    return false;
+                }
+            }
+
+            // 比對簽章授權碼中的機器碼（支援新版和舊版）
+            if (!string.IsNullOrWhiteSpace(signedLicense.MachineCode))
+            {
+                bool matchesV2 = string.Equals(signedLicense.MachineCode, currentMachineCodeV2, StringComparison.OrdinalIgnoreCase);
+                bool matchesLegacy = currentMachineCodeLegacy != null &&
+                                    string.Equals(signedLicense.MachineCode, currentMachineCodeLegacy, StringComparison.OrdinalIgnoreCase);
+
+                if (!matchesV2 && !matchesLegacy)
+                {
+                    errorMessage = "授權金鑰已綁定到其他電腦，請聯繫技術支援重新綁定。";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool StringEquals(string left, string right)
+        {
+            return string.Equals(left ?? string.Empty, right ?? string.Empty, StringComparison.Ordinal);
+        }
+
         /// <summary>
         /// 生成機器碼（基於硬體資訊）
+        /// 指紋來源：CPU ProcessorId + BaseBoard SerialNumber + MachineName
+        /// 不含 UserName，避免使用者變更導致失效
+        /// 支援 backward compatibility：若授權綁定的是舊版機器碼，仍可通過驗證
         /// </summary>
         public string GetMachineCode()
+        {
+            // 先嘗試用新版算法
+            string v2Code = GetMachineCodeV2();
+            // 同時生成舊版算法（用於比對既有授權）
+            string legacyCode = GetLegacyMachineCode();
+            
+            // 儲存兩者供驗證時使用
+            _currentMachineCodeV2 = v2Code;
+            _currentMachineCodeLegacy = legacyCode;
+            
+            return v2Code;
+        }
+
+        private static string _currentMachineCodeV2;
+        private static string _currentMachineCodeLegacy;
+
+        /// <summary>
+        /// 取得當前機器碼（含 backward compatibility）
+        /// 返回陣列：[0] = 新版，[1] = 舊版（若有）
+        /// </summary>
+        public string[] GetMachineCodes()
+        {
+            if (_currentMachineCodeV2 == null)
+            {
+                _currentMachineCodeV2 = GetMachineCodeV2();
+                _currentMachineCodeLegacy = GetLegacyMachineCode();
+            }
+            return new[] { _currentMachineCodeV2, _currentMachineCodeLegacy };
+        }
+
+        /// <summary>
+        /// 生成舊版機器碼（用於 backward compatibility）
+        /// 指紋來源：MachineName + UserName + ProcessorCount
+        /// </summary>
+        private static string GetLegacyMachineCode()
         {
             try
             {
@@ -407,7 +669,40 @@ namespace YD_RevitTools.LicenseManager
                     byte[] bytes = Encoding.UTF8.GetBytes(machineInfo);
                     byte[] hash = sha256.ComputeHash(bytes);
 
-                    // 取前16個字節並轉換為16進制字串
+                    string machineCode = BitConverter.ToString(hash, 0, 16).Replace("-", "");
+                    return $"{machineCode.Substring(0, 4)}-{machineCode.Substring(4, 4)}-{machineCode.Substring(8, 4)}-{machineCode.Substring(12, 4)}";
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetLegacyMachineCode failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 生成新版機器碼（基於硬體指紋）
+        /// </summary>
+        private static string GetMachineCodeV2()
+        {
+            try
+            {
+                string cpuId = GetCpuId();
+                string baseBoardSerial = GetBaseBoardSerialNumber();
+                string machineName = Environment.MachineName;
+
+                // 以固定分隔組合，降低不同欄位拼接碰撞機率
+                string machineInfo = string.Join("|",
+                    cpuId ?? "UNKNOWN_CPU",
+                    baseBoardSerial ?? "UNKNOWN_BOARD",
+                    machineName ?? "UNKNOWN_HOST");
+
+                using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                {
+                    byte[] bytes = Encoding.UTF8.GetBytes(machineInfo);
+                    byte[] hash = sha256.ComputeHash(bytes);
+
+                    // 取前 16 個字節並轉換為 16 進制字串
                     string machineCode = BitConverter.ToString(hash, 0, 16).Replace("-", "");
 
                     // 格式化為 XXXX-XXXX-XXXX-XXXX
@@ -416,9 +711,57 @@ namespace YD_RevitTools.LicenseManager
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"生成機器碼失敗: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"GetMachineCodeV2 failed: {ex.Message}");
                 return "無法生成機器碼";
             }
+        }
+
+
+        /// <summary>
+        /// 取得 CPU ProcessorId（WMIC: Win32_Processor.ProcessorId）
+        /// </summary>
+        private static string GetCpuId()
+        {
+            try
+            {
+                var search = new System.Management.ManagementObjectSearcher(
+                    "SELECT ProcessorId FROM Win32_Processor");
+                foreach (System.Management.ManagementObject obj in search.Get())
+                {
+                    string id = obj["ProcessorId"]?.ToString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(id))
+                        return id;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetCpuId failed: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 取得主機板序號（WMIC: Win32_BaseBoard.SerialNumber）
+        /// 部分機型（如筆記型電腦）此值可能為空，屬正常
+        /// </summary>
+        private static string GetBaseBoardSerialNumber()
+        {
+            try
+            {
+                var search = new System.Management.ManagementObjectSearcher(
+                    "SELECT SerialNumber FROM Win32_BaseBoard");
+                foreach (System.Management.ManagementObject obj in search.Get())
+                {
+                    string sn = obj["SerialNumber"]?.ToString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(sn) && sn != "To Be Filled By O.E.M.")
+                        return sn;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetBaseBoardSerialNumber failed: {ex.Message}");
+            }
+            return null;
         }
 
         /// <summary>
@@ -443,35 +786,12 @@ namespace YD_RevitTools.LicenseManager
                     };
                 }
 
-                // 解析授權金鑰（Base64 解碼）
-                string jsonData;
-                try
-                {
-                    byte[] data = Convert.FromBase64String(licenseKey);
-                    jsonData = Encoding.UTF8.GetString(data);
-                }
-                catch (FormatException)
+                if (!TryReadSignedLicense(licenseKey, out LicenseInfo license, out string licenseKeyError))
                 {
                     return new LicenseValidationResult
                     {
                         IsValid = false,
-                        Message = "授權金鑰格式錯誤（無效的 Base64 編碼）",
-                        Severity = ValidationSeverity.Error
-                    };
-                }
-
-                // 解析 JSON
-                LicenseInfo license;
-                try
-                {
-                    license = JsonConvert.DeserializeObject<LicenseInfo>(jsonData);
-                }
-                catch (JsonException ex)
-                {
-                    return new LicenseValidationResult
-                    {
-                        IsValid = false,
-                        Message = $"授權金鑰格式錯誤（無效的 JSON）：{ex.Message}",
+                        Message = licenseKeyError,
                         Severity = ValidationSeverity.Error
                     };
                 }

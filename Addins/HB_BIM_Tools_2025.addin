@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>HB_BIM Tools</Name>
+    <Assembly>C:\ProgramData\Autodesk\Revit\Addins\2025\HB_BIM\YD_RevitTools.LicenseManager.dll</Assembly>
+    <FullClassName>YD_RevitTools.LicenseManager.App</FullClassName>
+    <ClientId>B3F5D2D4-9392-4A9E-9C0D-A6F5DD93FAC7</ClientId>
+    <VendorId>LAN</VendorId>
+    <VendorDescription>LAN, HB_BIM Tools, www.ydbim.com</VendorDescription>
+  </AddIn>
+</RevitAddIns>

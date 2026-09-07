@@ -30,11 +30,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                 }
 
 #if REVIT2025 || REVIT2026
-                // Revit 2025/2026: XAML UI 不可用，顯示訊息
-                TaskDialog.Show("功能暫不可用",
-                    "裝修生成功能在 Revit 2025/2026 版本中暫時不可用。\n\n" +
-                    "我們正在開發新的 UI 介面以支援這些版本。\n\n" +
-                    "請使用 Revit 2024 或更早版本來使用此功能。");
+                TaskDialog.Show("使用方式提醒",
+                    "Revit 2026 已同步更新 AR 裝修入口。\n\n" +
+                    "請直接使用「房間裝修」或「面生面」按鈕執行對應功能。\n\n" +
+                    "其中房間裝修已恢復完整房間管理介面。\n" +
+                    "Revit 2025 則仍維持暫不開放狀態。");
                 return Result.Cancelled;
 #else
                 // 清空之前的日誌

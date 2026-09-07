@@ -42,14 +42,14 @@ namespace YD_RevitTools.LicenseManager.Commands
                 }
 
                 // 顯示關於對話框
-                TaskDialog td = new TaskDialog("關於 YD_BIM 工具");
-                td.MainInstruction = "YD_BIM 工具";
+                TaskDialog td = new TaskDialog("關於 HB_BIM Tools");
+                td.MainInstruction = "HB_BIM Tools";
                 td.MainContent = $"版本：{assemblyVersion}\n\n" +
                                 $"{licenseInfo}\n\n" +
-                                $"開發團隊：YD_BIM Tools Team\n" +
+                                $"開發團隊：HB_BIM Tools Team\n" +
                                 $"網站：www.ydbim.com\n" +
                                 $"技術支援：qoorst123@yesdir.com.tw\n\n" +
-                                $"© 2025 YD_BIM Owen. All rights reserved.";
+                                $"© 2025 HB_BIM Owen. All rights reserved.";
 
                 // 添加「檢查更新」按鈕
                 td.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "檢查更新", "檢查是否有新版本可用");

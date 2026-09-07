@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>對齊牆輪廓圖文使用手冊</title>
+  <style>
+    :root {
+      --ink: #1f2933;
+      --muted: #64748b;
+      --line: #d7dee8;
+      --panel: #f8fafc;
+      --blue: #0284c7;
+      --blue-soft: #e0f2fe;
+      --amber: #f59e0b;
+      --amber-soft: #fff7ed;
+      --red: #dc2626;
+      --green: #059669;
+      --slate: #46535c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Microsoft JhengHei", "Segoe UI", Arial, sans-serif;
+      line-height: 1.75;
+      background: #ffffff;
+    }
+
+    header {
+      padding: 40px 28px 30px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+    }
+
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    h1 {
+      max-width: 1080px;
+      margin: 0 auto 8px;
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 1080px;
+      margin: 0 auto;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    h2 {
+      margin: 34px 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--line);
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p { margin: 8px 0; }
+
+    ul, ol {
+      margin: 8px 0 14px 24px;
+      padding: 0;
+    }
+
+    li { margin: 4px 0; }
+
+    code {
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #eef2f7;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.94em;
+    }
+
+    .callout {
+      margin: 16px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .warning {
+      border-left-color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: #ffffff;
+    }
+
+    .card h3 { margin-top: 0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 15px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--panel);
+      font-weight: 700;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 10px;
+      margin: 14px 0;
+    }
+
+    .step {
+      position: relative;
+      min-height: 78px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel);
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #0f172a;
+    }
+
+    .diagram {
+      margin: 18px 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #edf2f4;
+      overflow-x: auto;
+    }
+
+    .beam-demo {
+      position: relative;
+      width: min(760px, 100%);
+      height: 360px;
+      margin: 0 auto;
+      background: #46535c;
+      border-radius: 4px;
+    }
+
+    .beam {
+      position: absolute;
+      left: 310px;
+      top: 74px;
+      width: 390px;
+      height: 38px;
+      border: 4px solid #f7e600;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .wall {
+      position: absolute;
+      left: 278px;
+      top: 112px;
+      width: 48px;
+      height: 220px;
+      border: 4px solid #0ea5e9;
+    }
+
+    .problem {
+      position: absolute;
+      left: 190px;
+      top: 74px;
+      width: 130px;
+      height: 112px;
+      border: 4px solid #ef2029;
+    }
+
+    .problem::before,
+    .problem::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 100%;
+      height: 4px;
+      background: #ef2029;
+      transform-origin: center;
+    }
+
+    .problem::before { transform: rotate(45deg); }
+    .problem::after { transform: rotate(-45deg); }
+
+    .gap {
+      position: absolute;
+      left: 320px;
+      top: 80px;
+      width: 8px;
+      height: 100px;
+      background: #ff7a18;
+    }
+
+    .arrow {
+      position: absolute;
+      left: 390px;
+      top: 170px;
+      width: 270px;
+      height: 8px;
+      background: #111827;
+      transform: rotate(-4deg);
+      transform-origin: left center;
+    }
+
+    .arrow::before {
+      content: "";
+      position: absolute;
+      left: -3px;
+      top: -14px;
+      border-top: 18px solid transparent;
+      border-bottom: 18px solid transparent;
+      border-right: 34px solid #111827;
+    }
+
+    .label {
+      position: absolute;
+      color: #ffffff;
+      font-weight: 700;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+    }
+
+    .label.orange {
+      left: 198px;
+      top: 32px;
+      color: #ff8a2a;
+      font-size: 28px;
+    }
+
+    .label.note {
+      left: 370px;
+      top: 128px;
+      font-size: 15px;
+      max-width: 320px;
+    }
+
+    .caption {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .ok { color: var(--green); font-weight: 700; }
+    .no { color: var(--red); font-weight: 700; }
+
+    footer {
+      max-width: 1080px;
+      margin: 28px auto 40px;
+      padding: 0 28px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>對齊牆輪廓圖文使用手冊</h1>
+    <p class="subtitle">HB_BIM Tools / 建模工具 / 接合工具。整理基本牆頂部與底部高度，避免牆與樓板、梁交界處出現不必要的薄縫或短凸出。</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 功能用途</h2>
+      <p>「對齊牆輪廓」用於整理基本牆的頂部與底部高度，使牆體能依模型中的樓板或梁自動調整輪廓。</p>
+      <div class="callout">
+        <strong>主要目的：</strong>牆頂通常先貼附樓板下；但當牆位與梁投影面距離小於等於 <code>0.5 cm</code>，且梁底低於樓板貼附高度時，會改貼附梁下，避免留下很薄的牆頂凸出或短縫。
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 啟動位置</h2>
+      <p>在 Revit Ribbon 中執行：</p>
+      <p><code>HB_BIM Tools</code> &gt; <code>建模工具</code> &gt; <code>接合工具</code> &gt; <code>對齊牆輪廓</code></p>
+      <p>此命令是獨立按鈕，可直接執行牆輪廓整理，不需要先進入自動接合或解除接合流程。</p>
+    </section>
+
+    <section>
+      <h2>3. 適用元素</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>可處理</h3>
+          <ul>
+            <li>基本牆 <code>Basic Wall</code></li>
+            <li>樓板 <code>Floors</code></li>
+            <li>結構樓板 <code>Structural Floors</code></li>
+            <li>結構構架 <code>Structural Framing</code>，通常為梁</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>可能略過</h3>
+          <ul>
+            <li>帷幕牆、疊層牆等非基本牆</li>
+            <li>無法取得 BoundingBox 的元素</li>
+            <li>牆高參數唯讀或受約束限制</li>
+            <li>與牆沒有合理高度或平面關係的樓板/梁</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. 操作流程</h2>
+      <div class="flow">
+        <div class="step"><strong>步驟 1</strong>開啟要整理的模型視圖。</div>
+        <div class="step"><strong>步驟 2</strong>點選 <code>對齊牆輪廓</code>。</div>
+        <div class="step"><strong>步驟 3</strong>選擇處理範圍：目前視圖可見、已選元素或全部元素。</div>
+        <div class="step"><strong>步驟 4</strong>確認類別包含牆、樓板、結構樓板與結構構架。</div>
+        <div class="step"><strong>步驟 5</strong>點選 <code>執行對齊</code>。</div>
+        <div class="step"><strong>步驟 6</strong>檢查調整數量與略過數量。</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>5. 建議處理範圍</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>範圍</th>
+            <th>使用時機</th>
+            <th>建議</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>目前視圖可見</td>
+            <td>日常樓層或區域整理</td>
+            <td>優先使用，可搭配 3D Section Box 控制範圍。</td>
+          </tr>
+          <tr>
+            <td>已選元素</td>
+            <td>局部修正特定牆與梁</td>
+            <td>需同時選到目標牆與可作為貼附目標的樓板/梁。</td>
+          </tr>
+          <tr>
+            <td>全部元素</td>
+            <td>模型整理或交付前批次檢查</td>
+            <td>大型模型建議先另存或備份。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>6. 對齊判斷邏輯</h2>
+      <ol>
+        <li>先找牆頂附近的樓板或結構樓板下緣。</li>
+        <li>同時檢查梁底是否位於牆頂附近。</li>
+        <li>若牆位與梁投影面距離小於等於 <code>0.5 cm</code>，且梁底低於樓板貼附高度，牆頂改貼附梁下。</li>
+        <li>若沒有近梁邊例外，才維持樓板優先或一般梁下貼附結果。</li>
+        <li>若梁距離大於 <code>0.5 cm</code>，不使用該梁，避免誤吸附。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>7. 梁邊 0.5 cm 判斷示意</h2>
+      <div class="diagram">
+        <div class="beam-demo" aria-label="梁邊 0.5 cm 容許值示意">
+          <div class="label orange">梁邊</div>
+          <div class="problem"></div>
+          <div class="beam"></div>
+          <div class="wall"></div>
+          <div class="gap"></div>
+          <div class="arrow"></div>
+          <div class="label note">牆位與梁投影面距離小於等於 0.5 cm 時，牆頂自動貼附梁下。</div>
+        </div>
+        <div class="caption">橘色區域代表小於等於 0.5 cm 的容許範圍；系統會避免牆頂在梁邊留下薄縫或短凸出。</div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>情況</th>
+            <th>結果</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>牆與梁投影重疊</td>
+            <td><span class="ok">貼附梁下</span></td>
+          </tr>
+          <tr>
+            <td>牆與梁投影間距小於等於 0.5 cm</td>
+            <td><span class="ok">貼附梁下</span></td>
+          </tr>
+          <tr>
+            <td>牆與梁投影間距大於 0.5 cm</td>
+            <td><span class="no">不貼附該梁</span></td>
+          </tr>
+          <tr>
+            <td>同位置已有樓板可貼附</td>
+            <td><span class="ok">優先貼附樓板下</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>8. 實務建議</h2>
+      <ul>
+        <li>牆建模仍建議以樓層或樓板作為主要高度控制。</li>
+        <li>梁下貼附適合作為局部修正，尤其是梁邊與牆邊幾乎貼齊的位置。</li>
+        <li>模型整合時，建議先確認樓板高度與梁定位，再執行牆輪廓整理。</li>
+        <li>局部處理時建議使用 <code>已選元素</code>，避免影響其他樓層或其他區域。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>9. 執行後檢查</h2>
+      <ul>
+        <li>牆頂是否貼齊樓板下或梁下。</li>
+        <li>梁邊是否還有薄縫或短凸出牆段。</li>
+        <li>牆底是否被調整到不合理高度。</li>
+        <li>門窗洞口附近是否仍符合建築需求。</li>
+        <li>需要幾何扣除時，再檢查接合順序是否正確。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>10. 常見問題</h2>
+      <h3>Q1. 為什麼牆沒有貼到梁下？</h3>
+      <p>可能是同位置已有樓板下緣可貼附且梁邊距離大於 0.5 cm、梁不在處理範圍、梁類別不是 Structural Framing，或牆頂與梁底的高度距離超過可貼附範圍。</p>
+
+      <h3>Q2. 為什麼大多數情況仍是樓板優先於梁？</h3>
+      <p>實務上牆高通常以樓板或樓層邊界作為主要控制。若所有梁都優先，牆頂可能被局部梁拉低，造成牆高不一致。因此只有梁邊與牆位小於等於 0.5 cm 且梁底較低時，才作為修正例外。</p>
+
+      <h3>Q3. 0.5 cm 是吸附距離嗎？</h3>
+      <p>它是梁投影邊與牆位之間的小誤差容許值，不是大範圍吸附。用途是修正幾乎貼齊卻留下薄縫或短凸出的情況。</p>
+
+      <h3>Q4. 執行後可以回復嗎？</h3>
+      <p>可以使用 Revit Undo 回復。大型範圍執行前仍建議先另存或備份模型。</p>
+    </section>
+
+    <section>
+      <h2>11. 建議測試案例</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>案例</th>
+            <th>條件</th>
+            <th>預期結果</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>牆頂貼樓板</td>
+            <td>牆頂接近樓板下緣，樓板與牆投影重疊，且沒有 0.5 cm 內的近梁邊例外。</td>
+            <td>牆頂貼附樓板下，不貼梁。</td>
+          </tr>
+          <tr>
+            <td>牆頂貼梁下</td>
+            <td>無樓板命中，牆頂接近梁底，梁與牆投影重疊。</td>
+            <td>牆頂貼附梁下。</td>
+          </tr>
+          <tr>
+            <td>梁邊小於等於 0.5 cm</td>
+            <td>無樓板命中，牆位與梁投影面距離小於等於 0.5 cm。</td>
+            <td>牆頂貼附梁下，避免薄縫或短凸出。</td>
+          </tr>
+          <tr>
+            <td>梁邊大於 0.5 cm</td>
+            <td>牆位與梁投影面距離大於 0.5 cm。</td>
+            <td>不因該梁調整牆頂，避免誤貼附。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>12. 注意事項</h2>
+      <div class="callout warning">
+        <strong>建議：</strong>執行大型範圍前先備份模型。若梁或樓板位置尚未定案，先用局部範圍測試，再批次執行。
+      </div>
+      <ul>
+        <li>若牆頂已有特殊設計需求，請使用 <code>已選元素</code> 局部處理。</li>
+        <li>此功能主要調整牆高度參數，不等同於接合順序檢查。</li>
+        <li>若後續需要乾淨幾何扣除，可再執行自動接合或檢查接合順序。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>文件位置：Docs/對齊牆輪廓圖文使用手冊.html</p>
+    <p>適用工具：HB_BIM Tools - 對齊牆輪廓</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,2 @@
+IssuedAt,LicenseType,UserName,Company,MachineCode,StartDate,ExpiryDate,Days,LicenseKeyFile,Note
+"2026-07-03 00:00:00","Professional","Example User","Example Company","XXXX-XXXX-XXXX-XXXX","2026-07-03","2027-07-03","365","license_key_Professional_Example User_20260703_000000.txt","Template only. Do not store real license keys in Git."

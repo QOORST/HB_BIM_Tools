@@ -1,83 +1,196 @@
 <Window x:Class="YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="管線套管工具" Height="600" Width="500"
+        Title="管線套管工具" Height="620" Width="900"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
+        MinHeight="560"
+        MinWidth="780"
         ShowInTaskbar="True">
-    <Grid Margin="10">
+    <Grid Margin="24">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 標題 -->
-        <TextBlock Grid.Row="0" Text="自動套管放置"
-                   FontSize="16" FontWeight="Bold" Margin="0,0,0,15"/>
+        <CheckBox x:Name="chkAutoSize" Visibility="Collapsed" IsChecked="True"/>
+        <CheckBox x:Name="chkMeasureDistance" Visibility="Collapsed" IsChecked="True"/>
 
-        <!-- 套管族群選擇 -->
-        <GroupBox Grid.Row="1" Header="套管族群設定" Margin="0,0,0,10">
-            <StackPanel Margin="5">
-                <TextBlock Text="牆套管族群:" Margin="0,5,0,5"/>
-                <ComboBox x:Name="cmbWallSleeveFamily" Height="25" Margin="0,0,0,10"/>
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="建立穿梁套管" FontSize="28" FontWeight="Bold"/>
+            <Border Height="1" Background="#777" Margin="0,14,0,0"/>
+        </StackPanel>
 
-                <TextBlock Text="樓板/樑套管族群:" Margin="0,5,0,5"/>
-                <ComboBox x:Name="cmbFloorSleeveFamily" Height="25" Margin="0,0,0,10"/>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360"/>
+                <ColumnDefinition Width="24"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-                <CheckBox x:Name="chkIncludeLinks" Content="包含連結模型中的結構元素"
-                          IsChecked="True" Margin="0,10,0,5"
-                          ToolTip="勾選此項以檢測連結模型（如建築模型、結構模型）中的牆、樓板和樑"/>
-            </StackPanel>
-        </GroupBox>
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <GroupBox Header="管篩選模式" Margin="0,0,0,14">
+                        <StackPanel Margin="10">
+                            <RadioButton x:Name="rbSelectedPipes" Content="使用目前已選取管線" IsChecked="True" Margin="0,0,0,8"/>
+                            <RadioButton x:Name="rbManualPipes" Content="重新手動選取管線" IsEnabled="False"/>
+                        </StackPanel>
+                    </GroupBox>
 
-        <!-- 套管參數設定 -->
-        <GroupBox Grid.Row="2" Header="套管參數" Margin="0,0,0,10">
-            <StackPanel Margin="5">
-                <CheckBox x:Name="chkAutoSize" Content="根據管徑自動調整套管尺寸"
-                          IsChecked="True" Margin="0,5,0,10"/>
+                    <GroupBox Header="指定套管類型" Margin="0,0,0,14">
+                        <StackPanel Margin="10">
+                            <CheckBox x:Name="chkUseDiameterMap" Content="依管徑自動套用大一級套管類型"
+                                      IsChecked="True" Margin="0,0,0,12"/>
+                            <TextBlock Text="牆套管預設類型" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="cmbWallSleeveFamily" Height="28" Margin="0,0,0,10"/>
+                            <TextBlock Text="樓板/樑套管預設類型" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="cmbFloorSleeveFamily" Height="28"/>
+                        </StackPanel>
+                    </GroupBox>
 
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
-                    <TextBlock Text="間隙距離 (mm):" Width="120" VerticalAlignment="Center"/>
-                    <TextBox x:Name="txtClearance" Width="100" Height="25" Text="50"/>
+                    <GroupBox Header="套管尺寸計算方式" Margin="0,0,0,14">
+                        <StackPanel Margin="10">
+                            <ComboBox x:Name="cmbSizeRule" Height="28" SelectedIndex="0" Margin="0,0,0,10">
+                                <ComboBoxItem Content="管徑放大一級"/>
+                            </ComboBox>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="間隙距離" Width="80" VerticalAlignment="Center"/>
+                                <TextBox x:Name="txtClearance" Width="86" Height="24" Text="50"/>
+                                <TextBlock Text="mm" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="管道穿牆位置" Margin="0,0,0,14">
+                        <StackPanel Margin="10">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <CheckBox x:Name="chkIncludeCurrentModel" Content="當前模型"
+                                          IsChecked="True" Margin="0,0,24,0"/>
+                                <CheckBox x:Name="chkIncludeLinks" Content="連結模型"
+                                          IsChecked="True"/>
+                            </StackPanel>
+                            <CheckBox x:Name="chkExcludeAdditionElements" Content="排除牆/樓板增築邊界"
+                                      IsChecked="True"/>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="編號與更新" Margin="0,0,0,14">
+                        <StackPanel Margin="10" Orientation="Horizontal">
+                            <CheckBox x:Name="chkAutoNumber" Content="自動編號套管"
+                                      IsChecked="True" Margin="0,0,24,0"/>
+                            <CheckBox x:Name="chkUpdateExisting" Content="更新現有套管"
+                                      IsChecked="False"/>
+                        </StackPanel>
+                    </GroupBox>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="穿梁/牆套管流程" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+                    <Border Background="#EEF3F7" BorderBrush="#D5DDE5" BorderThickness="1" Padding="14" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="1. 選取管線或風管" Margin="0,0,0,6"/>
+                            <TextBlock Text="2. 檢測當前或連結建築模型的牆、樓板、樑" Margin="0,0,0,6"/>
+                            <TextBlock Text="3. 依 DN 大一級套用套管類型" Margin="0,0,0,6"/>
+                            <TextBlock Text="4. 依對應建築構件厚度設定套管長度"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="#FFFDF8" BorderBrush="#E4D7B7" BorderThickness="1" Padding="12" Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="穿梁原則示意" FontSize="16" FontWeight="Bold" Margin="0,0,0,8"/>
+                            <Grid Height="178" MinWidth="430">
+                                <Canvas ClipToBounds="True">
+                                    <Rectangle Canvas.Left="20" Canvas.Top="50" Width="390" Height="46" Fill="#D9DEE3" Stroke="#89919A" StrokeThickness="1"/>
+                                    <Rectangle Canvas.Left="20" Canvas.Top="46" Width="390" Height="4" Fill="#8A929B"/>
+                                    <Rectangle Canvas.Left="20" Canvas.Top="96" Width="390" Height="4" Fill="#8A929B"/>
+                                    <Rectangle Canvas.Left="20" Canvas.Top="18" Width="48" Height="112" Fill="#C6CCD2" Stroke="#7C858E" StrokeThickness="1"/>
+                                    <Rectangle Canvas.Left="362" Canvas.Top="18" Width="48" Height="112" Fill="#C6CCD2" Stroke="#7C858E" StrokeThickness="1"/>
+                                    <Line X1="68" Y1="133" X2="128" Y2="133" Stroke="#D9534F" StrokeThickness="2" StrokeDashArray="4 3"/>
+                                    <Line X1="302" Y1="133" X2="362" Y2="133" Stroke="#D9534F" StrokeThickness="2" StrokeDashArray="4 3"/>
+                                    <TextBlock Canvas.Left="83" Canvas.Top="136" Text="2H 禁開區" Foreground="#D9534F" FontSize="12" FontWeight="SemiBold"/>
+                                    <TextBlock Canvas.Left="304" Canvas.Top="136" Text="2H 禁開區" Foreground="#D9534F" FontSize="12" FontWeight="SemiBold"/>
+                                    <Line X1="152" Y1="70" X2="182" Y2="70" Stroke="#2B2B2B" StrokeThickness="7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                    <Ellipse Canvas.Left="168" Canvas.Top="58" Width="24" Height="24" Fill="#FFFFFF" Stroke="#E67E22" StrokeThickness="4"/>
+                                    <TextBlock Canvas.Left="142" Canvas.Top="20" Text="提醒" Foreground="#B45F06" FontSize="12" FontWeight="SemiBold"/>
+                                    <TextBlock Canvas.Left="124" Canvas.Top="36" Text="孔徑 ≥100mm" Foreground="#555" FontSize="11"/>
+                                    <Line X1="225" Y1="70" X2="255" Y2="70" Stroke="#2B2B2B" StrokeThickness="10" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                    <Ellipse Canvas.Left="239" Canvas.Top="54" Width="32" Height="32" Fill="#FFFFFF" Stroke="#D9534F" StrokeThickness="4"/>
+                                    <TextBlock Canvas.Left="220" Canvas.Top="20" Text="需結構確認" Foreground="#B00020" FontSize="12" FontWeight="SemiBold"/>
+                                    <TextBlock Canvas.Left="214" Canvas.Top="36" Text="≥200mm 或 &gt; H/3" Foreground="#555" FontSize="11"/>
+                                    <Line X1="194" Y1="112" X2="244" Y2="112" Stroke="#666" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                    <Ellipse Canvas.Left="190" Canvas.Top="104" Width="16" Height="16" Fill="#FFFFFF" Stroke="#D9534F" StrokeThickness="3"/>
+                                    <Ellipse Canvas.Left="236" Canvas.Top="104" Width="16" Height="16" Fill="#FFFFFF" Stroke="#D9534F" StrokeThickness="3"/>
+                                    <TextBlock Canvas.Left="181" Canvas.Top="124" Text="孔距 &lt; 3D 或 300mm" Foreground="#B00020" FontSize="11"/>
+                                    <TextBlock Canvas.Left="78" Canvas.Top="154" Text="紅色：梁端/柱邊 2H、孔徑、梁深比例或孔距不符，仍生成但標示為需複核。" Foreground="#555" FontSize="12"/>
+                                </Canvas>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
-                <CheckBox x:Name="chkUpdateExisting" Content="更新現有套管"
-                          IsChecked="False" Margin="0,10,0,5"/>
-            </StackPanel>
-        </GroupBox>
+                <StackPanel Grid.Row="1">
+                    <Expander Header="進階尺寸對應" IsExpanded="False" Margin="0,0,0,14">
+                        <DataGrid x:Name="gridSleeveSizes"
+                                  ItemsSource="{Binding SleeveSizeRows}"
+                                  AutoGenerateColumns="False"
+                                  HeadersVisibility="Column"
+                                  CanUserAddRows="False"
+                                  CanUserDeleteRows="False"
+                                  RowHeight="28"
+                                  MaxHeight="240"
+                                  Margin="0,8,0,0">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="管道標稱直徑" Binding="{Binding NominalName}" Width="140" IsReadOnly="True"/>
+                                <DataGridTemplateColumn Header="套管類型" Width="*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <ComboBox ItemsSource="{Binding DataContext.SleeveSymbolChoices, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      DisplayMemberPath="DisplayName"
+                                                      SelectedValuePath="IdValue"
+                                                      SelectedValue="{Binding SymbolIdValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Expander>
 
-        <!-- 編號與測量 -->
-        <GroupBox Grid.Row="3" Header="編號與測量" Margin="0,0,0,10">
-            <StackPanel Margin="5">
-                <CheckBox x:Name="chkAutoNumber" Content="自動編號套管"
-                          IsChecked="True" Margin="0,5,0,10"/>
+                    <GroupBox Header="執行狀態">
+                        <StackPanel Margin="10">
+                            <TextBlock x:Name="txtPreview" TextWrapping="Wrap" FontFamily="Microsoft JhengHei UI" FontSize="12" Margin="0,0,0,10"/>
+                            <ProgressBar x:Name="progressExecution" Height="8" Minimum="0" Maximum="100" Value="0"/>
+                        </StackPanel>
+                    </GroupBox>
+                </StackPanel>
+            </Grid>
+        </Grid>
 
-                <CheckBox x:Name="chkMeasureDistance" Content="計算與結構體的距離"
-                          IsChecked="True" Margin="0,0,0,5"/>
-            </StackPanel>
-        </GroupBox>
-
-        <!-- 預覽資訊 -->
-        <GroupBox Grid.Row="4" Header="預覽資訊" Margin="0,0,0,10">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <TextBlock x:Name="txtPreview" TextWrapping="Wrap" Padding="5"
-                           Background="#F5F5F5" FontFamily="Microsoft JhengHei UI" FontSize="11"/>
-            </ScrollViewer>
-        </GroupBox>
-
-        <!-- 按鈕 -->
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="btnAnalyze" Content="分析" Width="100" Height="30"
-                    Margin="0,0,10,0" Click="BtnAnalyze_Click"/>
-            <Button x:Name="btnExecute" Content="執行" Width="100" Height="30"
-                    Margin="0,0,10,0" Click="BtnExecute_Click" IsEnabled="False"/>
-            <Button x:Name="btnCancel" Content="取消" Width="100" Height="30"
+        <Grid Grid.Row="2" Margin="0,18,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="120"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="btnExecute" Grid.Column="0" Content="開始執行" Height="38"
+                    Click="BtnExecute_Click" IsEnabled="True"
+                    Background="#0078D4" Foreground="White" BorderBrush="#0078D4"
+                    FontSize="15" FontWeight="SemiBold"/>
+            <Button x:Name="btnSaveDefaults" Grid.Column="1" Content="儲存預設" Height="38" Margin="12,0,0,0"
+                    Click="BtnSaveDefaults_Click"/>
+            <Button x:Name="btnCancel" Grid.Column="2" Content="取消" Height="38" Margin="12,0,0,0"
                     Click="BtnCancel_Click"/>
-        </StackPanel>
+        </Grid>
     </Grid>
 </Window>
+
+
+
 

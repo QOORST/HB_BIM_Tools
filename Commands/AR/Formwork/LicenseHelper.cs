@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // AR_Formwork 授權檢查輔助類別
 // 用途: 提供統一的授權檢查方法給所有命令使用
 // 使用方式: 在每個命令的 Execute 方法開頭呼叫
@@ -53,7 +53,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             {
                 MainIcon = TaskDialogIcon.TaskDialogIconWarning,
                 MainInstruction = "授權未啟用或已過期",
-                MainContent = message + "\n\n請點擊「YD BIM 工具」頁籤中的「授權管理」按鈕進行啟用。",
+                MainContent = message + "\n\n請點擊「HB_BIM Tools」頁籤中的「授權管理」按鈕進行啟用。",
                 CommonButtons = TaskDialogCommonButtons.Ok
             };
             td.Show();
@@ -125,13 +125,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             var licenseManager = LicenseManager.Instance;
             var validation = licenseManager.ValidateLicense();
 
-            TaskDialog dialog = new TaskDialog("授權資訊 - YD BIM Tools");
+            TaskDialog dialog = new TaskDialog("授權資訊 - HB_BIM Tools");
 
             if (!validation.IsValid)
             {
                 dialog.MainIcon = TaskDialogIcon.TaskDialogIconWarning;
                 dialog.MainInstruction = "授權未啟用或已過期";
-                dialog.MainContent = validation.Message + "\n\n請點擊「YD BIM 工具」頁籤中的「授權管理」按鈕進行啟用。";
+                dialog.MainContent = validation.Message + "\n\n請點擊「HB_BIM Tools」頁籤中的「授權管理」按鈕進行啟用。";
             }
             else
             {

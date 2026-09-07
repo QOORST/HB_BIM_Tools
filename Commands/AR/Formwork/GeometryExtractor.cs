@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -280,14 +281,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 System.Diagnostics.Debug.WriteLine($"🔍 GetNearbyStructuralElements 開始搜索...");
                 
                 var filter = new BoundingBoxIntersectsFilter(new Outline(expandedBounds.Min, expandedBounds.Max));
-                var categories = new List<BuiltInCategory>
-                {
-                    BuiltInCategory.OST_StructuralColumns,
-                    BuiltInCategory.OST_StructuralFraming,
-                    BuiltInCategory.OST_Floors,
-                    BuiltInCategory.OST_Walls,
-                    BuiltInCategory.OST_Stairs
-                };
+                var categories = ElementCategorizer.GetStructuralCategories();
 
                 foreach (var category in categories)
                 {
@@ -413,12 +407,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 System.Diagnostics.Debug.WriteLine($"  鄰近元素數量: {nearbyElements.Count}");
                 System.Diagnostics.Debug.WriteLine($"  交集閾值: {intersectionThreshold:F2} ({intersectionThreshold * 100}%)");
                 
-                // 判斷宿主是否為柱子
-                bool isColumnHost = hostElement?.Category?.Id?.Value == (long)BuiltInCategory.OST_StructuralColumns;
-                if (isColumnHost)
-                {
-                    System.Diagnostics.Debug.WriteLine($"  🏛️ 宿主為柱子，使用特殊扣除邏輯");
-                }
+                // 判斷宿主元素類型
+                bool isColumnHost = hostElement?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralColumns;
+                bool isWallHost   = hostElement?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_Walls;
+                bool isFloorHost  = hostElement?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_Floors;
+                bool isBeamHost   = hostElement?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralFraming;
+                if (isColumnHost) System.Diagnostics.Debug.WriteLine($"  🏛️ 宿主為柱子，使用特殊扣除邏輯");
+                if (isWallHost)   System.Diagnostics.Debug.WriteLine($"  🧱 宿主為牆，牆對牆/牆對板接合使用低閾值扣除邏輯");
+                if (isFloorHost)  System.Diagnostics.Debug.WriteLine($"  🪟 宿主為樓板，板對牆接合使用低閾值扣除邏輯");
+                if (isBeamHost)   System.Diagnostics.Debug.WriteLine($"  🕩 宿主為梁，梁對牆/梁對板接合使用低閾值扣除邏輯");
                 
                 if (nearbyElements.Count == 0)
                 {
@@ -435,10 +432,25 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     try
                     {
                         var elementSolids = GetElementSolids(element);
-                        var elementCategory = element.Category?.Id?.Value ?? 0;
-                        bool isSlabOrBeam = elementCategory == (long)BuiltInCategory.OST_Floors || 
-                                           elementCategory == (long)BuiltInCategory.OST_StructuralFraming;
-                        
+                        var elementCategory = element.Category?.Id?.GetIdValue() ?? 0;
+                        bool isSlabOrBeam  = elementCategory == (long)BuiltInCategory.OST_Floors ||
+                                            elementCategory == (long)BuiltInCategory.OST_StructuralFraming;
+                        bool isNearbyWall  = elementCategory == (long)BuiltInCategory.OST_Walls;
+                        // 需要低閾值（0.1%）的接合類型：
+                        //   牆對牆: 交集比率 = 牆A厚/牆B長，大型樓層可能 < 5%
+                        //   樓板對牆: 交集比率 = 牆厚×牆長 / 樓板面積，大型樓板遠低於 5%
+                        //   牆對樓板(高牆): 交集比率 = 板厚/牆高，4m高牆遇200mm板僅 5%，臨界不穩
+                        bool isNearbyBeam = elementCategory == (long)BuiltInCategory.OST_StructuralFraming;
+                        bool isWallToWallJunction  = isWallHost  && isNearbyWall;
+                        bool isFloorWallJunction   = isFloorHost && isNearbyWall;
+                        bool isWallFloorJunction   = isWallHost  && isSlabOrBeam;
+                        // 梁側模與牆/梁接合：交集比率 = 牆厚/梁長 或 柱寬/梁長，遠低於 5%
+                        bool isBeamWallJunction    = isBeamHost  && isNearbyWall;
+                        bool isBeamFloorJunction   = isBeamHost  && (elementCategory == (long)BuiltInCategory.OST_Floors);
+                        bool needsLowThreshold = isWallToWallJunction || isFloorWallJunction || isWallFloorJunction
+                                              || isBeamWallJunction   || isBeamFloorJunction;
+                        double effectiveThreshold = needsLowThreshold ? 0.001 : intersectionThreshold;
+
                         System.Diagnostics.Debug.WriteLine($"  檢查元素 {element.Id} ({element.Category?.Name}): {elementSolids.Count} 個實體");
                         
                         foreach (var elementSolid in elementSolids)
@@ -454,12 +466,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                 double intersectionRatio = intersection.Volume / result.Volume;
                                 System.Diagnostics.Debug.WriteLine($"    ✓ 發現交集 - 交集體積: {intersection.Volume:F6}, 比例: {intersectionRatio:F3} ({intersectionRatio * 100:F1}%)");
 
-                                // 🔧 特殊邏輯: 如果是柱子模板且鄰近元素是樓板或梁，直接扣除不考慮閾值
-                                bool shouldDeductDirectly = isColumnHost && isSlabOrBeam;
+                                // 🔧 直接扣除（不考慮比率閾值）：柱子/牆/梁穿過樓板
+                                // 結構構件側面模板在穿越水平板處必定需要去除，與板厚/構件高度比率無關
+                                bool shouldDeductDirectly = (isColumnHost || isWallHost || isBeamHost) && isSlabOrBeam;
+                                // 低閾值接合扣除：牆對牆、樓板對牆、牆對半板（已含於 shouldDeductDirectly）
+                                bool isLowThresholdDeduction = needsLowThreshold && intersectionRatio > effectiveThreshold;
                                 
                                 if (shouldDeductDirectly)
                                 {
-                                    System.Diagnostics.Debug.WriteLine($"    🏛️ 柱子穿過樓板/梁，直接扣除接觸部分");
+                                    string hostTypeName = isColumnHost ? "柱子" : "牆";
+                                    System.Diagnostics.Debug.WriteLine($"    🏛️ {hostTypeName}穿過樓板/梁，直接扣除接觸部分");
                                     
                                     var difference = BooleanOperationsUtils.ExecuteBooleanOperation(
                                         result, elementSolid, BooleanOperationsType.Difference);
@@ -477,9 +493,19 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                         return null;
                                     }
                                 }
-                                // 一般邏輯: 根據閾值判斷
-                                else if (intersectionRatio > intersectionThreshold)
+                                // 一般邏輯: 根據閾值判斷（牆對牆/板對牆使用低閾值 effectiveThreshold）
+                                else if (intersectionRatio > intersectionThreshold || isLowThresholdDeduction)
                                 {
+                                    if (isLowThresholdDeduction && intersectionRatio <= intersectionThreshold)
+                                    {
+                                        string junctionType = isWallToWallJunction ? "牆對牆"
+                                            : isFloorWallJunction ? "樓板對牆"
+                                            : isBeamWallJunction  ? "梁對牆"
+                                            : isBeamFloorJunction ? "梁對樓板"
+                                            : "牆對板";
+                                        System.Diagnostics.Debug.WriteLine($"    🕩 {junctionType}接合扣除 - 交集比例 {intersectionRatio:P1} 低於一般閾值但超過接合閾值 {effectiveThreshold:P1}");
+                                    }
+                                    
                                     var difference = BooleanOperationsUtils.ExecuteBooleanOperation(
                                         result, elementSolid, BooleanOperationsType.Difference);
 
@@ -498,7 +524,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                 }
                                 else
                                 {
-                                    System.Diagnostics.Debug.WriteLine($"    ⏭️ 交集比例 {intersectionRatio:F3} 低於閾值 {intersectionThreshold:F3}，不扣除");
+                                    System.Diagnostics.Debug.WriteLine($"    ⏭️ 交集比例 {intersectionRatio:P1} 低於有效閾值 {effectiveThreshold:P1}，不扣除");
                                 }
                             }
                         }

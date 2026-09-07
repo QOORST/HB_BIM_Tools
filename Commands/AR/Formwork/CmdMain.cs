@@ -8,6 +8,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
 using YD_RevitTools.LicenseManager;
+using YD_RevitTools.LicenseManager.Helpers;
 
 // --- WPF alias ---
 using WpfWindow = System.Windows.Window;
@@ -103,7 +104,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             catch (Exception ex) { TaskDialog.Show("�������", ex.Message); }
         }
 
-        public string GetName() => "YD_BIM_Tools.Pick";
+        public string GetName() => "HB_BIM_Tools.Pick";
     }
 
     // ---------- ���� ----------
@@ -121,7 +122,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 _vm.RaiseRunStarted(0);
                 SharedParams.Ensure(doc);
 
-                var hosts = _vm.GetHostElements();
+                var hosts = ExpandHostsForProcessing(doc, _vm.GetHostElements());
                 _vm.RaiseRunStarted(hosts.Count);
 
                 var sw = Stopwatch.StartNew();
@@ -138,7 +139,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         t.Start();
 
                         // 執行完整的結構分析（與結構分析傳統模式相同的邏輯）
-                        var analysisResult = StructuralFormworkAnalyzer.AnalyzeProject(doc);
+                        var analysisOptions = new StructuralFormworkAnalyzer.AnalysisOptions
+                        {
+                            IncludeStructuralBottom = _vm.IncludeStructuralBottom,
+                            IncludeFoundationBottom = _vm.IncludeFoundationBottom,
+                            ActiveViewOnly = _vm.ActiveViewOnly,
+                            ViewId = _vm.ActiveViewOnly ? doc.ActiveView.Id : ElementId.InvalidElementId
+                        };
+
+                        var analysisResult = StructuralFormworkAnalyzer.AnalyzeProject(doc, analysisOptions);
                         
                         // 過濾只處理用戶選取的元素
                         var selectedIds = new HashSet<ElementId>(hosts.Select(h => h.Id));
@@ -161,16 +170,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             try
                             {
                                 System.Diagnostics.Debug.WriteLine($"\n========== 處理元素: {element.Id} ({element.Name}) ==========");
-                                
+
                                 var formworkIds = GenerateFormworkWithStructuralAnalysis(doc, element, analysis, _vm);
-                                
+
                                 System.Diagnostics.Debug.WriteLine($"✅ 生成了 {formworkIds.Count} 個模板");
-                                
+
                                 if (_vm.DrawFormwork && formworkIds.Count > 0)
                                 {
                                     all.AddRange(formworkIds);
                                     totalFormworkCount += formworkIds.Count;
-                                    
+
                                     // 設定模板參數和材質
                                     System.Diagnostics.Debug.WriteLine($"📝 開始設定參數和材質...");
                                     SetFormworkParametersAndMaterials(doc, formworkIds, element, analysis, _vm);
@@ -225,7 +234,34 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         }
 
 
-        public string GetName() => "YD_BIM_Tools.Run";
+        public string GetName() => "HB_BIM_Tools.Run";
+
+        private static IList<Element> ExpandHostsForProcessing(Document doc, IList<Element> hosts)
+        {
+            var expanded = new List<Element>();
+
+            foreach (var host in hosts ?? new List<Element>())
+            {
+                if (host == null) continue;
+
+                if (ElementCategorizer.IsStairs(host))
+                {
+                    var parts = ElementCategorizer.GetStairPartElements(doc, host);
+                    if (parts.Count > 0)
+                    {
+                        expanded.AddRange(parts);
+                        continue;
+                    }
+                }
+
+                expanded.Add(host);
+            }
+
+            return expanded
+                .GroupBy(e => e.Id.GetIdValue())
+                .Select(g => g.First())
+                .ToList();
+        }
 
         /// <summary>
         /// 使用結構分析邏輯生成模板
@@ -252,7 +288,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     {
                         var fallbackIds = FormworkEngine.BuildFormworkSolids(
                             doc, element, analysis.FormworkInfo, null, null,
-                            true, vm.ThicknessMm, vm.BottomOffsetMm, vm.DrawFormwork);
+                            ShouldIncludeBottom(element, vm), vm.ThicknessMm, vm.BottomOffsetMm, vm.DrawFormwork);
                         formworkIds = fallbackIds.ToList();
                     }
                 }
@@ -272,6 +308,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
+                if (!ShouldIncludeBottom(element, _vm))
+                {
+                    return new List<ElementId>();
+                }
+
                 return ImprovedFormworkEngine.CreateFormworkFromElement(doc, element, 18.0);
             }
             catch (Exception ex)
@@ -292,7 +333,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var faces = GetElementFaces(element);
                 foreach (var face in faces)
                 {
-                    if (face is PlanarFace planarFace && ShouldGenerateFormwork(planarFace, element))
+                    if (face is PlanarFace planarFace && ShouldGenerateFormwork(planarFace, element, _vm))
                     {
                         var formworkId = FormworkEngine.BuildFromFaceAccurate(doc, element, planarFace, 18.0, null);
                         if (formworkId != ElementId.InvalidElementId)
@@ -442,7 +483,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     materialId = vm.SlabMaterialId;
                     elementTypeName = "板";
                 }
-                else if (hostElement.Category?.Id.Value == (int)BuiltInCategory.OST_Stairs)
+                else if (ElementCategorizer.IsStairs(hostElement))
                 {
                     materialId = vm.MaterialId; // 樓梯使用預設材質
                     elementTypeName = "樓梯";
@@ -483,12 +524,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         // 輔助方法
         private bool IsStructuralColumn(Element element)
         {
-            return element.Category?.Id.Value == (int)BuiltInCategory.OST_StructuralColumns;
+            return element.Category?.Id.GetIdValue() == (int)BuiltInCategory.OST_StructuralColumns;
         }
 
         private bool IsStructuralFraming(Element element)
         {
-            return element.Category?.Id.Value == (int)BuiltInCategory.OST_StructuralFraming;
+            return element.Category?.Id.GetIdValue() == (int)BuiltInCategory.OST_StructuralFraming;
         }
 
         private void SetElementMaterial(Element element, Material material)
@@ -795,7 +836,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             if (element == null || element.Category == null)
                 return "其他";
 
-            var categoryId = element.Category.Id.Value;
+            var categoryId = element.Category.Id.GetIdValue();
 
             if (categoryId == (long)BuiltInCategory.OST_StructuralColumns)
                 return "柱模板";
@@ -807,7 +848,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 return "牆模板";
             else if (categoryId == (long)BuiltInCategory.OST_StructuralFoundation)
                 return "基礎模板";
-            else if (categoryId == (long)BuiltInCategory.OST_Stairs)
+            else if (ElementCategorizer.IsStairCategory(categoryId))
                 return "樓梯模板";
             else
                 return "其他";
@@ -854,7 +895,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             return faces;
         }
 
-        private bool ShouldGenerateFormwork(PlanarFace face, Element element)
+        private bool ShouldGenerateFormwork(PlanarFace face, Element element, UiVm vm)
         {
             try
             {
@@ -865,6 +906,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // 面積太小的面不生成模板
                 if (area < 0.01) return false;
 
+                if (normal.Z < -0.7 && !ShouldIncludeBottom(element, vm))
+                    return false;
+
                 // 可以添加更多判斷邏輯
                 return true;
             }
@@ -872,6 +916,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             {
                 return false;
             }
+        }
+
+        private bool ShouldIncludeBottom(Element element, UiVm vm)
+        {
+            if (element?.Category?.Id == null)
+                return vm.IncludeStructuralBottom;
+
+            return element.Category.Id.GetIdValue() == (int)BuiltInCategory.OST_StructuralFoundation
+                ? vm.IncludeFoundationBottom
+                : vm.IncludeStructuralBottom;
         }
     }
 
@@ -893,7 +947,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         public bool Isolate = true;
         public bool WriteExplanation = true;
         public bool ActiveViewOnly = false;
-        public bool IncludeBottom = true;
+        public bool IncludeStructuralBottom = true;
+        public bool IncludeFoundationBottom = true;
 
         // �Ѽ�
         public double ThicknessMm = 20.0;
@@ -943,9 +998,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             if (IncludeSlab)
                 ids.AddRange(FE().OfClass(typeof(Floor)).ToElementIds());
             if (IncludeStairs)
-                ids.AddRange(FE().OfCategory(BuiltInCategory.OST_Stairs).ToElementIds());
+            {
+                foreach (var category in ElementCategorizer.GetStructuralCategories().Where(c => ElementCategorizer.IsStairCategory((long)c)))
+                    ids.AddRange(FE().OfCategory(category).ToElementIds());
+            }
 
-            return ids.Select(id => _doc.GetElement(id)).ToList();
+            return ids
+                .GroupBy(id => id.GetIdValue())
+                .Select(g => _doc.GetElement(g.First()))
+                .Where(e => e != null)
+                .ToList();
         }
 
         internal void RaiseRunStarted(int total) => RunStarted?.Invoke(total);
@@ -1082,7 +1144,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 AddCheck(opt, "隔離模板（僅現時檢視）", v => _vm.Isolate = v, _vm.Isolate);
                 AddCheck(opt, "寫入解說參數", v => _vm.WriteExplanation = v, _vm.WriteExplanation);
                 AddCheck(opt, "僅目前視圖", v => _vm.ActiveViewOnly = v, _vm.ActiveViewOnly);
-                AddCheck(opt, "包含底模", v => _vm.IncludeBottom = v, _vm.IncludeBottom);
+                AddCheck(opt, "結構產出底模", v => _vm.IncludeStructuralBottom = v, _vm.IncludeStructuralBottom);
+                AddCheck(opt, "基礎產出底模", v => _vm.IncludeFoundationBottom = v, _vm.IncludeFoundationBottom);
                 gbOpt.Content = opt;
                 g.Children.Add(gbOpt);
                 WpfGrid.SetRow(gbOpt, 2);
@@ -1295,10 +1358,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         public bool AllowElement(Element e)
         {
             if (_w && e is Wall) return true;
-            if (_c && e.Category != null && e.Category.Id.Value == (int)BuiltInCategory.OST_StructuralColumns) return true;
-            if (_b && e.Category != null && e.Category.Id.Value == (int)BuiltInCategory.OST_StructuralFraming) return true;
+            if (_c && e.Category != null && e.Category.Id.GetIdValue() == (int)BuiltInCategory.OST_StructuralColumns) return true;
+            if (_b && e.Category != null && e.Category.Id.GetIdValue() == (int)BuiltInCategory.OST_StructuralFraming) return true;
             if (_s && e is Floor) return true;
-            if (_st && e.Category != null && e.Category.Id.Value == (int)BuiltInCategory.OST_Stairs) return true;
+            if (_st && ElementCategorizer.IsStairs(e)) return true;
             return false;
         }
 

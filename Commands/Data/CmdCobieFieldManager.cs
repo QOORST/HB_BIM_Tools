@@ -24,6 +24,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
     [Transaction(TransactionMode.Manual)]
     public class CmdCobieFieldManager : IExternalCommand
     {
+        private static readonly List<CobieFieldManagerWindow> OpenWindows = new List<CobieFieldManagerWindow>();
+
         public enum ConflictResolution
         {
             Cancel,                    // 取消操作
@@ -91,27 +93,109 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             var doc = cd.Application.ActiveUIDocument.Document;
             var app = cd.Application.Application;
 
-            var win = new CobieFieldManagerWindow(doc, app);
+            var handler = new CobieFieldManagerExternalEventHandler();
+            var externalEvent = ExternalEvent.Create(handler);
+            var win = new CobieFieldManagerWindow(doc, app, handler, externalEvent);
+            handler.Attach(win);
             try
             {
                 var h = cd.Application.MainWindowHandle;
                 if (h != IntPtr.Zero)
                 {
-                    var src = System.Windows.Interop.HwndSource.FromHwnd(h);
-                    if (src != null) win.Owner = src.RootVisual as Window;
+                    new System.Windows.Interop.WindowInteropHelper(win).Owner = h;
                 }
             }
             catch { }
 
-            if (win.ShowDialog() == true)
+            OpenWindows.Add(win);
+            win.Closed += (s, e) =>
             {
-                TaskDialog.Show("COBie 欄位管理", "設定已儲存");
-                return Result.Succeeded;
-            }
-            return Result.Cancelled;
+                OpenWindows.Remove(win);
+                externalEvent.Dispose();
+            };
+            win.Show();
+            return Result.Succeeded;
         }
 
-        public class CobieFieldManagerWindow : Window
+        internal enum CobieFieldManagerRequestKind
+        {
+            None,
+            LoadSharedParameters,
+            AutoMatchParameters,
+            CreateAndBindParameters,
+            AuditStandardFields
+        }
+
+        internal sealed class CobieFieldManagerExternalEventHandler : IExternalEventHandler
+        {
+            private readonly object _syncRoot = new object();
+            private CobieFieldManagerWindow _window;
+            private CobieFieldManagerRequestKind _requestKind;
+
+            public void Attach(CobieFieldManagerWindow window)
+            {
+                _window = window;
+            }
+
+            public void Request(CobieFieldManagerRequestKind requestKind)
+            {
+                lock (_syncRoot)
+                {
+                    _requestKind = requestKind;
+                }
+            }
+
+            public void Execute(UIApplication app)
+            {
+                CobieFieldManagerRequestKind requestKind;
+                lock (_syncRoot)
+                {
+                    requestKind = _requestKind;
+                    _requestKind = CobieFieldManagerRequestKind.None;
+                }
+
+                if (_window == null || !_window.IsLoaded)
+                    return;
+
+                try
+                {
+                    switch (requestKind)
+                    {
+                        case CobieFieldManagerRequestKind.LoadSharedParameters:
+                            _window.LoadSharedParametersFromApi();
+                            break;
+                        case CobieFieldManagerRequestKind.AutoMatchParameters:
+                            _window.AutoMatchParametersFromApi();
+                            break;
+                        case CobieFieldManagerRequestKind.CreateAndBindParameters:
+                            _window.CreateSharedParameterForSelected();
+                            break;
+                        case CobieFieldManagerRequestKind.AuditStandardFields:
+                            _window.ExportStandardFieldAudit();
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        "執行 COBie 欄位設定動作失敗：\n" + ex.Message,
+                        "COBie 欄位設定",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+                finally
+                {
+                    _window.SetApiRequestCompleted();
+                }
+            }
+
+            public string GetName()
+            {
+                return "HB_BIM Tools - COBie 欄位設定";
+            }
+        }
+
+        internal class CobieFieldManagerWindow : Window
         {
             private readonly Document _doc;
             private readonly Autodesk.Revit.ApplicationServices.Application _app;
@@ -120,10 +204,19 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
             private readonly WpfComboBox _categoryFilter;
             private readonly WpfTextBox _searchBox;
             private readonly TextBlock _statsText;
+            private readonly CobieFieldManagerExternalEventHandler _externalHandler;
+            private readonly ExternalEvent _externalEvent;
+            private bool _apiRequestPending;
 
-            public CobieFieldManagerWindow(Document doc, Autodesk.Revit.ApplicationServices.Application app)
+            public CobieFieldManagerWindow(
+                Document doc,
+                Autodesk.Revit.ApplicationServices.Application app,
+                CobieFieldManagerExternalEventHandler externalHandler,
+                ExternalEvent externalEvent)
             {
                 _doc = doc; _app = app;
+                _externalHandler = externalHandler;
+                _externalEvent = externalEvent;
                 _fieldConfigs = LoadOrCreateDefaultConfig();
 
                 Title = "COBie 欄位管理器";
@@ -209,6 +302,29 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
                 Content = root;
                 RefreshGrid();
+            }
+
+            private void RaiseApiRequest(CobieFieldManagerRequestKind requestKind)
+            {
+                if (_apiRequestPending)
+                {
+                    MessageBox.Show("上一個 Revit 動作仍在處理中，請稍候。", "COBie 欄位設定");
+                    return;
+                }
+
+                _apiRequestPending = true;
+                _externalHandler.Request(requestKind);
+                var result = _externalEvent.Raise();
+                if (result != ExternalEventRequest.Accepted)
+                {
+                    _apiRequestPending = false;
+                    MessageBox.Show("目前無法送出 Revit 動作，請稍後再試。", "COBie 欄位設定");
+                }
+            }
+
+            internal void SetApiRequestCompleted()
+            {
+                _apiRequestPending = false;
             }
 
             private ToolBar CreateToolbar()
@@ -299,46 +415,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     ToolTip = "從共用參數檔案載入參數定義（可複選欄位批次關聯）",
                     FontSize = 12
                 };
-                btnLoad.Click += (s, e) =>
-                {
-                    var selectedItems = _grid.SelectedItems.Cast<CobieFieldConfig>().ToList();
-                    if (selectedItems.Count == 0)
-                    {
-                        TaskDialog.Show("提示", "請先選擇一個或多個欄位");
-                        return;
-                    }
-
-                    var sp = _app.OpenSharedParameterFile();
-                    if (sp == null)
-                    {
-                        var ofd = new OpenFileDialog() { Filter = "共用參數檔案 (*.txt)|*.txt" };
-                        if (ofd.ShowDialog() == true) { _app.SharedParametersFilename = ofd.FileName; sp = _app.OpenSharedParameterFile(); }
-                    }
-                    if (sp == null) return;
-
-                    if (selectedItems.Count == 1)
-                    {
-                        // 單選：開啟參數選擇對話框
-                        var dlg = new SelectDefinitionDialog(sp);
-                        if (dlg.ShowDialog() == true && dlg.Selected != null)
-                        {
-                            selectedItems[0].SharedParameterName = dlg.Selected.Name;
-                            selectedItems[0].SharedParameterGuid = dlg.Selected.GUID.ToString();
-                            RefreshGrid();
-                            TaskDialog.Show("成功", $"已為「{selectedItems[0].DisplayName}」載入共用參數");
-                        }
-                    }
-                    else
-                    {
-                        // 多選：開啟批次關聯對話框
-                        var batchDlg = new BatchLoadParametersDialog(sp, selectedItems);
-                        if (batchDlg.ShowDialog() == true)
-                        {
-                            RefreshGrid();
-                            TaskDialog.Show("成功", $"已為 {selectedItems.Count} 個欄位載入共用參數");
-                        }
-                    }
-                };
+                btnLoad.Click += (s, e) => RaiseApiRequest(CobieFieldManagerRequestKind.LoadSharedParameters);
                 t.Items.Add(btnLoad);
 
                 var btnAutoMatch = new Button()
@@ -349,48 +426,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     ToolTip = "根據欄位名稱自動從共用參數檔案中尋找並關聯同名參數",
                     FontSize = 12
                 };
-                btnAutoMatch.Click += (s, e) =>
-                {
-                    var sp = _app.OpenSharedParameterFile();
-                    if (sp == null)
-                    {
-                        var ofd = new OpenFileDialog() { Filter = "共用參數檔案 (*.txt)|*.txt" };
-                        if (ofd.ShowDialog() == true) { _app.SharedParametersFilename = ofd.FileName; sp = _app.OpenSharedParameterFile(); }
-                    }
-                    if (sp == null) return;
-
-                    // 收集所有共用參數
-                    var allParams = new List<ExternalDefinition>();
-                    foreach (DefinitionGroup g in sp.Groups)
-                    {
-                        foreach (ExternalDefinition d in g.Definitions)
-                        {
-                            allParams.Add(d);
-                        }
-                    }
-
-                    int matchCount = 0;
-                    foreach (var field in _fieldConfigs)
-                    {
-                        if (string.IsNullOrEmpty(field.SharedParameterName) || string.IsNullOrEmpty(field.SharedParameterGuid))
-                        {
-                            // 嘗試根據顯示名稱或已設定的共用參數名稱匹配
-                            var match = allParams.FirstOrDefault(p =>
-                                p.Name.Equals(field.DisplayName, StringComparison.OrdinalIgnoreCase) ||
-                                (!string.IsNullOrEmpty(field.SharedParameterName) && p.Name.Equals(field.SharedParameterName, StringComparison.OrdinalIgnoreCase)));
-
-                            if (match != null)
-                            {
-                                field.SharedParameterName = match.Name;
-                                field.SharedParameterGuid = match.GUID.ToString();
-                                matchCount++;
-                            }
-                        }
-                    }
-
-                    RefreshGrid();
-                    TaskDialog.Show("自動匹配完成", $"成功匹配 {matchCount} 個欄位的共用參數");
-                };
+                btnAutoMatch.Click += (s, e) => RaiseApiRequest(CobieFieldManagerRequestKind.AutoMatchParameters);
                 t.Items.Add(btnAutoMatch);
 
                 var btnCreate = new Button() 
@@ -401,8 +437,30 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     ToolTip = "為選中的欄位建立共用參數並綁定到相關類別（可複選批次處理）",
                     FontSize = 12
                 };
-                btnCreate.Click += (s, e) => CreateSharedParameterForSelected();
+                btnCreate.Click += (s, e) => RaiseApiRequest(CobieFieldManagerRequestKind.CreateAndBindParameters);
                 t.Items.Add(btnCreate);
+
+                var btnLoadStandard = new Button()
+                {
+                    Content = "📋 載入標準欄位",
+                    Margin = new Thickness(2),
+                    Padding = new Thickness(10, 6, 10, 6),
+                    ToolTip = "依 COBie 標準檢核規則補齊欄位設定，既有欄位不會覆蓋",
+                    FontSize = 12
+                };
+                btnLoadStandard.Click += (s, e) => LoadStandardCobieFields();
+                t.Items.Add(btnLoadStandard);
+
+                var btnAuditStandard = new Button()
+                {
+                    Content = "檢核標準欄位",
+                    Margin = new Thickness(2),
+                    Padding = new Thickness(10, 6, 10, 6),
+                    ToolTip = "檢查目前 COBie 欄位設定是否符合標準欄位、匯出啟用與專案參數綁定狀態",
+                    FontSize = 12
+                };
+                btnAuditStandard.Click += (s, e) => RaiseApiRequest(CobieFieldManagerRequestKind.AuditStandardFields);
+                t.Items.Add(btnAuditStandard);
 
                 t.Items.Add(new Separator());
 
@@ -713,7 +771,11 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     BorderThickness = new Thickness(0),
                     Cursor = System.Windows.Input.Cursors.Hand
                 };
-                btnSave.Click += (s, e) => { SaveConfig(CobieConfigIO.ConfigPath); DialogResult = true; Close(); };
+                btnSave.Click += (s, e) =>
+                {
+                    SaveConfig(CobieConfigIO.ConfigPath);
+                    MessageBox.Show("設定已儲存。", "COBie 欄位設定", MessageBoxButton.OK, MessageBoxImage.Information);
+                };
                 
                 var btnCancel = new Button() 
                 { 
@@ -728,7 +790,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     BorderThickness = new Thickness(0),
                     Cursor = System.Windows.Input.Cursors.Hand
                 };
-                btnCancel.Click += (s, e) => { DialogResult = false; Close(); };
+                btnCancel.Content = "關閉";
+                btnCancel.Click += (s, e) => Close();
                 
                 panel.Children.Add(btnSave); 
                 panel.Children.Add(btnCancel);
@@ -808,6 +871,306 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 }
             }
 
+            internal void LoadSharedParametersFromApi()
+            {
+                var selectedItems = _grid.SelectedItems.Cast<CobieFieldConfig>().ToList();
+                if (selectedItems.Count == 0)
+                {
+                    TaskDialog.Show("提示", "請先選擇一個或多個欄位");
+                    return;
+                }
+
+                var sp = _app.OpenSharedParameterFile();
+                if (sp == null)
+                {
+                    var ofd = new OpenFileDialog() { Filter = "共用參數檔案 (*.txt)|*.txt" };
+                    if (ofd.ShowDialog() == true)
+                    {
+                        _app.SharedParametersFilename = ofd.FileName;
+                        sp = _app.OpenSharedParameterFile();
+                    }
+                }
+                if (sp == null) return;
+
+                if (selectedItems.Count == 1)
+                {
+                    var dlg = new SelectDefinitionDialog(sp) { Owner = this };
+                    if (dlg.ShowDialog() == true && dlg.Selected != null)
+                    {
+                        selectedItems[0].SharedParameterName = dlg.Selected.Name;
+                        selectedItems[0].SharedParameterGuid = dlg.Selected.GUID.ToString();
+                        RefreshGrid();
+                        TaskDialog.Show("成功", $"已為「{selectedItems[0].DisplayName}」載入共用參數");
+                    }
+                }
+                else
+                {
+                    var batchDlg = new BatchLoadParametersDialog(sp, selectedItems) { Owner = this };
+                    if (batchDlg.ShowDialog() == true)
+                    {
+                        RefreshGrid();
+                        TaskDialog.Show("成功", $"已為 {selectedItems.Count} 個欄位載入共用參數");
+                    }
+                }
+            }
+
+            internal void AutoMatchParametersFromApi()
+            {
+                var sp = _app.OpenSharedParameterFile();
+                if (sp == null)
+                {
+                    var ofd = new OpenFileDialog() { Filter = "共用參數檔案 (*.txt)|*.txt" };
+                    if (ofd.ShowDialog() == true)
+                    {
+                        _app.SharedParametersFilename = ofd.FileName;
+                        sp = _app.OpenSharedParameterFile();
+                    }
+                }
+                if (sp == null) return;
+
+                var allParams = new List<ExternalDefinition>();
+                foreach (DefinitionGroup g in sp.Groups)
+                {
+                    foreach (ExternalDefinition d in g.Definitions)
+                        allParams.Add(d);
+                }
+
+                int matchCount = 0;
+                foreach (var field in _fieldConfigs)
+                {
+                    if (!string.IsNullOrEmpty(field.SharedParameterName) &&
+                        !string.IsNullOrEmpty(field.SharedParameterGuid))
+                        continue;
+
+                    var match = allParams.FirstOrDefault(p =>
+                        p.Name.Equals(field.DisplayName, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(field.SharedParameterName) &&
+                         p.Name.Equals(field.SharedParameterName, StringComparison.OrdinalIgnoreCase)));
+
+                    if (match == null) continue;
+                    field.SharedParameterName = match.Name;
+                    field.SharedParameterGuid = match.GUID.ToString();
+                    matchCount++;
+                }
+
+                RefreshGrid();
+                TaskDialog.Show("自動匹配完成", $"成功匹配 {matchCount} 個欄位的共用參數");
+            }
+
+            private void LoadStandardCobieFields()
+            {
+                int added = 0;
+                int skipped = 0;
+                int matched = 0;
+
+                foreach (var rule in CobieFieldRules.All)
+                {
+                    string cobieName = $"{rule.SheetName}.{rule.FieldName}";
+                    string displayName = $"{rule.SheetName}_{rule.FieldName}";
+                    var existing = FindMatchingConfig(rule);
+                    if (existing != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(existing.CobieName))
+                            existing.CobieName = cobieName;
+                        if (string.IsNullOrWhiteSpace(existing.Category) || existing.Category == "自定義")
+                            existing.Category = rule.SheetName;
+                        existing.IsRequired = rule.Requirement == "必要";
+                        existing.ExportEnabled = true;
+                        matched++;
+                        skipped++;
+                        continue;
+                    }
+
+                    _fieldConfigs.Add(new CobieFieldConfig
+                    {
+                        DisplayName = displayName,
+                        CobieName = cobieName,
+                        Category = rule.SheetName,
+                        SharedParameterName = displayName,
+                        DataType = "Text",
+                        IsRequired = rule.Requirement == "必要",
+                        ExportEnabled = true,
+                        ImportEnabled = false,
+                        IsInstance = true,
+                        IsBuiltIn = false
+                    });
+                    added++;
+                }
+
+                RefreshGrid();
+                TaskDialog.Show("載入標準欄位",
+                    $"已新增 {added} 個標準 COBie 欄位設定。\n" +
+                    $"已辨識並更新 {matched} 個既有相似欄位。\n" +
+                    $"已略過 {skipped} 個既有欄位。\n\n" +
+                    "請確認欄位名稱與共用參數對應後，再按「儲存設定」。");
+            }
+
+            internal void ExportStandardFieldAudit()
+            {
+                var rows = BuildStandardFieldAuditRows();
+                int missing = rows.Count(r => r.Status == "缺少設定");
+                int unbound = rows.Count(r => r.Status == "未綁定參數");
+                int disabled = rows.Count(r => r.Status == "未啟用匯出");
+                int ok = rows.Count(r => r.Status == "完成");
+
+                var summary =
+                    $"標準欄位總數：{rows.Count}\n" +
+                    $"完成：{ok}\n" +
+                    $"缺少設定：{missing}\n" +
+                    $"未啟用匯出：{disabled}\n" +
+                    $"未綁定專案參數：{unbound}\n\n" +
+                    "是否匯出 CSV 檢核報告？";
+
+                var result = TaskDialog.Show("COBie 標準欄位檢核", summary, TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No);
+                if (result != TaskDialogResult.Yes)
+                    return;
+
+                var dlg = new SaveFileDialog
+                {
+                    Filter = "CSV 檔案 (*.csv)|*.csv",
+                    FileName = $"COBie_FieldAudit_{DateTime.Now:yyyyMMdd_HHmm}.csv",
+                    DefaultExt = "csv",
+                    Title = "匯出 COBie 標準欄位檢核報告"
+                };
+                if (dlg.ShowDialog() != true)
+                    return;
+
+                using (var sw = new StreamWriter(dlg.FileName, false, System.Text.Encoding.UTF8))
+                {
+                    var headers = new[] { "SheetName", "FieldName", "Requirement", "Status", "ConfigDisplayName", "CobieName", "SharedParameterName", "ExportEnabled", "IsRequired", "BoundToProject", "SuggestedAction", "AutoFillValue", "Note" };
+                    sw.WriteLine(string.Join(",", headers.Select(Csv)));
+                    foreach (var row in rows)
+                    {
+                        sw.WriteLine(string.Join(",", new[]
+                        {
+                            row.SheetName,
+                            row.FieldName,
+                            row.Requirement,
+                            row.Status,
+                            row.ConfigDisplayName,
+                            row.CobieName,
+                            row.SharedParameterName,
+                            row.ExportEnabled,
+                            row.IsRequired,
+                            row.BoundToProject,
+                            row.SuggestedAction,
+                            row.AutoFillValue,
+                            row.Note
+                        }.Select(Csv)));
+                    }
+                }
+
+                TaskDialog.Show("COBie 標準欄位檢核", "已匯出標準欄位檢核報告。");
+            }
+
+            private List<CobieFieldAuditRow> BuildStandardFieldAuditRows()
+            {
+                var boundNames = GetBoundParameterNames();
+                var rows = new List<CobieFieldAuditRow>();
+
+                foreach (var rule in CobieFieldRules.All)
+                {
+                    var cfg = FindMatchingConfig(rule);
+                    bool exists = cfg != null;
+                    bool exportEnabled = cfg?.ExportEnabled == true;
+                    bool bound = exists && (!string.IsNullOrWhiteSpace(cfg.SharedParameterName) && boundNames.Contains(cfg.SharedParameterName));
+
+                    string status;
+                    if (!exists) status = "缺少設定";
+                    else if (!exportEnabled) status = "未啟用匯出";
+                    else if (!bound && !cfg.IsBuiltIn) status = "未綁定參數";
+                    else status = "完成";
+
+                    rows.Add(new CobieFieldAuditRow
+                    {
+                        SheetName = rule.SheetName,
+                        FieldName = rule.FieldName,
+                        Requirement = rule.Requirement,
+                        Status = status,
+                        ConfigDisplayName = cfg?.DisplayName ?? string.Empty,
+                        CobieName = cfg?.CobieName ?? string.Empty,
+                        SharedParameterName = cfg?.SharedParameterName ?? string.Empty,
+                        ExportEnabled = exists ? (cfg.ExportEnabled ? "是" : "否") : string.Empty,
+                        IsRequired = exists ? (cfg.IsRequired ? "是" : "否") : string.Empty,
+                        BoundToProject = exists ? (cfg.IsBuiltIn ? "內建" : (bound ? "是" : "否")) : string.Empty,
+                        SuggestedAction = CobieFieldRules.GetSuggestedAction(rule, status == "完成" ? 0 : 1, exists ? 1 : 0),
+                        AutoFillValue = CobieFieldRules.GetAutoFillValue(rule),
+                        Note = rule.Note
+                    });
+                }
+
+                return rows;
+            }
+
+            private HashSet<string> GetBoundParameterNames()
+            {
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    var it = _doc.ParameterBindings.ForwardIterator();
+                    it.Reset();
+                    while (it.MoveNext())
+                    {
+                        if (it.Key != null && !string.IsNullOrWhiteSpace(it.Key.Name))
+                            names.Add(it.Key.Name);
+                    }
+                }
+                catch { }
+                return names;
+            }
+
+            private CobieFieldConfig FindMatchingConfig(CobieFieldRule rule)
+            {
+                string cobieName = $"{rule.SheetName}.{rule.FieldName}";
+                string displayName = $"{rule.SheetName}_{rule.FieldName}";
+                string compactField = NormalizeKey(rule.FieldName);
+
+                return _fieldConfigs.FirstOrDefault(f =>
+                    SameKey(f.CobieName, cobieName) ||
+                    SameKey(f.DisplayName, displayName) ||
+                    SameKey(f.SharedParameterName, displayName) ||
+                    (!string.IsNullOrWhiteSpace(compactField) &&
+                     (SameKey(f.DisplayName, rule.FieldName) ||
+                      SameKey(f.SharedParameterName, rule.FieldName) ||
+                      NormalizeKey(f.DisplayName).EndsWith(compactField, StringComparison.OrdinalIgnoreCase) ||
+                      NormalizeKey(f.SharedParameterName).EndsWith(compactField, StringComparison.OrdinalIgnoreCase))));
+            }
+
+            private static string NormalizeKey(string value)
+            {
+                return string.IsNullOrWhiteSpace(value)
+                    ? string.Empty
+                    : value.Trim().Replace(" ", string.Empty).Replace("_", string.Empty).Replace(".", string.Empty);
+            }
+
+            private static bool SameKey(string left, string right)
+            {
+                return string.Equals(NormalizeKey(left), NormalizeKey(right), StringComparison.OrdinalIgnoreCase);
+            }
+
+            private static string Csv(string value)
+            {
+                value = value ?? string.Empty;
+                return "\"" + value.Replace("\"", "\"\"") + "\"";
+            }
+
+            private sealed class CobieFieldAuditRow
+            {
+                public string SheetName { get; set; }
+                public string FieldName { get; set; }
+                public string Requirement { get; set; }
+                public string Status { get; set; }
+                public string ConfigDisplayName { get; set; }
+                public string CobieName { get; set; }
+                public string SharedParameterName { get; set; }
+                public string ExportEnabled { get; set; }
+                public string IsRequired { get; set; }
+                public string BoundToProject { get; set; }
+                public string SuggestedAction { get; set; }
+                public string AutoFillValue { get; set; }
+                public string Note { get; set; }
+            }
+
             // 只收集允許綁定參數的模型類別，避免空分類導致綁定失敗
             private CategorySet BuildDefaultCategorySet()
             {
@@ -835,7 +1198,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 return cats;
             }
 
-            private void CreateSharedParameterForSelected()
+            internal void CreateSharedParameterForSelected()
             {
                 // 支援多選
                 var selectedItems = _grid.SelectedItems.Cast<CobieFieldConfig>().ToList();
@@ -1833,7 +2196,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
                 public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
                 {
-                    throw new NotImplementedException();
+                    return System.Windows.Data.Binding.DoNothing;
                 }
             }
         }
@@ -1857,7 +2220,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
         public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
         {
-            throw new NotImplementedException();
+            return System.Windows.Data.Binding.DoNothing;
         }
     }
 }

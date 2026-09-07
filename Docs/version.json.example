@@ -1,9 +1,8 @@
 {
-  "version": "2.3.0",
-  "downloadUrl": "https://download.ydbim.com/YD_BIM_Tools_v2.3_Setup.exe",
-  "releaseNotes": "新功能：\n• 新增管線避讓工具\n• 優化 COBie 匯出性能\n• 修復已知問題\n\n改進：\n• 提升授權驗證速度\n• 優化 UI 響應性能",
-  "releaseDate": "2025-12-10T00:00:00Z",
+  "version": "2.5.11",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.11/HB_BIM_Tools_v2.5.11_Setup.exe",
+  "releaseNotes": "Security improvements: (1) Enhanced machine code fingerprint using CPU ID + BaseBoard Serial + MachineName; backward compatible with existing licenses. (2) Fixed TOCTOU risk in installer launch by removing temp script. (3) Upgraded RSA API from RSACryptoServiceProvider to RSA.Create().",
+  "releaseDate": "2026-08-31T12:00:00Z",
   "isCritical": false,
   "minimumVersion": "2.0.0"
 }
-

@@ -7,9 +7,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
     public static class SharedParams
     {
         // 應用程式 ID，用於識別由本工具建立的 DirectShape
-        public const string AppId = "YD_BIM_Tools";
+        public const string AppId = "HB_BIM_Tools";
 
-        public const string GroupName = "YD_BIM_Tools";
+        public const string GroupName = "HB_BIM_Tools";
 
         // 核心模板參數
         public const string P_Total = "模板_合計";           // 模板總面積
@@ -19,6 +19,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         public const string P_AnalysisTime = "分析時間";
         public const string P_Thickness = "厚度";           // 厚度（mm）
         public const string P_Area = "面積";                // 面積（m²）
+        public const string P_FinishingArea = "裝修面積";    // 裝修面積（m²）
+        public const string P_Length = "長度";               // 長度（m）
+        public const string P_Height = "高度";               // 高度（m）
         public const string P_MaterialName = "材料名稱";     // 材料名稱
 
         // 參數 GUID（確保參數的唯一性和一致性）
@@ -29,6 +32,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         private static readonly System.Guid GUID_AnalysisTime = new System.Guid("E5F6A7B8-C9D1-4E5F-9A1B-5C6D7E8F9A0B");
         private static readonly System.Guid GUID_Thickness = new System.Guid("F6A7B8C9-D1E2-4F5A-9B1C-6D7E8F9A0B1C");
         private static readonly System.Guid GUID_Area = new System.Guid("A7B8C9D1-E2F3-4A5B-9C1D-7E8F9A0B1C2D");
+        private static readonly System.Guid GUID_FinishingArea = new System.Guid("A15E8A71-4C09-4F7E-9A0A-2D2F6C8B0B11");
+        private static readonly System.Guid GUID_Length = new System.Guid("45B1C02C-94C1-44E8-A410-DF1B5D813C72");
+        private static readonly System.Guid GUID_Height = new System.Guid("4421969D-9E56-4B58-9F60-5EE6BB25A0C7");
         private static readonly System.Guid GUID_MaterialName = new System.Guid("B8C9D1E2-F3A4-4B5C-9D1E-8F9A0B1C2D3E");
 
         static bool _ensuredThisSession = false;
@@ -40,7 +46,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             var app = doc.Application;
             DefinitionFile defFile = null;
             string old = app.SharedParametersFilename;
-            string temp = Path.Combine(Path.GetTempPath(), "YD_BIM_Tools_Params.txt");
+            string temp = Path.Combine(Path.GetTempPath(), "HB_BIM_Tools_Params.txt");
 
             try
             {
@@ -66,6 +72,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     (P_AnalysisTime,  SpecTypeId.String.Text, GUID_AnalysisTime),  // 分析時間
                     (P_Thickness,     SpecTypeId.Number,      GUID_Thickness),     // 厚度（mm）
                     (P_Area,          SpecTypeId.Area,        GUID_Area),          // 面積（m²）
+                    (P_FinishingArea, SpecTypeId.Area,        GUID_FinishingArea), // 裝修面積（m²）
+                    (P_Length,        SpecTypeId.Length,      GUID_Length),        // 長度（m）
+                    (P_Height,        SpecTypeId.Length,      GUID_Height),        // 高度（m）
                     (P_MaterialName,  SpecTypeId.String.Text, GUID_MaterialName)   // 材料名稱
                 };
 

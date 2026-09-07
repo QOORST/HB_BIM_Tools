@@ -8,6 +8,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Family
     [Transaction(TransactionMode.Manual)]
     public class CmdFamilyParameterSlider : IExternalCommand
     {
+        private static MainWindow _openWindow;
+
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
             try
@@ -30,7 +32,19 @@ namespace YD_RevitTools.LicenseManager.Commands.Family
                     return Result.Failed;
                 }
 
+                if (_openWindow != null)
+                {
+                    if (_openWindow.IsVisible)
+                    {
+                        _openWindow.Activate();
+                        return Result.Succeeded;
+                    }
+                    _openWindow = null;
+                }
+
                 var win = new MainWindow(commandData);
+                _openWindow = win;
+                win.Closed += (_, __) => _openWindow = null;
                 win.Show();
                 return Result.Succeeded;
             }

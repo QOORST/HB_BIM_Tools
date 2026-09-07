@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 {
@@ -10,6 +11,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
     /// </summary>
     public static class StructuralFormworkAnalyzer
     {
+        public class AnalysisOptions
+        {
+            public bool IncludeStructuralBottom { get; set; } = true;
+            public bool IncludeFoundationBottom { get; set; } = true;
+            public bool ActiveViewOnly { get; set; }
+            public ElementId ViewId { get; set; } = ElementId.InvalidElementId;
+        }
+
         // 鋼筋密度常數 (kg/m³)
         private const double REBAR_DENSITY_KG_M3 = 150.0; // 平均鋼筋密度
         
@@ -23,20 +32,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             Joint         // 接縫處理 (綠色)
         }
 
-        internal static StructuralAnalysisResult AnalyzeProject(Document doc)
+        internal static StructuralAnalysisResult AnalyzeProject(Document doc, AnalysisOptions options = null)
         {
+            options = options ?? new AnalysisOptions();
             var result = new StructuralAnalysisResult();
             
             FormworkEngine.Debug.Log("開始結構模板專案分析");
 
             // 1. 收集所有結構元素
-            var structuralElements = CollectStructuralElements(doc);
+            var structuralElements = CollectStructuralElements(doc, options);
             FormworkEngine.Debug.Log("找到 {0} 個結構元素", structuralElements.Count);
 
             // 2. 分析每個元素
             foreach (var element in structuralElements)
             {
-                var analysis = AnalyzeElement(doc, element, structuralElements);
+                var analysis = AnalyzeElement(doc, element, structuralElements, options);
                 result.ElementAnalyses[element] = analysis;
                 
                 // 累加統計
@@ -69,39 +79,40 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             return result;
         }
 
-        private static List<Element> CollectStructuralElements(Document doc)
+        private static List<Element> CollectStructuralElements(Document doc, AnalysisOptions options)
         {
             var elements = new List<Element>();
             
-            var categories = new[]
-            {
-                BuiltInCategory.OST_StructuralColumns,
-                BuiltInCategory.OST_StructuralFraming,
-                BuiltInCategory.OST_Floors,
-                BuiltInCategory.OST_Walls,
-                BuiltInCategory.OST_StructuralFoundation
-            };
+            var categories = ElementCategorizer.GetStructuralCategories(includeFoundation: true);
 
             foreach (var category in categories)
             {
-                var collector = new FilteredElementCollector(doc)
+                var collector = options.ActiveViewOnly && options.ViewId != ElementId.InvalidElementId
+                    ? new FilteredElementCollector(doc, options.ViewId)
+                    : new FilteredElementCollector(doc);
+
+                collector = collector
                     .OfCategory(category)
                     .WhereElementIsNotElementType();
                 
                 elements.AddRange(collector.ToElements());
             }
 
-            return elements;
+            return elements
+                .GroupBy(e => e.Id.GetIdValue())
+                .Select(g => g.First())
+                .ToList();
         }
 
-        private static ElementFormworkAnalysis AnalyzeElement(Document doc, Element element, List<Element> allElements)
+        private static ElementFormworkAnalysis AnalyzeElement(Document doc, Element element, List<Element> allElements, AnalysisOptions options)
         {
+            bool includeBottom = ShouldIncludeBottom(element, options);
             var analysis = new ElementFormworkAnalysis
             {
                 Element = element,
                 ElementType = GetElementType(element),
                 ConcreteVolume = CalculateConcreteVolume(element),
-                FormworkInfo = FormworkEngine.AnalyzeHost(doc, element, true)
+                FormworkInfo = FormworkEngine.AnalyzeHost(doc, element, includeBottom)
             };
 
             // 分析與其他元素的關係
@@ -114,22 +125,35 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             analysis.FormworkTypes = DetermineFormworkTypes(analysis);
 
             FormworkEngine.Debug.Log("分析元素 {0} - 體積: {1:F3}m³, 模板面積: {2:F3}m²", 
-                element.Id.Value, analysis.ConcreteVolume, analysis.FormworkArea);
+                element.Id.GetIdValue(), analysis.ConcreteVolume, analysis.FormworkArea);
 
             return analysis;
+        }
+
+        private static bool ShouldIncludeBottom(Element element, AnalysisOptions options)
+        {
+            if (element?.Category?.Id == null)
+                return options.IncludeStructuralBottom;
+
+            if (element.Category.Id.GetIdValue() == (long)BuiltInCategory.OST_StructuralFoundation)
+                return options.IncludeFoundationBottom;
+
+            return options.IncludeStructuralBottom;
         }
 
         private static StructuralElementType GetElementType(Element element)
         {
             if (element is Wall) return StructuralElementType.Wall;
             if (element is Floor) return StructuralElementType.Slab;
-            if (element.Category?.Id?.Value == (long)BuiltInCategory.OST_StructuralColumns) 
+            if (element.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralColumns)
                 return StructuralElementType.Column;
-            if (element.Category?.Id?.Value == (long)BuiltInCategory.OST_StructuralFraming) 
+            if (element.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralFraming)
                 return StructuralElementType.Beam;
-            if (element.Category?.Id?.Value == (long)BuiltInCategory.OST_StructuralFoundation) 
+            if (element.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralFoundation)
                 return StructuralElementType.Foundation;
-            
+            if (ElementCategorizer.IsStairs(element))
+                return StructuralElementType.Stair;
+
             return StructuralElementType.Other;
         }
 
@@ -365,6 +389,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 case StructuralElementType.Slab: return "樓板";
                 case StructuralElementType.Wall: return "牆";
                 case StructuralElementType.Foundation: return "基礎";
+                case StructuralElementType.Stair: return "樓梯";
                 default: return "其他";
             }
         }
@@ -452,6 +477,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         Slab,
         Wall,
         Foundation,
+        Stair,
         Other
     }
 

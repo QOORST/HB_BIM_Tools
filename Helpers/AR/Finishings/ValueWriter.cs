@@ -6,6 +6,7 @@ using System.Text;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
 using Autodesk.Revit.UI;
+using YD_RevitTools.LicenseManager.Helpers;
 
 namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
 {
@@ -150,7 +151,7 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                     .OfCategory(cat)
                     .WhereElementIsNotElementType()
                     .ToElements()
-                    .Where(e => (e.LookupParameter(P_RoomId)?.AsInteger() ?? 0) == room.Id.Value);
+                    .Where(e => ReadRoomId(e.LookupParameter(P_RoomId)) == room.Id.GetIdValue());
                 elems.AddRange(catElems);
             }
 
@@ -192,7 +193,7 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
                     .OfCategory(cat)
                     .WhereElementIsNotElementType()
                     .ToElements()
-                    .Where(e => (e.LookupParameter(P_RoomId)?.AsInteger() ?? 0) == room.Id.Value);
+                    .Where(e => ReadRoomId(e.LookupParameter(P_RoomId)) == room.Id.GetIdValue());
                 elems.AddRange(catElems);
             }
 
@@ -271,14 +272,10 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
 
             var group = defFile.Groups.get_Item(GROUP_NAME) ?? defFile.Groups.Create(GROUP_NAME);
 
-            var defRoomId = group.Definitions.get_Item(P_RoomId)
-                ?? group.Definitions.Create(new ExternalDefinitionCreationOptions(P_RoomId, SpecTypeId.Int.Integer));
-            var defRoomNames = group.Definitions.get_Item(P_RoomNames)
-                ?? group.Definitions.Create(new ExternalDefinitionCreationOptions(P_RoomNames, SpecTypeId.String.Text));
-            var defRoomNumbers = group.Definitions.get_Item(P_RoomNumbers)
-                ?? group.Definitions.Create(new ExternalDefinitionCreationOptions(P_RoomNumbers, SpecTypeId.String.Text));
-            var defSummary = group.Definitions.get_Item(P_Summary)
-                ?? group.Definitions.Create(new ExternalDefinitionCreationOptions(P_Summary, SpecTypeId.String.Text));
+            var defRoomId = GetOrCreateDefinition(P_RoomId, SpecTypeId.String.Text, group, Doc.ParameterBindings);
+            var defRoomNames = GetOrCreateDefinition(P_RoomNames, SpecTypeId.String.Text, group, Doc.ParameterBindings);
+            var defRoomNumbers = GetOrCreateDefinition(P_RoomNumbers, SpecTypeId.String.Text, group, Doc.ParameterBindings);
+            var defSummary = GetOrCreateDefinition(P_Summary, SpecTypeId.String.Text, group, Doc.ParameterBindings);
 
             // 綁定參數到類別（必須在 Transaction 內執行）
             // finish elements
@@ -290,15 +287,58 @@ namespace YD_RevitTools.LicenseManager.Helpers.AR.Finishings
 
             var inst = app.Create.NewInstanceBinding(catsFinish);
             var map = Doc.ParameterBindings;
-            map.Insert(defRoomId, inst, GroupTypeId.IdentityData);
-            map.Insert(defRoomNames, inst, GroupTypeId.IdentityData);
-            map.Insert(defRoomNumbers, inst, GroupTypeId.IdentityData);
+            BindOrRebind(map, defRoomId, inst, GroupTypeId.IdentityData);
+            BindOrRebind(map, defRoomNames, inst, GroupTypeId.IdentityData);
+            BindOrRebind(map, defRoomNumbers, inst, GroupTypeId.IdentityData);
 
             // rooms
             var catsRoom = new CategorySet();
             catsRoom.Insert(Doc.Settings.Categories.get_Item(BuiltInCategory.OST_Rooms));
             var instRoom = app.Create.NewInstanceBinding(catsRoom);
-            map.Insert(defSummary, instRoom, GroupTypeId.IdentityData);
+            BindOrRebind(map, defSummary, instRoom, GroupTypeId.IdentityData);
+        }
+
+        private static long ReadRoomId(Parameter parameter)
+        {
+            if (parameter == null)
+                return 0;
+
+            if (parameter.StorageType == StorageType.Integer)
+                return parameter.AsInteger();
+
+            return long.TryParse(parameter.AsString(), out var value) ? value : 0;
+        }
+
+        private static void BindOrRebind(BindingMap map, Definition definition, Binding binding, ForgeTypeId groupTypeId)
+        {
+            if (map.Insert(definition, binding, groupTypeId))
+                return;
+
+            map.ReInsert(definition, binding, groupTypeId);
+        }
+
+        private static Definition GetOrCreateDefinition(string name, ForgeTypeId specTypeId, DefinitionGroup group, BindingMap bindings)
+        {
+            var existing = FindBoundDefinitionByName(bindings, name);
+            if (existing != null)
+                return existing;
+
+            return group.Definitions.get_Item(name)
+                ?? group.Definitions.Create(new ExternalDefinitionCreationOptions(name, specTypeId));
+        }
+
+        private static Definition FindBoundDefinitionByName(BindingMap bindings, string name)
+        {
+            var it = bindings.ForwardIterator();
+            it.Reset();
+            while (it.MoveNext())
+            {
+                var definition = it.Key;
+                if (definition != null && string.Equals(definition.Name, name, StringComparison.Ordinal))
+                    return definition;
+            }
+
+            return null;
         }
     }
 }

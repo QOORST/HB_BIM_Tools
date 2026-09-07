@@ -1,0 +1,113 @@
+﻿<Window x:Class="YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI.ExecutionStatusWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="執行狀態 / 未完整清單" Height="560" Width="1080" WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <Window.Resources>
+        <SolidColorBrush x:Key="CardBorderBrush" Color="#D7DEE8"/>
+        <SolidColorBrush x:Key="CardBackgroundBrush" Color="#F8FAFD"/>
+        <Style x:Key="CardBorderStyle" TargetType="Border">
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+            <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}"/>
+            <Setter Property="Padding" Value="10"/>
+        </Style>
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="MinWidth" Value="108"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+        <!-- Row color: 部分失敗 → 淡橙；全部失敗 → 淡紅 -->
+        <Style x:Key="IncompleteRowStyle" TargetType="DataGridRow">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsIncomplete}" Value="True">
+                    <Setter Property="Background" Value="#FFF3E0"/>
+                    <Setter Property="FontWeight" Value="SemiBold"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Status}" Value="失敗">
+                    <Setter Property="Background" Value="#FFEBEE"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Style="{StaticResource CardBorderStyle}" Margin="0,0,0,8">
+            <StackPanel>
+                <DockPanel LastChildFill="False" Margin="0,0,0,8">
+                    <CheckBox x:Name="chkOnlyIncomplete" Content="只顯示未完整 / 失敗房間"
+                              VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#E65100"
+                              Checked="ChkOnlyIncomplete_Changed" Unchecked="ChkOnlyIncomplete_Changed"
+                              Margin="0,0,16,0"/>
+                    <TextBlock Text="橙色 = 部分失敗，紅色 = 全部失敗"
+                               VerticalAlignment="Center" Foreground="#6B7785" FontSize="11"/>
+                </DockPanel>
+
+                <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="牆舊值" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="txtBatchOldWall" Width="140" Margin="0,0,8,0"/>
+                    <TextBlock Text="牆新值" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="txtBatchNewWall" Width="140" Margin="0,0,12,0"/>
+                    <TextBlock Text="地舊值" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="txtBatchOldFloor" Width="140" Margin="0,0,8,0"/>
+                    <TextBlock Text="地新值" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="txtBatchNewFloor" Width="140" Margin="0,0,12,0"/>
+                    <TextBlock Text="天舊值" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="txtBatchOldCeiling" Width="140" Margin="0,0,8,0"/>
+                    <TextBlock Text="天新值" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="txtBatchNewCeiling" Width="140" Margin="0,0,12,0"/>
+                    <Button x:Name="btnBatchReplace" Content="批次套入取代欄" Width="128" Height="30" Click="BtnBatchReplace_Click"/>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource CardBorderStyle}" Padding="6">
+            <DataGrid x:Name="dgStatusRooms" AutoGenerateColumns="False" CanUserAddRows="False"
+                  IsReadOnly="False" SelectionMode="Extended" SelectionUnit="FullRow"
+                  MouseDoubleClick="DgStatusRooms_MouseDoubleClick"
+                  RowStyle="{StaticResource IncompleteRowStyle}"
+                  RowHeight="30" ColumnHeaderHeight="34"
+                  GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEF0F2"
+                  HeadersVisibility="Column">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="房間編號" Binding="{Binding Number}" Width="90" IsReadOnly="True"/>
+                <DataGridTextColumn Header="房間名稱" Binding="{Binding Name}" Width="180" IsReadOnly="True"/>
+                <DataGridTextColumn Header="樓層" Binding="{Binding Level}" Width="100" IsReadOnly="True"/>
+                <DataGridTextColumn Header="總狀態" Binding="{Binding Status}" Width="80" IsReadOnly="True"/>
+                <DataGridTextColumn Header="未完整項目" Binding="{Binding MissingItems}" Width="170" IsReadOnly="True"/>
+                <DataGridTextColumn Header="失敗原因" Binding="{Binding FailureReason}" Width="240" IsReadOnly="True"/>
+                <DataGridTextColumn Header="牆(現況)" Binding="{Binding CurrentWallFinish}" Width="140" IsReadOnly="True"/>
+                <DataGridTextColumn Header="地(現況)" Binding="{Binding CurrentFloorFinish}" Width="140" IsReadOnly="True"/>
+                <DataGridTextColumn Header="天(現況)" Binding="{Binding CurrentCeilingFinish}" Width="140" IsReadOnly="True"/>
+                <DataGridTextColumn Header="天高(現況mm)" Binding="{Binding CurrentCeilingHeightMm, StringFormat=F1}" Width="110" IsReadOnly="True"/>
+                <DataGridTextColumn Header="牆(取代)" Binding="{Binding ReplaceWallFinish, UpdateSourceTrigger=PropertyChanged}" Width="140"/>
+                <DataGridTextColumn Header="地(取代)" Binding="{Binding ReplaceFloorFinish, UpdateSourceTrigger=PropertyChanged}" Width="140"/>
+                <DataGridTextColumn Header="天(取代)" Binding="{Binding ReplaceCeilingFinish, UpdateSourceTrigger=PropertyChanged}" Width="140"/>
+                <DataGridTextColumn Header="天高(取代mm)" Binding="{Binding ReplaceCeilingHeightMm, UpdateSourceTrigger=PropertyChanged, StringFormat=F1}" Width="110"/>
+            </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+
+        <Border Grid.Row="3" Style="{StaticResource CardBorderStyle}" Margin="0,8,0,0" Padding="10,8">
+            <DockPanel LastChildFill="False">
+                <TextBlock x:Name="txtStatus" DockPanel.Dock="Left" VerticalAlignment="Center" Foreground="#6B7785"/>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button x:Name="btnJump3D" Content="跳轉至 3D" Style="{StaticResource PrimaryButtonStyle}" Click="BtnJump3D_Click"/>
+                    <Button x:Name="btnExportExcel" Content="匯出明細Excel" Style="{StaticResource PrimaryButtonStyle}" Click="BtnExportExcel_Click"/>
+                    <Button x:Name="btnReloadModel" Content="載入模型現況" Style="{StaticResource PrimaryButtonStyle}" Click="BtnReloadModel_Click"/>
+                    <Button x:Name="btnApplySelectedReplace" Content="只套用選取列" Style="{StaticResource PrimaryButtonStyle}" Click="BtnApplySelectedReplace_Click"/>
+                    <Button x:Name="btnApplyReplace" Content="套用取代" Style="{StaticResource PrimaryButtonStyle}" Click="BtnApplyReplace_Click"/>
+                    <Button x:Name="btnClose" Content="關閉" Width="90" Height="34" Click="BtnClose_Click"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
+
