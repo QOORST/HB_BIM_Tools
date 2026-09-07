@@ -1,8 +1,8 @@
-# YD_BIM Tools
+# HB_BIM Tools
 
 **專業的 Revit 工具集 - 提升 BIM 工作效率**
 
-[![Version](https://img.shields.io/badge/version-2.5.1-blue.svg)](https://github.com/QOORST/YD_BIM_Tools/releases)
+[![Version](https://img.shields.io/badge/version-2.5.10-blue.svg)](https://github.com/QOORST/HB_BIM_Tools/releases)
 [![Revit](https://img.shields.io/badge/Revit-2022%20|%202024%20|%202025%20|%202026-orange.svg)](https://www.autodesk.com/products/revit)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -10,7 +10,7 @@
 
 ## 📋 概述
 
-YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實用功能，包括自動更新、管線避讓、套管放置、COBie 匯出等，大幅提升 BIM 工作效率。
+HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實用功能，包括自動更新、AR 裝修檢查、釋疑簡報快速產出、COBie 匯出等，大幅提升 BIM 工作效率。
 
 ---
 
@@ -22,17 +22,23 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 - **安全可靠** - HTTPS 加密傳輸
 
 ### 🔧 MEP 工具
-- **管線避讓** - 自動生成管線避讓路徑，支援 Pipe、Duct、Conduit
-- **管線套管** - 自動為穿牆/穿樓板的管線放置套管
+- **支管/批次對齊** - 管中心對齊與多支管批次對齊
+- **Pipe Sleeve 自動套管** - 自動為 Pipe/Duct/電管/電纜線架穿牆、穿樓板、穿梁放置套管或矩形開孔，支援連結模型與內嵌預設族群
 
 ### 📊 數據工具
 - **自訂 COBie** - 依自訂欄位與參數對照匯出，支援連結模型
 - **標準 COBie** - 依標準工作表與必要欄位檢核規則匯出
 - **CSV 匯出** - 批量匯出元素參數到 CSV
 
+### 📝 釋疑工具
+- **釋疑簡報** - 依內部檢查或正式釋疑樣板快速產出 PowerPoint
+- **窗選圖片** - 直接框選畫面導入，並依範例版面最佳化圖片比例
+- **項目追蹤** - 以 SQLite 管理 Q1/Q2 項次、進度、歷史紀錄與 Excel 匯出
+- **同檔追加/更新** - 同一專案可追加投影片，也可從歷史紀錄更新既有投影片
+
 ### 🏗️ AR 模板工具
 - **房間裝修** - 依房間設定建立牆、地板、天花與踢腳板，並同步模型實際裝修牆高
-- **房間裝修驗算** - 匯出「驗算報表／明細表驗收」Excel，並建立 `AR_Check_*` 3D 視圖，協助檢查交付明細報表數量是否正確
+- **房間裝修交付報表** - Revit 2026 匯出格式已對齊其他版本，提供「明細表／統計表／施工明細表」，並以模型實際粉刷元素數量作為可驗算交付量
 - **面生面** - 從選取面快速建立裝修元素
 - **參數滑桿** - 視覺化調整族群參數
 
@@ -50,8 +56,8 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 ### 安裝步驟
 
 1. **下載安裝程式**
-   - 前往 [Releases](https://github.com/QOORST/YD_BIM_Tools/releases) 頁面
-   - 下載最新版本的 `YD_BIM_Tools_vX.X_Setup.exe`
+   - 前往 [Releases](https://github.com/QOORST/HB_BIM_Tools/releases) 頁面
+   - 下載最新版本的 `HB_BIM_Tools_v2.5.10_Setup.exe`
 
 2. **執行安裝**
    - 關閉所有 Revit 實例
@@ -59,8 +65,8 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
    - 按照安裝精靈完成安裝
 
 3. **啟動 Revit**
-   - 啟動 Revit 2024 / 2025 / 2026
-   - 在 Revit 中找到 "YD_BIM Tools" 標籤
+   - 啟動 Revit 2022 / 2024 / 2025 / 2026
+   - 在 Revit 中找到 "HB_BIM Tools" 標籤
 
 4. **授權啟用**
    - 點擊「授權管理」按鈕
@@ -91,12 +97,15 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 2. 選擇要處理的管線
 3. 設定套管參數
 4. 自動放置套管
+5. 3D 視圖若有啟用範圍框 / Section Box，僅生成目前視圖範圍內的穿越交點
 
 ---
 
 ## 📚 文檔
 
-- [完整使用手冊](https://github.com/QOORST/YD_BIM_Tools/wiki)
+- [完整使用手冊](https://github.com/QOORST/HB_BIM_Tools/wiki)
+- [對齊牆輪廓使用手冊](Docs/對齊牆輪廓使用手冊.md)
+- [對齊牆輪廓圖文使用手冊](Docs/對齊牆輪廓圖文使用手冊.html)
 - [自動更新功能說明](docs/auto-update.md)
 - [管線避讓工具指南](docs/pipe-avoid.md)
 - [常見問題 FAQ](docs/FAQ.md)
@@ -142,7 +151,7 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 - **Email**: qoorst123@yesdir.com.tw
 - **網站**: www.ydbim.com
-- **Issues**: [GitHub Issues](https://github.com/QOORST/YD_BIM_Tools/issues)
+- **Issues**: [GitHub Issues](https://github.com/QOORST/HB_BIM_Tools/issues)
 
 ---
 
@@ -154,9 +163,41 @@ YD_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 ## 🙏 致謝
 
-感謝所有使用和支援 YD_BIM Tools 的使用者！
+感謝所有使用和支援 HB_BIM Tools 的使用者！
 
 ---
 
-**© 2025 YD_BIM Owen. All rights reserved.**
+**© 2025 LAN. All rights reserved.**
+
+## v2.5.10 - 2026-08-27
+
+- 建築開孔同步支援與套管同為「管附件」類別的開口族，改以族群/類型名稱中的開口、開孔、圓形、矩形等關鍵字辨識。
+- 找不到開口族時增加相近族型診斷，並在例外時復原本次交易，降低錯誤後模型停在未完成交易狀態的風險。
+
+## v2.5.8 - 2026-08-26
+
+- Pipe Sleeve 新增建築模型端「建築開孔」第一階段同步：可在建築模型讀取連結 MEP 模型中自動生成的套管需求，建立或更新獨立的開孔/預留洞切割族。
+- 建築端開孔族群不混用 MEP 套管族；預設辨識 套管-開口圓形_無、套管-開口矩形_無 / 開孔-開口矩形_無，並可依 DN、標稱直徑或尺寸參數自動匹配族型。
+- 同步規則使用連結實例與來源套管 UniqueId 對應，降低重複建置風險，並同步更新使用手冊與安裝說明。
+## v2.5.7 - 2026-08-25
+- 修正 Auto Join「分割牆」對結構梁位置的判斷。
+- 分割牆會依梁與牆的平面重疊範圍及梁底/梁頂高度建立上下牆段。
+- 未命中梁位時仍保留原本外側面輪廓分割邏輯。
+- 同步更新 Revit 2022 / 2024 / 2025 / 2026 版本資訊與安裝檔說明。
+
+## v2.5.6 - 2026-08-20
+- MEP 工具面板保留穩定工具：支管對齊、批次對齊、手動翻彎、Pipe Sleeve。
+- Pipe Sleeve 支援穿牆、穿樓板、穿梁自動套管，含連結模型厚度/中心判斷，並依目前視圖 Section Box / CropBox 限制生成範圍。
+- 安裝檔內嵌 `套管-圓形_無.rfa` 與 `開孔-矩形_無.rfa`，其他電腦安裝後不需先準備族群。
+- 修正穿梁套管中心點，改以管線與梁實體交段中心放置，避免偏到梁定位線。
+- 修正豎井/樓板開口誤判與同來源殘留套管清理，管理清單預設跟隨目前視圖範圍。
+- 更新管線套管使用手冊、圖文手冊、安裝說明、手動部署說明與部署包 README。
+
+
+
+
+
+
+
+
 

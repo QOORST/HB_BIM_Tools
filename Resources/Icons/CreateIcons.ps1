@@ -217,6 +217,29 @@ function Draw-Icon([string]$name, [int]$size, [string]$outDir) {
             $g.DrawRectangle($p, 13*$s, 14*$s, 6*$s, 6*$s)
             $p.Dispose()
         }
+        "mep_rotate" {
+            Draw-Pipe $g $s 7 21 25 11 "#546E7A" 5.6
+            $arc = New-Pen "#00897B" (2.5*$s)
+            $g.DrawArc($arc, 6*$s, 6*$s, 20*$s, 20*$s, 35, 245)
+            $g.DrawLine($arc, 8*$s, 18*$s, 5*$s, 24*$s)
+            $g.DrawLine($arc, 8*$s, 18*$s, 14*$s, 20*$s)
+            $arc.Dispose()
+        }
+        "mep_rotate_settings" {
+            Draw-Pipe $g $s 7 21 25 11 "#546E7A" 5.6
+            $arc = New-Pen "#00897B" (2.3*$s)
+            $g.DrawArc($arc, 6*$s, 6*$s, 20*$s, 20*$s, 35, 245)
+            $g.DrawLine($arc, 8*$s, 18*$s, 5*$s, 24*$s)
+            $g.DrawLine($arc, 8*$s, 18*$s, 14*$s, 20*$s)
+            $gear = New-Pen "#263238" (1.5*$s)
+            $g.DrawEllipse($gear, 19*$s, 19*$s, 9*$s, 9*$s)
+            foreach ($a in 0,60,120) {
+                $rad = [Math]::PI * $a / 180
+                $cx = 23.5*$s; $cy = 23.5*$s
+                $g.DrawLine($gear, $cx, $cy, $cx + [Math]::Cos($rad)*6*$s, $cy + [Math]::Sin($rad)*6*$s)
+            }
+            $arc.Dispose(); $gear.Dispose()
+        }
         "pipe_center_align" {
             Draw-Pipe $g $s 4 23 28 23 "#546E7A" 6
             Draw-Pipe $g $s 13 21 25 7 "#546E7A" 6
@@ -246,6 +269,65 @@ function Draw-Icon([string]$name, [int]$size, [string]$outDir) {
             Draw-Pipe $g $s 9 8 18 14 "#0D47A1" 3
             Draw-Pipe $g $s 18 14 25 10 "#0D47A1" 3
         }
+        "manual_offset" {
+            Draw-Pipe $g $s 5 23 12 23 "#546E7A" 6
+            Draw-Pipe $g $s 12 23 18 11 "#546E7A" 6
+            Draw-Pipe $g $s 18 11 27 11 "#546E7A" 6
+            $p = New-Pen "#00ACC1" (2.2*$s)
+            $g.DrawLine($p, 8*$s, 5*$s, 8*$s, 16*$s)
+            $g.DrawLine($p, 5*$s, 8*$s, 8*$s, 5*$s)
+            $g.DrawLine($p, 11*$s, 8*$s, 8*$s, 5*$s)
+            $g.DrawLine($p, 24*$s, 16*$s, 24*$s, 27*$s)
+            $g.DrawLine($p, 21*$s, 24*$s, 24*$s, 27*$s)
+            $g.DrawLine($p, 27*$s, 24*$s, 24*$s, 27*$s)
+            $p.Dispose()
+        }
+        "auto_pipe_routing" {
+            Draw-Pipe $g $s 5 23 13 16 "#546E7A" 5.8
+            Draw-Pipe $g $s 13 16 22 16 "#546E7A" 5.8
+            Draw-Pipe $g $s 22 16 28 9 "#546E7A" 5.8
+            $p = New-Pen "#00897B" (2.2*$s)
+            $g.DrawLine($p, 6*$s, 8*$s, 13*$s, 8*$s)
+            $g.DrawLine($p, 13*$s, 8*$s, 13*$s, 13*$s)
+            $g.DrawLine($p, 13*$s, 8*$s, 9*$s, 5*$s)
+            $g.DrawLine($p, 13*$s, 8*$s, 9*$s, 11*$s)
+            $g.DrawEllipse($p, 20*$s, 21*$s, 7*$s, 7*$s)
+            $p.Dispose()
+        }
+        "auto_dimension" {
+            $p = New-Pen "#1565C0" (2*$s)
+            $g.DrawLine($p, 6*$s, 9*$s, 26*$s, 9*$s)
+            $g.DrawLine($p, 6*$s, 23*$s, 26*$s, 23*$s)
+            $g.DrawLine($p, 8*$s, 13*$s, 24*$s, 19*$s)
+            foreach ($x in 6,26) {
+                $g.DrawLine($p, $x*$s, 6*$s, $x*$s, 26*$s)
+            }
+            $p.Dispose()
+        }
+        "auto_tag_horizontal" {
+            $p = New-Pen "#0288D1" (2.2*$s)
+            Draw-Pipe $g $s 5 19 27 19 "#546E7A" 5
+            Draw-RoundRect $g (7*$s) (5*$s) (18*$s) (9*$s) (2*$s) (New-Brush "#E3F2FD") $p
+            $g.DrawLine($p, 16*$s, 14*$s, 16*$s, 19*$s)
+            $p.Dispose()
+        }
+        "auto_tag_vertical" {
+            $p = New-Pen "#0288D1" (2.2*$s)
+            Draw-Pipe $g $s 16 5 16 27 "#546E7A" 5
+            Draw-RoundRect $g (18*$s) (8*$s) (10*$s) (17*$s) (2*$s) (New-Brush "#E3F2FD") $p
+            $g.DrawLine($p, 16*$s, 16*$s, 18*$s, 16*$s)
+            $p.Dispose()
+        }
+        "align_wall_profile" {
+            $wall = New-Pen "#546E7A" (3*$s)
+            $axis = New-Pen "#1976D2" (2*$s)
+            $g.DrawLine($wall, 8*$s, 6*$s, 8*$s, 26*$s)
+            $g.DrawLine($wall, 23*$s, 6*$s, 23*$s, 26*$s)
+            $g.DrawLine($axis, 6*$s, 16*$s, 25*$s, 16*$s)
+            $g.DrawLine($axis, 21*$s, 12*$s, 25*$s, 16*$s)
+            $g.DrawLine($axis, 21*$s, 20*$s, 25*$s, 16*$s)
+            $wall.Dispose(); $axis.Dispose()
+        }
         "family_slider" {
             $p = New-Pen "#7B1FA2" (2*$s)
             foreach ($x in 8,16,24) { $g.DrawLine($p, $x*$s, 6*$s, $x*$s, 26*$s) }
@@ -256,26 +338,120 @@ function Draw-Icon([string]$name, [int]$size, [string]$outDir) {
         }
         "project_slider" {
             $p = New-Pen "#5E35B1" (2*$s)
-            $g.DrawPolygon($p, @(
+            $points = [System.Drawing.PointF[]]@(
                 (New-PointF (6*$s) (14*$s)),
                 (New-PointF (16*$s) (6*$s)),
                 (New-PointF (26*$s) (14*$s)),
                 (New-PointF (26*$s) (27*$s)),
                 (New-PointF (6*$s) (27*$s))
-            ))
+            )
+            $g.DrawPolygon($p, $points)
             $g.DrawLine($p, 10*$s, 18*$s, 22*$s, 18*$s)
             $g.FillEllipse((New-Brush "#B39DDB"), 14*$s, 15*$s, 6*$s, 6*$s)
             $p.Dispose()
         }
+        "company_library" {
+            $line = New-Pen "#00695C" (1.8*$s)
+            $fill = New-Brush "#E0F2F1"
+            Draw-RoundRect $g (5*$s) (9*$s) (22*$s) (17*$s) (2*$s) $fill $line
+            $g.DrawLine($line, 7*$s, 14*$s, 25*$s, 14*$s)
+            foreach ($x in 11,16,21) { $g.DrawLine($line, $x*$s, 14*$s, $x*$s, 25*$s) }
+            $roof = New-Pen "#00897B" (2.4*$s)
+            $g.DrawLine($roof, 5*$s, 10*$s, 16*$s, 5*$s)
+            $g.DrawLine($roof, 16*$s, 5*$s, 27*$s, 10*$s)
+            $line.Dispose(); $fill.Dispose(); $roof.Dispose()
+        }
+        "family_database" {
+            $outline = New-Pen "#1F4E5F" (1.8*$s)
+            $accent = New-Pen "#00897B" (2.1*$s)
+            $fill = New-Brush "#E8F4F3"
+            $topFill = New-Brush "#BFE5E0"
+
+            $g.FillEllipse($topFill, 7*$s, 5*$s, 18*$s, 6*$s)
+            $g.DrawEllipse($outline, 7*$s, 5*$s, 18*$s, 6*$s)
+            $g.FillRectangle($fill, 7*$s, 8*$s, 18*$s, 11*$s)
+            $g.DrawLine($outline, 7*$s, 8*$s, 7*$s, 19*$s)
+            $g.DrawLine($outline, 25*$s, 8*$s, 25*$s, 19*$s)
+            $g.DrawArc($outline, 7*$s, 16*$s, 18*$s, 6*$s, 0, 180)
+            $g.DrawLine($outline, 10*$s, 13*$s, 22*$s, 13*$s)
+
+            Draw-RoundRect $g (9*$s) (18*$s) (14*$s) (9*$s) (1.5*$s) (New-Brush "#FFFFFF") $accent
+            $g.DrawLine($accent, 16*$s, 19*$s, 16*$s, 26*$s)
+            $g.DrawLine($accent, 10*$s, 22*$s, 22*$s, 22*$s)
+
+            $outline.Dispose(); $accent.Dispose(); $fill.Dispose(); $topFill.Dispose()
+        }
+        "family_rename" {
+            $p = New-Pen "#7B1FA2" (2*$s)
+            Draw-RoundRect $g (5*$s) (6*$s) (18*$s) (20*$s) (2*$s) (New-Brush "#F3E5F5") $p
+            $font = New-Object System.Drawing.Font("Segoe UI", (12*$s), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+            $g.DrawString("A", $font, (New-Brush "#7B1FA2"), (New-PointF (9*$s) (8*$s)))
+            $g.DrawLine($p, 17*$s, 21*$s, 27*$s, 11*$s)
+            $g.DrawLine($p, 23*$s, 11*$s, 27*$s, 11*$s)
+            $g.DrawLine($p, 27*$s, 11*$s, 27*$s, 15*$s)
+            $font.Dispose(); $p.Dispose()
+        }
         "cobie_field" { Draw-Doc $g $s "#2E7D32" "" "" }
         "cobie_template" { Draw-Doc $g $s "#0288D1" "T" "out" }
         "cobie_export" { Draw-Doc $g $s "#1565C0" "CO" "out" }
+        "cobie_standard" { Draw-Doc $g $s "#0D47A1" "STD" "out" }
         "cobie_import" { Draw-Doc $g $s "#2E7D32" "CO" "in" }
         "schedule_export" { Draw-Doc $g $s "#1565C0" "XLS" "out" }
+        "bim_standard" {
+            $p = New-Pen "#2E7D32" (2.2*$s)
+            Draw-Doc $g $s "#2E7D32" "" ""
+            $g.DrawLine($p, 13*$s, 23*$s, 17*$s, 27*$s)
+            $g.DrawLine($p, 17*$s, 27*$s, 27*$s, 16*$s)
+            $p.Dispose()
+        }
+        "data_management" {
+            $p = New-Pen "#455A64" (1.7*$s)
+            $fill = New-Brush "#ECEFF1"
+            Draw-RoundRect $g (5*$s) (7*$s) (22*$s) (18*$s) (2*$s) $fill $p
+            foreach ($y in 12,17,22) { $g.DrawLine($p, 7*$s, $y*$s, 25*$s, $y*$s) }
+            foreach ($x in 13,20) { $g.DrawLine($p, $x*$s, 7*$s, $x*$s, 25*$s) }
+            $gear = New-Pen "#00897B" (2*$s)
+            $g.DrawEllipse($gear, 19*$s, 19*$s, 9*$s, 9*$s)
+            $g.DrawLine($gear, 23.5*$s, 17*$s, 23.5*$s, 30*$s)
+            $g.DrawLine($gear, 17*$s, 23.5*$s, 30*$s, 23.5*$s)
+            $p.Dispose(); $fill.Dispose(); $gear.Dispose()
+        }
+        "model_data_manager" {
+            $p = New-Pen "#455A64" (1.8*$s)
+            Draw-Doc $g $s "#455A64" "" ""
+            $glass = New-Pen "#00897B" (2.3*$s)
+            $g.DrawEllipse($glass, 16*$s, 15*$s, 8*$s, 8*$s)
+            $g.DrawLine($glass, 22*$s, 21*$s, 28*$s, 27*$s)
+            $p.Dispose(); $glass.Dispose()
+        }
+        "clarification_deck" {
+            $p = New-Pen "#F57C00" (1.9*$s)
+            $fill = New-Brush "#FFF3E0"
+            Draw-RoundRect $g (5*$s) (5*$s) (20*$s) (21*$s) (2*$s) $fill $p
+            $g.DrawLine($p, 9*$s, 11*$s, 21*$s, 11*$s)
+            $g.DrawLine($p, 9*$s, 16*$s, 18*$s, 16*$s)
+            $q = New-Pen "#1976D2" (2.3*$s)
+            $g.DrawLine($q, 18*$s, 22*$s, 28*$s, 12*$s)
+            $g.DrawLine($q, 25*$s, 12*$s, 28*$s, 12*$s)
+            $g.DrawLine($q, 28*$s, 12*$s, 28*$s, 15*$s)
+            $p.Dispose(); $fill.Dispose(); $q.Dispose()
+        }
+        "ai_assistant" {
+            $p = New-Pen "#00BFA5" (2.1*$s)
+            $fill = New-Brush "#E0F7FA"
+            Draw-RoundRect $g (6*$s) (8*$s) (20*$s) (16*$s) (4*$s) $fill $p
+            $g.DrawLine($p, 12*$s, 24*$s, 10*$s, 28*$s)
+            $g.FillEllipse((New-Brush "#00BFA5"), 11*$s, 14*$s, 3*$s, 3*$s)
+            $g.FillEllipse((New-Brush "#00BFA5"), 19*$s, 14*$s, 3*$s, 3*$s)
+            $g.DrawLine($p, 14*$s, 20*$s, 19*$s, 20*$s)
+            $p.Dispose(); $fill.Dispose()
+        }
     }
 
     $path = Join-Path $outDir "$($name)_$size.png"
-    $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+    $tempPath = Join-Path $outDir "$($name)_$size.$([Guid]::NewGuid().ToString('N')).tmp.png"
+    $bmp.Save($tempPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    Move-Item -LiteralPath $tempPath -Destination $path -Force
     $g.Dispose()
     $bmp.Dispose()
 }
@@ -284,10 +460,12 @@ $icons = @(
     "license", "about", "update",
     "formwork", "formwork_delete", "formwork_pick", "export_csv", "structural_analysis",
     "finishings", "face_to_face", "refresh_finish_params", "change_finishing_color",
-    "auto_join", "split_floor", "split_wall",
-    "pipe_sleeve", "auto_avoid", "pipe_center_align", "pipe_center_align_settings", "pipe_iso",
-    "family_slider", "project_slider",
-    "cobie_field", "cobie_template", "cobie_export", "cobie_import", "schedule_export"
+    "auto_join", "align_wall_profile", "split_floor", "split_wall",
+    "pipe_sleeve", "auto_avoid", "mep_rotate", "mep_rotate_settings", "manual_offset", "auto_pipe_routing", "pipe_center_align", "pipe_center_align_settings", "pipe_iso",
+    "auto_dimension", "auto_tag_horizontal", "auto_tag_vertical",
+    "family_slider", "project_slider", "company_library", "family_database", "family_rename",
+    "cobie_field", "cobie_template", "cobie_export", "cobie_standard", "cobie_import", "schedule_export",
+    "bim_standard", "data_management", "model_data_manager", "clarification_deck", "ai_assistant"
 )
 
 New-Item -ItemType Directory -Path $scriptDir -Force | Out-Null

@@ -1,5 +1,5 @@
 ===============================================================
-  YD_BIM Tools - 快速參考卡
+  HB_BIM Tools - 快速參考卡
 ===============================================================
 
 【一鍵更新所有】
@@ -32,7 +32,7 @@ cd Installer
 【輸出檔案位置】
 ---------------------------------------------------------
 安裝程式:
-  Output\YD_BIM_Tools_v2.2.9_Setup.exe
+  Output\HB_BIM_Tools_v2.2.9_Setup.exe
 
 部署包:
   Output\Deployment\
@@ -41,7 +41,7 @@ cd Installer
 【發布給使用者】
 ---------------------------------------------------------
 方式一（推薦）：
-  發送 YD_BIM_Tools_v2.2.9_Setup.exe
+  發送 HB_BIM_Tools_v2.2.9_Setup.exe
 
 方式二：
   發送整個 Deployment 資料夾
@@ -50,7 +50,7 @@ cd Installer
 【使用者安裝】
 ---------------------------------------------------------
 方式一：
-  執行 YD_BIM_Tools_v2.2.9_Setup.exe
+  執行 HB_BIM_Tools_v2.2.9_Setup.exe
 
 方式二：
   在 Deployment 資料夾執行 Deploy.ps1
@@ -69,16 +69,16 @@ Q: 安裝後 Revit 沒有顯示工具？
 A: 檢查 .addin 檔案是否正確建立
 
 Q: 如何更新版本號？
-A: 修改 Installer\YD_BIM_Setup.iss 中的 MyAppVersion
+A: 修改 Installer\HB_BIM_Setup.iss 中的 MyAppVersion
 
 Q: 如何添加新的依賴 DLL？
 A: 1. 將 DLL 複製到 Installer 資料夾
-   2. 在 YD_BIM_Setup.iss 中添加對應的 Source 行
+   2. 在 HB_BIM_Setup.iss 中添加對應的 Source 行
 
 Q: 如何支援新的 Revit 版本？
 A: 1. 添加新的專案配置（如 Release2027）
    2. 更新所有腳本以支援新版本
-   3. 更新 YD_BIM_Setup.iss
+   3. 更新 HB_BIM_Setup.iss
 
 
 【技術支援】

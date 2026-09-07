@@ -6,6 +6,38 @@ Write-Host ""
 
 $installerDir = $PSScriptRoot
 $projectRoot = Split-Path $installerDir -Parent
+$revitApiRoot = Split-Path (Split-Path $projectRoot -Parent) -Parent
+$familyLibraryProjectRoot = Join-Path $revitApiRoot "Codex\work\family-library-management\addin"
+
+function Resolve-FamilyLibraryDll {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Version,
+        [string]$FallbackVersion
+    )
+
+    $candidatePaths = @(
+        (Join-Path $familyLibraryProjectRoot "bin\x64\Release$Version\net48\CompanyFamilyLibraryMvp.dll"),
+        (Join-Path $projectRoot "bin\Release$Version\CompanyFamilyLibraryMvp.dll"),
+        "C:\ProgramData\Autodesk\Revit\Addins\$Version\HB_BIM\CompanyFamilyLibraryMvp.dll"
+    )
+
+    foreach ($candidatePath in $candidatePaths) {
+        if (Test-Path $candidatePath) {
+            return $candidatePath
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($FallbackVersion)) {
+        $fallbackPath = Resolve-FamilyLibraryDll -Version $FallbackVersion
+        if ($fallbackPath) {
+            Write-Host "[INFO] Using Revit $FallbackVersion CompanyFamilyLibraryMvp.dll for Revit $Version" -ForegroundColor Yellow
+            return $fallbackPath
+        }
+    }
+
+    return $null
+}
 
 # Check source files
 Write-Host "Checking source files..." -ForegroundColor Yellow
@@ -14,7 +46,7 @@ Write-Host "Checking source files..." -ForegroundColor Yellow
 $baseBinDir = Join-Path $projectRoot "bin\Release2024"
 $sourceResources = Join-Path $projectRoot "Resources"
 
-# 定義所有需要的依賴 DLL（排除 Revit API 和 .NET Framework 內建的）
+# Define dependency DLLs. Revit API and .NET Framework built-in assemblies are excluded.
 $dependencyDlls = @(
     "Newtonsoft.Json.dll",
     "System.Text.Json.dll",
@@ -22,10 +54,15 @@ $dependencyDlls = @(
     "System.Memory.dll",
     "System.Buffers.dll",
     "System.Runtime.CompilerServices.Unsafe.dll",
+    "DocumentFormat.OpenXml.dll",
     "EPPlus.dll",
     "EPPlus.Interfaces.dll",
     "EPPlus.System.Drawing.dll",
     "Microsoft.IO.RecyclableMemoryStream.dll",
+    "Microsoft.Data.Sqlite.dll",
+    "SQLitePCLRaw.batteries_v2.dll",
+    "SQLitePCLRaw.core.dll",
+    "SQLitePCLRaw.provider.dynamic_cdecl.dll",
     "Microsoft.Bcl.AsyncInterfaces.dll",
     "System.ComponentModel.Annotations.dll",
     "System.Drawing.Common.dll",
@@ -39,6 +76,9 @@ $dependencyDlls = @(
 $sourceDll2022 = Join-Path $projectRoot "bin\Release2022\YD_RevitTools.LicenseManager.dll"
 $sourceDll2024 = Join-Path $projectRoot "bin\Release2024\YD_RevitTools.LicenseManager.dll"
 $sourceDll2025 = Join-Path $projectRoot "bin\Release2025\YD_RevitTools.LicenseManager.dll"
+$sourceFamilyLibraryDll2022 = Resolve-FamilyLibraryDll -Version "2022"
+$sourceFamilyLibraryDll2024 = Resolve-FamilyLibraryDll -Version "2024"
+$sourceFamilyLibraryDll2025 = Resolve-FamilyLibraryDll -Version "2025"
 
 # Revit 2026 uses its own DLL when available, otherwise falls back to 2025
 $sourceDll2026Path = Join-Path $projectRoot "bin\Release2026\YD_RevitTools.LicenseManager.dll"
@@ -48,6 +88,8 @@ if (Test-Path $sourceDll2026Path) {
     $sourceDll2026 = $sourceDll2025
     Write-Host "[INFO] Using Revit 2025 DLL for Revit 2026 (Release2026 not found)" -ForegroundColor Yellow
 }
+
+$sourceFamilyLibraryDll2026 = Resolve-FamilyLibraryDll -Version "2026" -FallbackVersion "2025"
 
 $requiredMainDlls = @(
     @{ Version = "2022"; Path = $sourceDll2022 },
@@ -60,6 +102,20 @@ foreach ($dllInfo in $requiredMainDlls) {
         Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit $($dllInfo.Version)" -ForegroundColor Red
         Write-Host "Path: $($dllInfo.Path)" -ForegroundColor Gray
         exit 1
+    }
+}
+
+$familyLibraryDlls = @(
+    @{ Version = "2022"; Path = $sourceFamilyLibraryDll2022 },
+    @{ Version = "2024"; Path = $sourceFamilyLibraryDll2024 },
+    @{ Version = "2025"; Path = $sourceFamilyLibraryDll2025 },
+    @{ Version = "2026"; Path = $sourceFamilyLibraryDll2026 }
+)
+
+foreach ($dllInfo in $familyLibraryDlls) {
+    if ([string]::IsNullOrWhiteSpace($dllInfo.Path) -or -not (Test-Path $dllInfo.Path)) {
+        Write-Host "[WARNING] CompanyFamilyLibraryMvp.dll not found for Revit $($dllInfo.Version); the company library button will be skipped for that version." -ForegroundColor Yellow
+        Write-Host "Path: $($dllInfo.Path)" -ForegroundColor Gray
     }
 }
 
@@ -113,7 +169,7 @@ if (Test-Path $installerIconsDir) {
     $installerIconCountBeforeSync = (Get-ChildItem $installerIconsDir -Recurse -File -Include *.png,*.ico,*.jpg,*.jpeg -ErrorAction SilentlyContinue).Count
 }
 
-# 保留 Installer\Resources 既有內容，僅從專案 Resources 做增量同步
+# Keep existing Installer\Resources content and sync incrementally from project Resources.
 $resourceFileCount = 0
 if (Test-Path $sourceResources) {
     $sourceResourceFileCount = (Get-ChildItem $sourceResources -Recurse -File -ErrorAction SilentlyContinue).Count
@@ -146,18 +202,37 @@ foreach ($dll in $dependencyDlls) {
 }
 Write-Host "[OK] Copied $copiedCount dependency DLLs" -ForegroundColor Green
 
+$sourceRuntimes = Join-Path $baseBinDir "runtimes"
+$targetRuntimes = Join-Path $installerDir "runtimes"
+if (Test-Path $sourceRuntimes) {
+    if (Test-Path $targetRuntimes) {
+        Remove-Item $targetRuntimes -Recurse -Force
+    }
+    Copy-Item $sourceRuntimes -Destination $installerDir -Recurse -Force
+    Write-Host "[OK] Copied native runtime dependencies" -ForegroundColor Green
+}
+
 # 3. Copy installer documentation from project root so packaged files match the current release.
 $readmeSource = Join-Path $projectRoot "README.txt"
 $licenseSource = Join-Path $projectRoot "LICENSE.txt"
+$versionSource = Join-Path $projectRoot "version.json"
 if (Test-Path $readmeSource) {
     Copy-Item $readmeSource -Destination $installerDir -Force
 }
 if (Test-Path $licenseSource) {
     Copy-Item $licenseSource -Destination $installerDir -Force
 }
-Write-Host "[OK] Synced README.txt and LICENSE.txt" -ForegroundColor Green
+if (Test-Path $versionSource) {
+    Copy-Item $versionSource -Destination $installerDir -Force
+}
+Write-Host "[OK] Synced README.txt, LICENSE.txt, and version.json" -ForegroundColor Green
 
 Write-Host ""
+
+# Revit 2025/2026 run in the newer .NET host. Package the netstandard OpenXML build
+# with System.IO.Packaging for those versions to avoid load failures.
+$openXmlNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\documentformat.openxml\2.20.0\lib\netstandard2.0\DocumentFormat.OpenXml.dll"
+$packagingNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\system.io.packaging\4.7.0\lib\netstandard2.0\System.IO.Packaging.dll"
 
 # Create version directories
 Write-Host "Creating version directories..." -ForegroundColor Yellow
@@ -169,6 +244,9 @@ if (Test-Path $versionDir2022) {
 }
 New-Item -ItemType Directory -Path $versionDir2022 -Force | Out-Null
 Copy-Item $sourceDll2022 -Destination $versionDir2022 -Force
+if (-not [string]::IsNullOrWhiteSpace($sourceFamilyLibraryDll2022) -and (Test-Path $sourceFamilyLibraryDll2022)) {
+    Copy-Item $sourceFamilyLibraryDll2022 -Destination $versionDir2022 -Force
+}
 Write-Host "[OK] Revit 2022 ready" -ForegroundColor Green
 
 # Revit 2024
@@ -178,6 +256,9 @@ if (Test-Path $versionDir2024) {
 }
 New-Item -ItemType Directory -Path $versionDir2024 -Force | Out-Null
 Copy-Item $sourceDll2024 -Destination $versionDir2024 -Force
+if (-not [string]::IsNullOrWhiteSpace($sourceFamilyLibraryDll2024) -and (Test-Path $sourceFamilyLibraryDll2024)) {
+    Copy-Item $sourceFamilyLibraryDll2024 -Destination $versionDir2024 -Force
+}
 Write-Host "[OK] Revit 2024 ready" -ForegroundColor Green
 
 # Revit 2025
@@ -187,6 +268,15 @@ if (Test-Path $versionDir2025) {
 }
 New-Item -ItemType Directory -Path $versionDir2025 -Force | Out-Null
 Copy-Item $sourceDll2025 -Destination $versionDir2025 -Force
+if (-not [string]::IsNullOrWhiteSpace($sourceFamilyLibraryDll2025) -and (Test-Path $sourceFamilyLibraryDll2025)) {
+    Copy-Item $sourceFamilyLibraryDll2025 -Destination $versionDir2025 -Force
+}
+if (Test-Path $openXmlNetStandard) {
+    Copy-Item $openXmlNetStandard -Destination $versionDir2025 -Force
+}
+if (Test-Path $packagingNetStandard) {
+    Copy-Item $packagingNetStandard -Destination $versionDir2025 -Force
+}
 Write-Host "[OK] Revit 2025 ready" -ForegroundColor Green
 
 # Revit 2026
@@ -196,6 +286,15 @@ if (Test-Path $versionDir2026) {
 }
 New-Item -ItemType Directory -Path $versionDir2026 -Force | Out-Null
 Copy-Item $sourceDll2026 -Destination $versionDir2026 -Force
+if (-not [string]::IsNullOrWhiteSpace($sourceFamilyLibraryDll2026) -and (Test-Path $sourceFamilyLibraryDll2026)) {
+    Copy-Item $sourceFamilyLibraryDll2026 -Destination $versionDir2026 -Force
+}
+if (Test-Path $openXmlNetStandard) {
+    Copy-Item $openXmlNetStandard -Destination $versionDir2026 -Force
+}
+if (Test-Path $packagingNetStandard) {
+    Copy-Item $packagingNetStandard -Destination $versionDir2026 -Force
+}
 Write-Host "[OK] Revit 2026 ready" -ForegroundColor Green
 
 Write-Host ""
@@ -204,25 +303,25 @@ Write-Host "  Directory Structure" -ForegroundColor Cyan
 Write-Host "===============================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Installer\" -ForegroundColor White
-Write-Host "├── Resources\" -ForegroundColor White
-Write-Host "│   └── ... ($resourceFileCount files)" -ForegroundColor Cyan
-Write-Host "├── 2022\" -ForegroundColor White
-Write-Host "│   └── YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
-Write-Host "├── 2024\" -ForegroundColor White
-Write-Host "│   └── YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
-Write-Host "├── 2025\" -ForegroundColor White
-Write-Host "│   └── YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
-Write-Host "├── 2026\" -ForegroundColor White
-Write-Host "│   └── YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
-Write-Host "├── Newtonsoft.Json.dll" -ForegroundColor Cyan
-Write-Host "├── System.Text.Json.dll" -ForegroundColor Cyan
-Write-Host "├── System.Text.Encodings.Web.dll" -ForegroundColor Cyan
-Write-Host "├── System.Memory.dll" -ForegroundColor Cyan
-Write-Host "├── System.Buffers.dll" -ForegroundColor Cyan
-Write-Host "├── System.Runtime.CompilerServices.Unsafe.dll" -ForegroundColor Cyan
-Write-Host "├── README.txt" -ForegroundColor Gray
-Write-Host "├── LICENSE.txt" -ForegroundColor Gray
-Write-Host "└── YD_BIM_Setup.iss" -ForegroundColor Gray
+Write-Host "+-- Resources\" -ForegroundColor White
+Write-Host "|   +-- ... ($resourceFileCount files)" -ForegroundColor Cyan
+Write-Host "+-- 2022\" -ForegroundColor White
+Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
+Write-Host "+-- 2024\" -ForegroundColor White
+Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
+Write-Host "+-- 2025\" -ForegroundColor White
+Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
+Write-Host "+-- 2026\" -ForegroundColor White
+Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
+Write-Host "+-- Newtonsoft.Json.dll" -ForegroundColor Cyan
+Write-Host "+-- System.Text.Json.dll" -ForegroundColor Cyan
+Write-Host "+-- System.Text.Encodings.Web.dll" -ForegroundColor Cyan
+Write-Host "+-- System.Memory.dll" -ForegroundColor Cyan
+Write-Host "+-- System.Buffers.dll" -ForegroundColor Cyan
+Write-Host "+-- System.Runtime.CompilerServices.Unsafe.dll" -ForegroundColor Cyan
+Write-Host "+-- README.txt" -ForegroundColor Gray
+Write-Host "+-- LICENSE.txt" -ForegroundColor Gray
+Write-Host "+-- HB_BIM_Setup.iss" -ForegroundColor Gray
 Write-Host ""
 
 # Calculate total size
@@ -273,6 +372,6 @@ Write-Host "===============================================================" -Fo
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "  1. Open Inno Setup Compiler" -ForegroundColor White
-Write-Host "  2. Open YD_BIM_Setup.iss" -ForegroundColor White
+Write-Host "  2. Open HB_BIM_Setup.iss" -ForegroundColor White
 Write-Host "  3. Click Build -> Compile" -ForegroundColor White
 Write-Host ""

@@ -7,7 +7,7 @@ param(
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "YD_BIM Tools - Prepare Deployment Package" -ForegroundColor Cyan
+Write-Host "HB_BIM Tools - Prepare Deployment Package" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -34,10 +34,15 @@ $dependencyDlls = @(
     "System.Memory.dll",
     "System.Buffers.dll",
     "System.Runtime.CompilerServices.Unsafe.dll",
+    "DocumentFormat.OpenXml.dll",
     "EPPlus.dll",
     "EPPlus.Interfaces.dll",
     "EPPlus.System.Drawing.dll",
     "Microsoft.IO.RecyclableMemoryStream.dll",
+    "Microsoft.Data.Sqlite.dll",
+    "SQLitePCLRaw.batteries_v2.dll",
+    "SQLitePCLRaw.core.dll",
+    "SQLitePCLRaw.provider.dynamic_cdecl.dll",
     "Microsoft.Bcl.AsyncInterfaces.dll",
     "System.ComponentModel.Annotations.dll",
     "System.Drawing.Common.dll",
@@ -81,16 +86,40 @@ foreach ($version in $versions) {
             $copiedCount++
         }
     }
+
+    if ($version -in @("2025", "2026")) {
+        $openXmlNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\documentformat.openxml\2.20.0\lib\netstandard2.0\DocumentFormat.OpenXml.dll"
+        $packagingNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\system.io.packaging\4.7.0\lib\netstandard2.0\System.IO.Packaging.dll"
+        if (Test-Path $openXmlNetStandard) {
+            Copy-Item $openXmlNetStandard -Destination $versionDir -Force
+        }
+        if (Test-Path $packagingNetStandard) {
+            Copy-Item $packagingNetStandard -Destination $versionDir -Force
+            $copiedCount++
+        }
+    }
     Write-Host "  OK Dependencies: $copiedCount DLLs" -ForegroundColor Green
+
+    $sourceRuntimes = Join-Path $sourceBinDir "runtimes"
+    $targetRuntimes = Join-Path $versionDir "runtimes"
+    if (Test-Path $sourceRuntimes) {
+        if (Test-Path $targetRuntimes) {
+            Remove-Item $targetRuntimes -Recurse -Force
+        }
+        Copy-Item $sourceRuntimes -Destination $versionDir -Recurse -Force
+        Write-Host "  OK Native runtimes" -ForegroundColor Green
+    }
     
-    # Copy icon resources
-    $sourceIcons = Join-Path $projectRoot "Resources\Icons"
-    $targetIcons = Join-Path $versionDir "Resources\Icons"
-    if (Test-Path $sourceIcons) {
-        New-Item -ItemType Directory -Path $targetIcons -Force | Out-Null
-        Copy-Item "$sourceIcons\*.png" -Destination $targetIcons -Force
-        $iconCount = (Get-ChildItem $targetIcons -Filter "*.png").Count
-        Write-Host "  OK Icons: $iconCount files" -ForegroundColor Green
+    # Copy shared resources, including icons and Pipe Sleeve default families.
+    $sourceResources = Join-Path $projectRoot "Resources"
+    $targetResources = Join-Path $versionDir "Resources"
+    if (Test-Path $sourceResources) {
+        if (Test-Path $targetResources) {
+            Remove-Item $targetResources -Recurse -Force
+        }
+        Copy-Item $sourceResources -Destination $versionDir -Recurse -Force
+        $resourceCount = (Get-ChildItem $targetResources -Recurse -File -ErrorAction SilentlyContinue).Count
+        Write-Host "  OK Resources: $resourceCount files" -ForegroundColor Green
     }
     
     $successCount++
@@ -136,4 +165,3 @@ Write-Host "  1. Copy the entire Deployment folder to target computer" -Foregrou
 Write-Host "  2. Run PowerShell as Administrator on target computer" -ForegroundColor White
 Write-Host "  3. Execute: .\Deploy.ps1" -ForegroundColor White
 Write-Host ""
-

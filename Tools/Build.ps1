@@ -8,7 +8,7 @@ param(
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "YD_BIM Tools - Build Script" -ForegroundColor Cyan
+Write-Host "HB_BIM Tools - Build Script" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

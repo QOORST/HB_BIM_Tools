@@ -1,8 +1,10 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -13,8 +15,10 @@ namespace YD_RevitTools.LicenseManager.Services
         private static UpdateService _instance;
         private static readonly object _lock = new object();
 
-        private const string VERSION_INFO_URL = "https://raw.githubusercontent.com/QOORST/YD_BIM_Tools/main/version.json";
-        private const string GITHUB_RELEASES_URL = "https://api.github.com/repos/QOORST/YD_BIM_Tools/releases/latest";
+        private const string VERSION_INFO_URL = "https://raw.githubusercontent.com/QOORST/HB_BIM_Tools/main/version.json";
+        private const string GITHUB_RELEASES_URL = "https://api.github.com/repos/QOORST/HB_BIM_Tools/releases/latest";
+        private const string TRUSTED_SIGNER_THUMBPRINT = "5EBE6DDEEBEBE5194CBDC9E71CDE8E6BB91AB166";
+        private const string TRUSTED_SIGNER_SUBJECT = "CN=LAN";
 
         public static UpdateService Instance
         {
@@ -46,12 +50,23 @@ namespace YD_RevitTools.LicenseManager.Services
                 using (HttpClient client = new HttpClient())
                 {
                     client.Timeout = TimeSpan.FromSeconds(10);
-                    client.DefaultRequestHeaders.Add("User-Agent", "YD_BIM_Tools");
+                    client.DefaultRequestHeaders.Add("User-Agent", "HB_BIM_Tools");
 
-                    string jsonResponse = await client.GetStringAsync(VERSION_INFO_URL);
+                    string jsonResponse = await TryGetStringAsync(client, VERSION_INFO_URL);
+                    bool usingLocalVersionInfo = false;
                     if (string.IsNullOrWhiteSpace(jsonResponse))
                     {
-                        return new UpdateCheckResult { Success = false, Message = "更新資訊為空白。" };
+                        jsonResponse = TryReadLocalVersionJson();
+                        usingLocalVersionInfo = !string.IsNullOrWhiteSpace(jsonResponse);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(jsonResponse))
+                    {
+                        return new UpdateCheckResult
+                        {
+                            Success = false,
+                            Message = "目前無法取得線上更新資訊，且本機未找到 version.json。"
+                        };
                     }
 
                     VersionInfo versionInfo = JsonSerializer.Deserialize<VersionInfo>(
@@ -68,12 +83,15 @@ namespace YD_RevitTools.LicenseManager.Services
                     Version currentVersion = NormalizeVersion(GetCurrentVersion().ToString());
                     Version latestVersion = NormalizeVersion(versionInfo.Version);
 
-                    // 雙來源保護：若 version.json 較舊，改取 GitHub release tag
-                    Version ghLatest = await TryGetGithubLatestVersionAsync(client);
-                    if (ghLatest != null && ghLatest > latestVersion)
+                    // Remote fallback: only ask GitHub Releases when the online version file is available.
+                    if (!usingLocalVersionInfo)
                     {
-                        latestVersion = ghLatest;
-                        versionInfo.Version = ghLatest.ToString();
+                        Version ghLatest = await TryGetGithubLatestVersionAsync(client);
+                        if (ghLatest != null && ghLatest > latestVersion)
+                        {
+                            latestVersion = ghLatest;
+                            versionInfo.Version = ghLatest.ToString();
+                        }
                     }
                     bool hasUpdate = latestVersion > currentVersion;
 
@@ -86,7 +104,7 @@ namespace YD_RevitTools.LicenseManager.Services
                         DownloadUrl = versionInfo.DownloadUrl,
                         ReleaseNotes = versionInfo.ReleaseNotes,
                         ReleaseDate = versionInfo.ReleaseDate,
-                        Message = hasUpdate ? $"發現新版本 {versionInfo.Version}" : "目前已是最新版本。"
+                        Message = hasUpdate ? $"發現新版本 {versionInfo.Version}" : (usingLocalVersionInfo ? "目前無可用的線上更新資訊，已使用本機版本資訊確認目前版本。" : "目前已是最新版本。")
                     };
                 }
             }
@@ -100,6 +118,51 @@ namespace YD_RevitTools.LicenseManager.Services
             }
         }
 
+        private async Task<string> TryGetStringAsync(HttpClient client, string url)
+        {
+            try
+            {
+                return await client.GetStringAsync(url);
+            }
+            catch (HttpRequestException ex)
+            {
+                Debug.WriteLine($"TryGetStringAsync failed: {url} - {ex.Message}");
+                return null;
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"TryGetStringAsync timeout: {url} - {ex.Message}");
+                return null;
+            }
+        }
+
+        private string TryReadLocalVersionJson()
+        {
+            string[] candidatePaths =
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.json"),
+                Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? string.Empty, "version.json"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "HB_BIM_Tools", "version.json"),
+                Path.Combine(Path.GetTempPath(), "HB_BIM_Tools", "version.json")
+            };
+
+            foreach (string path in candidatePaths)
+            {
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        return File.ReadAllText(path);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"TryReadLocalVersionJson failed: {path} - {ex.Message}");
+                }
+            }
+
+            return null;
+        }
         private async Task<Version> TryGetGithubLatestVersionAsync(HttpClient client)
         {
             try
@@ -155,7 +218,7 @@ namespace YD_RevitTools.LicenseManager.Services
         {
             try
             {
-                string tempPath = Path.Combine(Path.GetTempPath(), "YD_BIM_Tools_Update.exe");
+                string tempPath = Path.Combine(Path.GetTempPath(), "HB_BIM_Tools_Update.exe");
 
                 using (HttpClient client = new HttpClient())
                 {
@@ -188,6 +251,20 @@ namespace YD_RevitTools.LicenseManager.Services
                     }
                 }
 
+                if (!IsTrustedInstaller(tempPath, out string signatureError))
+                {
+                    Debug.WriteLine($"Downloaded installer signature verification failed: {signatureError}");
+                    try
+                    {
+                        File.Delete(tempPath);
+                    }
+                    catch
+                    {
+                        // Ignore cleanup failure; the installer will not be launched.
+                    }
+                    return false;
+                }
+
                 LaunchInstaller(tempPath);
                 return true;
             }
@@ -198,37 +275,90 @@ namespace YD_RevitTools.LicenseManager.Services
             }
         }
 
-        private void LaunchInstaller(string installerPath)
+
+        private bool IsTrustedInstaller(string installerPath, out string errorMessage)
         {
+            errorMessage = null;
+
             try
             {
-                // 以背景腳本方式等待 Revit 關閉後再安裝，避免檔案鎖定
-                string waitScript = Path.Combine(Path.GetTempPath(), "YD_BIM_WaitAndInstall.cmd");
-                string scriptContent =
-                    "@echo off\r\n" +
-                    "setlocal\r\n" +
-                    ":WAITREVIT\r\n" +
-                    "tasklist /FI \"IMAGENAME eq Revit.exe\" | find /I \"Revit.exe\" >nul\r\n" +
-                    "if %ERRORLEVEL%==0 (\r\n" +
-                    "  timeout /t 2 /nobreak >nul\r\n" +
-                    "  goto WAITREVIT\r\n" +
-                    ")\r\n" +
-                    "start \"\" \"" + installerPath + "\"\r\n" +
-                    "del \"%~f0\" >nul 2>nul\r\n";
-
-                File.WriteAllText(waitScript, scriptContent);
-
-                ProcessStartInfo startInfo = new ProcessStartInfo
+                if (!File.Exists(installerPath))
                 {
-                    FileName = waitScript,
-                    UseShellExecute = true,
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
-                Process.Start(startInfo);
+                    errorMessage = "找不到下載的安裝檔。";
+                    return false;
+                }
+
+                X509Certificate signer = X509Certificate.CreateFromSignedFile(installerPath);
+                X509Certificate2 signerCertificate = new X509Certificate2(signer);
+                string thumbprint = (signerCertificate.Thumbprint ?? string.Empty).Replace(" ", string.Empty).ToUpperInvariant();
+                string subject = signerCertificate.Subject ?? string.Empty;
+
+                if (!string.Equals(thumbprint, TRUSTED_SIGNER_THUMBPRINT, StringComparison.OrdinalIgnoreCase) ||
+                    !subject.Contains(TRUSTED_SIGNER_SUBJECT))
+                {
+                    errorMessage = "更新安裝檔簽署者不是受信任的 LAN 憑證。";
+                    return false;
+                }
+
+                if (!signerCertificate.Verify())
+                {
+                    errorMessage = "更新安裝檔簽章無法建立信任鏈。";
+                    return false;
+                }
+
+                return true;
             }
             catch (Exception ex)
             {
-                throw new Exception($"啟動更新安裝程序失敗：{ex.Message}", ex);
+                errorMessage = ex.Message;
+                return false;
+            }
+        }
+        /// <summary>
+        /// 等待 Revit.exe 完全關閉後，直接以 ProcessStartInfo 啟動安裝檔。
+        /// 不使用 .cmd 腳本，避免寫入 %TEMP% 的 TOCTOU 風險。
+        /// </summary>
+        private static void LaunchInstaller(string installerPath)
+        {
+            // 在獨立背景執行緒中等待 Revit 關閉，避免阻擋 UI 執行緒
+            var thread = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    // 輪詢 Revit.exe 是否仍在運行
+                    while (IsProcessRunning("Revit"))
+                    {
+                        System.Threading.Thread.Sleep(2000);
+                    }
+
+                    // Revit 已關閉，直接啟動安裝檔（不經由腳本中轉）
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = installerPath,
+                        UseShellExecute = true
+                    };
+                    Process.Start(startInfo);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"LaunchInstaller: {ex.Message}");
+                }
+            })
+            { IsBackground = true };
+            thread.Start();
+        }
+
+        private static bool IsProcessRunning(string processName)
+        {
+            try
+            {
+                return System.Diagnostics.Process
+                    .GetProcessesByName(processName)
+                    .Any();
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -271,3 +401,5 @@ namespace YD_RevitTools.LicenseManager.Services
         public string MinimumVersion { get; set; }
     }
 }
+
+

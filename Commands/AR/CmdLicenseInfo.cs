@@ -60,7 +60,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR
 
         public LicenseManagerDialog()
         {
-            Text = "YD_BIM Tools - 授權管理";
+            Text = "HB_BIM Tools - 授權管理";
             Width = 760;
             Height = 560;
             StartPosition = WinForms.FormStartPosition.CenterScreen;

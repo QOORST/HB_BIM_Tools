@@ -11,7 +11,7 @@ namespace YD_RevitTools.LicenseManager.Services
     public class LocalUpdateService
     {
         private const string LOCAL_VERSION_FILE = "version.json";
-        private const string LOCAL_INSTALLER_PATH = "YD_BIM_Tools_Setup.exe";
+        private const string LOCAL_INSTALLER_PATH = "HB_BIM_Tools_Setup.exe";
 
         /// <summary>
         /// 從本地檔案檢查更新
@@ -26,8 +26,8 @@ namespace YD_RevitTools.LicenseManager.Services
                     // 嘗試從多個位置查找
                     string[] searchPaths = new[]
                     {
-                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "YD_BIM_Tools", LOCAL_VERSION_FILE),
-                        Path.Combine(Path.GetTempPath(), "YD_BIM_Tools", LOCAL_VERSION_FILE),
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "HB_BIM_Tools", LOCAL_VERSION_FILE),
+                        Path.Combine(Path.GetTempPath(), "HB_BIM_Tools", LOCAL_VERSION_FILE),
                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, LOCAL_VERSION_FILE)
                     };
 

@@ -13,7 +13,7 @@ param(
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "YD_BIM Tools - Complete Update" -ForegroundColor Cyan
+Write-Host "HB_BIM Tools - Complete Update" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -132,7 +132,7 @@ if (Test-Path $deploymentDir) {
 }
 
 # Check installer
-$setupFiles = Get-ChildItem $outputDir -Filter "YD_BIM_Tools_v*_Setup.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+$setupFiles = Get-ChildItem $outputDir -Filter "HB_BIM_Tools_v*_Setup.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
 if ($setupFiles.Count -gt 0) {
     $setupFile = $setupFiles[0]
     Write-Host "Installer:" -ForegroundColor Cyan

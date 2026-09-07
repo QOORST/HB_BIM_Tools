@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pipe Sleeve 自動套管圖文使用手冊</title>
+  <style>
+    :root { --ink:#16212b; --muted:#5b6670; --line:#cfd8df; --blue:#0b84d8; --cyan:#61d6d6; --orange:#f07a22; --gray:#8f9499; --bg:#f6f8fa; }
+    body { margin:0; font-family:"Microsoft JhengHei", "Segoe UI", Arial, sans-serif; color:var(--ink); background:#fff; line-height:1.65; }
+    main { max-width:1120px; margin:0 auto; padding:36px 42px 56px; }
+    h1 { font-size:34px; margin:0 0 8px; }
+    h2 { font-size:23px; margin:38px 0 14px; border-bottom:2px solid #d8dde3; padding-bottom:8px; }
+    h3 { font-size:18px; margin:24px 0 10px; }
+    .meta { color:var(--muted); margin-bottom:28px; }
+    .lead { background:#eef6fc; border:1px solid #cfe4f5; padding:16px 18px; border-radius:8px; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; align-items:start; }
+    .card { border:1px solid #d8dde3; border-radius:8px; padding:16px; background:#fff; }
+    .caption { margin-top:8px; color:var(--muted); font-size:14px; }
+    .steps { counter-reset:step; padding:0; list-style:none; }
+    .steps li { counter-increment:step; display:flex; gap:12px; margin:12px 0; align-items:flex-start; }
+    .steps li:before { content:counter(step); display:inline-grid; place-items:center; width:26px; height:26px; border-radius:50%; color:#fff; background:var(--blue); font-weight:700; flex:0 0 auto; margin-top:2px; }
+    table { width:100%; border-collapse:collapse; margin:12px 0; }
+    th, td { border:1px solid #d8dde3; padding:8px 10px; text-align:left; }
+    th { background:#f1f5f8; }
+    code { background:#f1f5f8; padding:1px 5px; border-radius:4px; }
+    .note { border-left:4px solid var(--orange); background:#fff8f1; padding:12px 14px; }
+    svg { width:100%; height:auto; display:block; background:#fbfcfd; border-radius:6px; }
+    .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:var(--muted); margin-top:8px; }
+    .swatch { display:inline-block; width:14px; height:14px; border-radius:3px; vertical-align:-2px; margin-right:5px; border:1px solid #9994; }
+    @media (max-width: 860px) { main { padding:24px 18px 44px; } .grid { grid-template-columns:1fr; } h1 { font-size:28px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Pipe Sleeve 自動套管圖文使用手冊</h1>
+  <div class="meta">HB_BIM Tools v2.5.10｜適用 Revit 2022 / 2024 / 2025 / 2026</div>
+
+  <section class="lead">
+    <strong>用途：</strong>當 Pipe、Duct、電管或電纜線架穿越牆、樓板、梁時，自動建立圓形套管或矩形開孔；可處理目前模型與 Revit 連結模型，並可在管線改路徑後更新既有套管。
+  </section>
+
+  <h2>1. 操作流程</h2>
+  <div class="grid">
+    <div>
+      <ol class="steps">
+        <li>在模型中選取要處理的 Pipe 或 Duct。</li>
+        <li>執行 <code>HB_BIM Tools → MEP 工具 → Pipe Sleeve</code>。</li>
+        <li>確認套管族型、DN 對應與間隙距離。</li>
+        <li>選擇分析目前模型、連結模型，或兩者皆分析。</li>
+        <li>按 <code>分析</code> 確認穿越點數量。</li>
+        <li>按 <code>開始執行</code> 建立或更新套管。</li>
+                <li>豎井或樓板大開口內的立管，若沒有與原生樓板實體產生交段，不會生成穿樓板套管；勾選更新現有套管重新執行時，會清理目前視圖範圍內同來源的舊版殘留套管。</li>
+</ol>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 640 300" role="img" aria-label="Pipe Sleeve 操作流程圖">
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#0b84d8"/></marker>
+        </defs>
+        <g fill="#fff" stroke="#a8b4bf" stroke-width="2">
+          <rect x="24" y="58" width="110" height="58" rx="6"/><rect x="184" y="58" width="110" height="58" rx="6"/><rect x="344" y="58" width="110" height="58" rx="6"/><rect x="504" y="58" width="110" height="58" rx="6"/>
+          <rect x="184" y="184" width="110" height="58" rx="6"/><rect x="344" y="184" width="110" height="58" rx="6"/>
+        </g>
+        <g font-size="18" text-anchor="middle" fill="#16212b" font-family="Microsoft JhengHei, Arial">
+          <text x="79" y="92">選管線</text><text x="239" y="92">開工具</text><text x="399" y="92">設定族型</text><text x="559" y="92">分析</text>
+          <text x="239" y="218">更新選項</text><text x="399" y="218">建立/更新</text>
+        </g>
+        <g stroke="#0b84d8" stroke-width="4" marker-end="url(#arrow)" fill="none">
+          <path d="M135 87 H178"/><path d="M295 87 H338"/><path d="M455 87 H498"/><path d="M559 118 C559 168 471 213 460 213"/><path d="M344 213 H300"/>
+        </g>
+      </svg>
+      <div class="caption">建議先框選局部管線測試，確認專案座標與連結模型位置正確後再放大範圍。</div>
+    </div>
+  </div>
+
+
+  <h2>2. 目前視圖範圍與範圍框</h2>
+  <div class="grid">
+    <div>
+      <h3>規則</h3>
+      <p>Revit 選取管線時會選到整個元素，不是只選畫面中可見的線段。Pipe Sleeve 會以目前作用中視圖限制生成範圍：3D 視圖使用 <code>Section Box</code>，平面/立面/剖面使用啟用中的 <code>CropBox</code>。</p>
+      <ul>
+        <li>交點在目前視圖範圍內：建立或更新套管。</li>
+        <li>交點在範圍框外：略過，不生成套管。</li>
+        <li>套管管理預設只列目前視圖內、自動生成且含來源管線 ID 的套管。</li>
+      </ul>
+      <div class="note"><p>測試局部區域時，請先確認 3D 視圖的範圍框已啟用且包住本次要處理的管線與建築構件。</p></div>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 640 320" role="img" aria-label="目前視圖範圍框示意圖">
+        <rect x="70" y="74" width="400" height="190" fill="none" stroke="#d33" stroke-width="4" stroke-dasharray="14 10"/>
+        <rect x="118" y="116" width="84" height="110" fill="#8f9499" opacity=".9"/>
+        <rect x="300" y="116" width="84" height="110" fill="#8f9499" opacity=".9"/>
+        <rect x="520" y="116" width="84" height="110" fill="#8f9499" opacity=".35"/>
+        <line x1="36" y1="172" x2="612" y2="172" stroke="#444" stroke-width="16" stroke-linecap="round"/>
+        <rect x="106" y="140" width="108" height="64" fill="#61d6d6" opacity=".75" stroke="#029a9a" stroke-width="2"/>
+        <rect x="288" y="140" width="108" height="64" fill="#61d6d6" opacity=".75" stroke="#029a9a" stroke-width="2"/>
+        <rect x="508" y="140" width="108" height="64" fill="#cccccc" opacity=".45" stroke="#999" stroke-width="2" stroke-dasharray="8 6"/>
+        <g font-size="17" font-family="Microsoft JhengHei, Arial" fill="#16212b">
+          <text x="82" y="64">目前 3D Section Box / 範圍框</text>
+          <text x="118" y="246">生成</text><text x="302" y="246">生成</text><text x="510" y="246">框外略過</text>
+        </g>
+      </svg>
+      <div class="caption">即使選到的是同一整條管線，工具只會處理目前視圖範圍內的穿越交點。</div>
+    </div>
+  </div>
+  <h2>3. 穿牆套管</h2>
+  <div class="grid">
+    <div class="card">
+      <svg viewBox="0 0 640 320" role="img" aria-label="穿牆套管示意圖">
+        <rect x="260" y="44" width="120" height="232" fill="#999" opacity=".85"/>
+        <line x1="320" y1="44" x2="320" y2="276" stroke="#555" stroke-dasharray="8 7" stroke-width="2"/>
+        <line x1="70" y1="160" x2="570" y2="160" stroke="#444" stroke-width="22" stroke-linecap="round"/>
+        <rect x="258" y="128" width="124" height="64" fill="#61d6d6" opacity=".72" stroke="#029a9a" stroke-width="2"/>
+        <line x1="320" y1="160" x2="500" y2="160" stroke="#f07a22" stroke-width="4" marker-end="url(#arrow2)"/>
+        <defs><marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#f07a22"/></marker></defs>
+        <g font-size="18" font-family="Microsoft JhengHei, Arial" fill="#16212b">
+          <text x="270" y="32">牆</text><text x="78" y="135">管中心線</text><text x="394" y="145">套管方向垂直牆面</text><text x="330" y="113">中心在牆中心線</text>
+        </g>
+      </svg>
+      <div class="legend"><span><i class="swatch" style="background:#999"></i>牆</span><span><i class="swatch" style="background:#444"></i>管線</span><span><i class="swatch" style="background:#61d6d6"></i>套管</span></div>
+    </div>
+    <div>
+      <h3>規則</h3>
+      <p>穿牆時，工具會先找管線穿越牆厚範圍，再把套管中心修正到牆中心線。套管方向使用牆的法線方向，因此會垂直於牆面，不會跟著斜管歪斜。</p>
+      <table><tr><th>項目</th><th>判斷方式</th></tr><tr><td>中心點</td><td>管線穿越牆後，投影到牆中心線</td></tr><tr><td>方向</td><td>垂直牆面</td></tr><tr><td>長度</td><td>依牆厚</td></tr></table>
+    </div>
+  </div>
+
+  <h2>4. 穿樓板套管</h2>
+  <div class="grid">
+    <div>
+      <h3>規則</h3>
+      <p>穿樓板時，套管中心取管線穿越樓板厚度的中點。先前已調整為不再用整個樓板 bounding box 中心，避免立管套管被樓板增築層拉偏。</p>
+      <table><tr><th>項目</th><th>判斷方式</th></tr><tr><td>中心點</td><td>管線穿越樓板厚度的中點</td></tr><tr><td>方向</td><td>垂直樓板面</td></tr><tr><td>長度</td><td>依樓板厚</td></tr></table>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 640 320" role="img" aria-label="穿樓板套管示意圖">
+        <rect x="70" y="130" width="500" height="76" fill="#9b9b9b" opacity=".9"/>
+        <rect x="296" y="98" width="48" height="140" fill="#61d6d6" opacity=".75" stroke="#029a9a" stroke-width="2"/>
+        <line x1="320" y1="36" x2="320" y2="284" stroke="#444" stroke-width="18" stroke-linecap="round"/>
+        <line x1="320" y1="168" x2="320" y2="72" stroke="#f07a22" stroke-width="4" marker-end="url(#arrow3)"/>
+        <defs><marker id="arrow3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#f07a22"/></marker></defs>
+        <g font-size="18" font-family="Microsoft JhengHei, Arial" fill="#16212b">
+          <text x="76" y="120">樓板</text><text x="344" y="59">立管</text><text x="350" y="165">中心在樓板厚度中點</text><text x="360" y="86">垂直方向</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <h2>5. 穿梁套管</h2>
+  <div class="grid">
+    <div class="card">
+      <svg viewBox="0 0 640 320" role="img" aria-label="穿梁套管示意圖">
+        <rect x="248" y="72" width="144" height="178" fill="#8f9499" opacity=".9"/>
+        <rect x="390" y="72" width="34" height="178" fill="#f07a22" opacity=".72"/>
+        <line x1="80" y1="160" x2="560" y2="160" stroke="#444" stroke-width="18" stroke-linecap="round"/>
+        <rect x="238" y="128" width="196" height="64" fill="#61d6d6" opacity=".68" stroke="#029a9a" stroke-width="2"/>
+        <line x1="320" y1="54" x2="320" y2="268" stroke="#555" stroke-dasharray="8 7" stroke-width="2"/>
+        <line x1="320" y1="160" x2="516" y2="160" stroke="#f07a22" stroke-width="4" marker-end="url(#arrow4)"/>
+        <defs><marker id="arrow4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#f07a22"/></marker></defs>
+        <g font-size="18" font-family="Microsoft JhengHei, Arial" fill="#16212b">
+          <text x="252" y="60">梁本體</text><text x="397" y="60">增築</text><text x="86" y="137">管線</text><text x="314" y="118">中心對梁</text><text x="438" y="145">方向垂直梁側面</text>
+        </g>
+      </svg>
+      <div class="caption">穿梁時，套管長度通常涵蓋梁增築/增打寬度，因此梁不套用增築排除規則。</div>
+    </div>
+    <div>
+      <h3>規則</h3>
+      <p>穿梁套管目前改用梁中心線推算側面垂直方向，不沿管線方向旋轉。這樣在立面看會更接近現場預留套管做法。</p>
+      <table><tr><th>項目</th><th>判斷方式</th></tr><tr><td>中心點</td><td>管線穿越後修正到梁中心位置附近</td></tr><tr><td>方向</td><td>垂直梁側面</td></tr><tr><td>長度</td><td>涵蓋梁寬，含梁增築/增打</td></tr></table>
+    </div>
+  </div>
+
+  <h2>6. 更新既有套管</h2>
+  <div class="grid">
+    <div>
+      <p>管線調整路徑後，不需要刪除舊套管。重新選取管線並勾選 <code>更新現有套管</code>，工具會用 <code>來源管線Id</code> 找回既有套管。</p>
+      <ul>
+        <li>找到既有套管：移動、旋轉並更新尺寸/長度/備註。</li>
+        <li>找不到既有套管：建立新套管。</li>
+        <li>建立或更新完成後，若啟用自動編號，會依樓層、系統、穿越類型、DN 與元件 Id 整理目前視圖範圍內的自動套管編號；完成通知以整理後範圍總數為準。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 640 300" role="img" aria-label="更新既有套管示意圖">
+        <rect x="270" y="52" width="100" height="200" fill="#999" opacity=".88"/>
+        <line x1="70" y1="116" x2="560" y2="116" stroke="#aaa" stroke-width="12" stroke-dasharray="12 8"/>
+        <rect x="252" y="88" width="136" height="48" fill="#b6eaea" stroke="#74bcbc" stroke-width="2"/>
+        <line x1="70" y1="182" x2="560" y2="182" stroke="#444" stroke-width="18" stroke-linecap="round"/>
+        <rect x="252" y="150" width="136" height="64" fill="#61d6d6" opacity=".75" stroke="#029a9a" stroke-width="2"/>
+        <path d="M410 106 C500 104 500 174 406 178" fill="none" stroke="#0b84d8" stroke-width="4" marker-end="url(#arrow5)"/>
+        <defs><marker id="arrow5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#0b84d8"/></marker></defs>
+        <g font-size="18" font-family="Microsoft JhengHei, Arial" fill="#16212b">
+          <text x="82" y="96">舊管線位置</text><text x="82" y="215">新管線位置</text><text x="420" y="142">更新現有套管</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <h2>7. 建議檢查項目</h2>
+  <div class="note">
+    <p>穿梁套管若判定為需結構確認或高風險，仍會正常生成，但會在目前視圖以紅色覆寫顯示；提醒等級以橘色提示。分類包含孔徑、梁深 1/3、梁端/柱邊 2H、同梁孔距 3D/300mm，方便後續在套管管理中篩選。套管設定介面也已加入穿梁原則示意圖，執行前可直接對照禁開區與風險分類。</p><p>測試時建議用 6 種情境確認：3D 範圍框局部生成、水平管穿牆、立管穿樓板、水平管穿梁、矩形風管穿牆、管線改路徑後勾選更新既有套管。</p>
+  </div>
+  <h2>建築模型端開孔同步</h2>
+  <div class="grid">
+    <div>
+      <h3>建議工作流</h3>
+      <ol class="steps">
+        <li>MEP 模型先用 <code>Pipe Sleeve</code> 產生套管需求。</li>
+        <li>建築模型連結 MEP 模型，並以 3D 範圍框限制同步區域。</li>
+        <li>建築模型載入獨立切割族：<code>套管-開口圓形_無</code>、<code>套管-開口矩形_無</code> 或 <code>開孔-開口矩形_無</code>。</li>
+        <li>執行 <code>建築開孔</code>，由連結 MEP 套管建立或更新建築端開孔/預留洞。</li>
+      </ol>
+      <div class="note"><p>建築開孔同步不混用 MEP 套管族。開口族可使用管附件類別，工具以名稱中的開口/開孔與圓形/矩形辨識；族型可依來源套管的 DN、標稱直徑或尺寸參數自動匹配。缺少切割族時會提示，不會用一般套管代替。 Pipe Sleeve 新增止水套管類型相容；自動大一級預設仍優先套用一般套管，止水套管保留手動選用。</p></div>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 640 320" role="img" aria-label="建築開孔同步流程示意圖">
+        <defs><marker id="arrowOpen" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#0b84d8"/></marker></defs>
+        <rect x="40" y="54" width="200" height="190" rx="8" fill="#eef6fc" stroke="#9cc8e6" stroke-width="2"/>
+        <rect x="400" y="54" width="200" height="190" rx="8" fill="#fff8f1" stroke="#f0b27a" stroke-width="2"/>
+        <text x="140" y="92" font-size="24" text-anchor="middle" font-family="Microsoft JhengHei, Arial">MEP 模型</text>
+        <text x="500" y="92" font-size="24" text-anchor="middle" font-family="Microsoft JhengHei, Arial">建築模型</text>
+        <line x1="82" y1="158" x2="198" y2="158" stroke="#444" stroke-width="14" stroke-linecap="round"/>
+        <rect x="122" y="130" width="36" height="56" fill="#61d6d6" opacity=".8" stroke="#029a9a"/>
+        <rect x="456" y="116" width="88" height="88" fill="#61d6d6" opacity=".45" stroke="#029a9a" stroke-width="2"/>
+        <line x1="250" y1="158" x2="390" y2="158" stroke="#0b84d8" stroke-width="4" marker-end="url(#arrowOpen)"/>
+        <text x="320" y="136" font-size="18" text-anchor="middle" font-family="Microsoft JhengHei, Arial">讀取連結套管需求</text>
+        <text x="140" y="222" font-size="17" text-anchor="middle" font-family="Microsoft JhengHei, Arial">來源管線 ID / DN / 尺寸</text>
+        <text x="500" y="222" font-size="17" text-anchor="middle" font-family="Microsoft JhengHei, Arial">獨立切割開孔族</text>
+      </svg>
+      <div class="caption">重跑同步時，以連結實例與來源套管 UniqueId 對應既有開孔，避免同一來源重複建立。</div>
+    </div>
+  </div>
+
+</main>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+

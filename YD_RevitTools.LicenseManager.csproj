@@ -16,7 +16,8 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <!-- 啟用 XAML (僅 Revit 2024 及更早版本) -->
     <UseWPF Condition="'$(RevitVersion)' == '2022' OR '$(RevitVersion)' == '2023' OR '$(RevitVersion)' == '2024'">true</UseWPF>
-    <UseWPF Condition="'$(RevitVersion)' == '2025' OR '$(RevitVersion)' == '2026'">false</UseWPF>
+    <UseWPF Condition="'$(RevitVersion)' == '2025'">false</UseWPF>
+    <UseWPF Condition="'$(RevitVersion)' == '2026'">false</UseWPF>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -46,6 +47,7 @@
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" Version="2.20.0" />
     <PackageReference Include="EPPlus" Version="7.5.2" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.6" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />

@@ -2,7 +2,7 @@
 <Window x:Class="YD_RevitTools.LicenseManager.UI.LicenseWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="YD_BIM Tools - License Management" Height="580" Width="680"
+        Title="HB_BIM Tools - License Management" Height="580" Width="680"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize">
     <Window.Resources>
@@ -33,7 +33,7 @@
                 </Viewbox>
                 <TextBlock Text="授權管理" FontSize="28" FontWeight="Bold" VerticalAlignment="Center"/>
             </StackPanel>
-            <TextBlock Text="YD_BIM Tools - Revit 2024/2025/2026 Multi-Version BIM Tools"
+            <TextBlock Text="HB_BIM Tools - Revit 2024/2025/2026 Multi-Version BIM Tools"
                        Foreground="#666" FontSize="12"/>
         </StackPanel>
 
@@ -268,7 +268,7 @@
                         <TextBlock TextWrapping="Wrap" Margin="0,5">
                             <Run Text="1. 統一授權管理" FontWeight="Bold"/>
                             <LineBreak/>
-                            This license management system manages all YD_BIM Tools. One license can be used for all tools in the same tab.
+                            This license management system manages all HB_BIM Tools. One license can be used for all tools in the same tab.
                         </TextBlock>
 
                         <TextBlock TextWrapping="Wrap" Margin="0,10">

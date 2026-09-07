@@ -1,8 +1,9 @@
 {
-  "version": "2.5.1",
-  "downloadUrl": "https://github.com/QOORST/YD_BIM_Tools/releases/download/v2.5.1/YD_BIM_Tools_v2.5.1_Setup.exe",
-  "releaseNotes": "修正 AR 房間裝修管理的牆高同步：介面現在會依房間 ID 回讀模型中實際裝修牆的不連續高度，並排除踢腳板高度干擾；新增房間裝修驗算報表，可匯出「驗算報表／明細表驗收」Excel，並建立 AR_Check 3D 視圖，協助檢查與驗收交付明細報表數量是否正確；新增房間重疊防呆，避免空間歸屬不唯一時誤補寫 AR_RoomId 或誤改房間參數。",
-  "releaseDate": "2026-06-23T12:00:00Z",
+  "version": "2.5.11",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.11/HB_BIM_Tools_v2.5.11_Setup.exe",
+  "releaseNotes": "Security improvements: (1) Enhanced machine code fingerprint using CPU ID + BaseBoard Serial + MachineName; backward compatible with existing licenses. (2) Fixed TOCTOU risk in installer launch by removing temp script. (3) Upgraded RSA API from RSACryptoServiceProvider to RSA.Create().",
+  "releaseDate": "2026-08-31T12:00:00Z",
   "isCritical": false,
   "minimumVersion": "2.0.0"
 }
+

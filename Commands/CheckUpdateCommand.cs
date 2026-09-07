@@ -21,8 +21,14 @@ namespace YD_RevitTools.LicenseManager.Commands
 
                 var checkTask = Task.Run(async () =>
                 {
-                    try { result = await updateService.CheckForUpdatesAsync(); }
-                    catch (Exception ex) { taskException = ex; }
+                    try
+                    {
+                        result = await updateService.CheckForUpdatesAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        taskException = ex;
+                    }
                 });
 
                 if (!checkTask.Wait(TimeSpan.FromSeconds(15)))
@@ -46,7 +52,7 @@ namespace YD_RevitTools.LicenseManager.Commands
                 if (!result.HasUpdate)
                 {
                     TaskDialog.Show("檢查更新",
-                        $"目前已是最新版本。\n\n目前版本：{result.CurrentVersion}\n最新版本：{result.LatestVersion}");
+                        $"{result.Message}\n\n目前版本：{result.CurrentVersion}\n最新版本：{result.LatestVersion}");
                     return Result.Succeeded;
                 }
 
@@ -55,12 +61,13 @@ namespace YD_RevitTools.LicenseManager.Commands
                 td.MainContent =
                     $"目前版本：{result.CurrentVersion}\n" +
                     $"最新版本：{result.LatestVersion}\n" +
-                    $"發佈日期：{result.ReleaseDate:yyyy-MM-dd}\n\n" +
+                    $"發布日期：{result.ReleaseDate:yyyy-MM-dd}\n\n" +
                     $"更新內容：\n{result.ReleaseNotes}\n\n" +
-                    "按「是」後會先下載更新檔。\n" +
-                    "安裝程式會在您關閉 Revit 後自動啟動，不需先手動關閉。";
+                    "是否要立即下載並安裝更新？\n" +
+                    "安裝程式會等待 Revit 關閉後再啟動。";
                 td.CommonButtons = TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No;
                 td.DefaultButton = TaskDialogResult.Yes;
+
                 if (td.Show() != TaskDialogResult.Yes)
                 {
                     return Result.Cancelled;
@@ -75,24 +82,24 @@ namespace YD_RevitTools.LicenseManager.Commands
 
                 if (!downloadTask.Wait(TimeSpan.FromMinutes(8)))
                 {
-                    TaskDialog.Show("更新下載", "下載逾時，請稍後再試。");
+                    TaskDialog.Show("下載更新", "下載更新逾時，請稍後再試。");
                     return Result.Failed;
                 }
 
                 if (!downloadSuccess)
                 {
-                    TaskDialog.Show("更新下載", "下載或啟動更新程序失敗。");
+                    TaskDialog.Show("下載更新", "下載或啟動更新安裝程式失敗。");
                     return Result.Failed;
                 }
 
-                TaskDialog.Show("更新已排程",
-                    "更新檔已下載完成。\n\n當您關閉 Revit 後，安裝程式將自動啟動。");
+                TaskDialog.Show("更新已準備",
+                    "更新安裝程式已準備啟動。\n\n請關閉 Revit，安裝程式會在 Revit 關閉後繼續。");
                 return Result.Succeeded;
             }
             catch (Exception ex)
             {
                 message = ex.Message;
-                TaskDialog.Show("檢查更新", $"執行失敗：\n{ex.Message}");
+                TaskDialog.Show("檢查更新", $"發生錯誤：\n{ex.Message}");
                 return Result.Failed;
             }
         }

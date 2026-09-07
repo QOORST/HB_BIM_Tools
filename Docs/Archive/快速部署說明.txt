@@ -1,5 +1,5 @@
 ═══════════════════════════════════════════════════════════════
-  YD_BIM Tools - 快速部署說明
+  HB_BIM Tools - 快速部署說明
 ═══════════════════════════════════════════════════════════════
 
 如果無法使用安裝程式，請使用以下方式手動部署：
@@ -51,7 +51,7 @@
 【Revit 2024】
 
 1. 創建資料夾：
-   C:\ProgramData\Autodesk\Revit\Addins\2024\YD_BIM\
+   C:\ProgramData\Autodesk\Revit\Addins\2024\HB_BIM\
 
 2. 從開發電腦複製以下檔案到上述資料夾：
    
@@ -77,7 +77,7 @@
 3. 複製圖示資源：
    Resources\Icons\ (整個資料夾)
    到
-   C:\ProgramData\Autodesk\Revit\Addins\2024\YD_BIM\Resources\Icons\
+   C:\ProgramData\Autodesk\Revit\Addins\2024\HB_BIM\Resources\Icons\
 
 4. 創建配置檔案：
    在 C:\ProgramData\Autodesk\Revit\Addins\2024\ 創建檔案
@@ -101,12 +101,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RevitAddIns>
   <AddIn Type="Application">
-    <Name>YD_BIM Tools</Name>
-    <Assembly>C:\ProgramData\Autodesk\Revit\Addins\2024\YD_BIM\YD_RevitTools.LicenseManager.dll</Assembly>
+    <Name>HB_BIM Tools</Name>
+    <Assembly>C:\ProgramData\Autodesk\Revit\Addins\2024\HB_BIM\YD_RevitTools.LicenseManager.dll</Assembly>
     <FullClassName>YD_RevitTools.LicenseManager.App</FullClassName>
     <ClientId>B3F5D2D4-9392-4A9E-9C0D-A6F5DD93FAC7</ClientId>
     <VendorId>YD</VendorId>
-    <VendorDescription>YD BIM Tools, www.ydbim.com</VendorDescription>
+    <VendorDescription>HB_BIM Tools, www.ydbim.com</VendorDescription>
   </AddIn>
 </RevitAddIns>
 
@@ -120,7 +120,7 @@
 ───────────────────────────────────────────────────────────────
 
 1. 啟動 Revit
-2. 檢查是否出現「YD_BIM Tools」選項卡
+2. 檢查是否出現「HB_BIM Tools」選項卡
 3. 如果沒有出現：
    - 點擊「外部工具」→「外掛管理員」
    - 查看是否有錯誤訊息
