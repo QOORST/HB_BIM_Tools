@@ -19,6 +19,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         AlignOnly
     }
 
+    public enum PipeCenterAlignConnectionMode
+    {
+        Auto,
+        Tee,
+        Takeoff,
+        Vertical45
+    }
+
+    public enum PipeCenterAlignGeometryMode
+    {
+        WholePipeElevation,
+        EndpointOnly
+    }
+
     /// <summary>
     /// Aligns one selected branch pipe endpoint to the centerline of a selected horizontal main pipe,
     /// with an optional step to split the main pipe and create a tee fitting.
@@ -65,8 +79,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 int movingEndIndex = GetNearestEndIndexToLineInPlan(branchLine, mainLine);
                 XYZ oldMovingPoint = branchLine.GetEndPoint(movingEndIndex);
                 XYZ fixedPoint = branchLine.GetEndPoint(1 - movingEndIndex);
+                PipeCenterAlignGeometryMode geometryMode = PipeCenterAlignSettings.GetGeometryMode();
 
-                if (IsEndpointConnected(branchPipe, oldMovingPoint))
+                if (geometryMode == PipeCenterAlignGeometryMode.EndpointOnly && IsEndpointConnected(branchPipe, oldMovingPoint))
                 {
                     TaskDialog.Show(
                         "支管中心對齊",
@@ -74,21 +89,41 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     return Result.Cancelled;
                 }
 
-                if (!TryGetAlignedEndpoint(mainLine, fixedPoint, oldMovingPoint, out XYZ targetPoint, out string failReason))
+                if (!TryGetAlignedEndpoint(mainLine, fixedPoint, oldMovingPoint, out XYZ targetPoint, out XYZ slopePoint, out string failReason))
                 {
                     TaskDialog.Show("支管中心對齊", failReason);
                     return Result.Cancelled;
                 }
 
-                double moveDistance = oldMovingPoint.DistanceTo(targetPoint);
+                XYZ newFixedPoint = fixedPoint;
+                XYZ newMovingPoint = targetPoint;
+                double verticalShift = 0.0;
+                if (geometryMode == PipeCenterAlignGeometryMode.WholePipeElevation)
+                {
+                    verticalShift = targetPoint.Z - slopePoint.Z;
+                    XYZ elevationMove = XYZ.BasisZ.Multiply(verticalShift);
+                    newFixedPoint = fixedPoint + elevationMove;
+                    newMovingPoint = slopePoint + elevationMove;
+                }
+
+                double moveDistance = Math.Max(oldMovingPoint.DistanceTo(newMovingPoint), fixedPoint.DistanceTo(newFixedPoint));
                 double oneMillimeter = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
-                if (!PipeCenterAlignSettings.TryGetCreateFittingChoice(out bool shouldCreateTee))
+                if (!PipeCenterAlignSettings.TryGetCreateFittingChoice(out bool shouldCreateTee, out PipeCenterAlignConnectionMode connectionMode))
                 {
                     return Result.Cancelled;
                 }
 
+                if (connectionMode == PipeCenterAlignConnectionMode.Vertical45)
+                {
+                    newFixedPoint = fixedPoint;
+                    newMovingPoint = targetPoint;
+                    moveDistance = oldMovingPoint.DistanceTo(targetPoint);
+                }
+
                 double minimumLength = UnitUtils.ConvertToInternalUnits(10.0, UnitTypeId.Millimeters);
-                if (moveDistance >= oneMillimeter && targetPoint.DistanceTo(fixedPoint) < minimumLength)
+                if (connectionMode != PipeCenterAlignConnectionMode.Vertical45 &&
+                    moveDistance >= oneMillimeter &&
+                    newMovingPoint.DistanceTo(newFixedPoint) < minimumLength)
                 {
                     TaskDialog.Show("支管中心對齊", "調整後支管長度過短，已取消操作。");
                     return Result.Cancelled;
@@ -100,7 +135,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     return Result.Succeeded;
                 }
 
-                if (false && shouldCreateTee && !CanSplitMainPipe(mainLine, targetPoint, out string splitFailReason))
+                if (shouldCreateTee &&
+                    RequiresMainPipeSplit(connectionMode, mainPipe, branchPipe) &&
+                    !CanSplitMainPipe(mainLine, targetPoint, out string splitFailReason))
                 {
                     TaskDialog.Show("支管中心對齊", splitFailReason);
                     return Result.Cancelled;
@@ -108,29 +145,74 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                 ElementId fittingId = ElementId.InvalidElementId;
                 ElementId splitPipeId = ElementId.InvalidElementId;
+                ElementId vertical45PipeId = ElementId.InvalidElementId;
+                bool vertical45Created = false;
 
-                using (Transaction tx = new Transaction(doc, shouldCreateTee ? "支管中心對齊並建立三通" : "支管中心對齊"))
+                using (Transaction tx = new Transaction(doc, GetTransactionName(shouldCreateTee, connectionMode)))
                 {
                     tx.Start();
 
-                    if (moveDistance >= oneMillimeter)
+                    if (connectionMode == PipeCenterAlignConnectionMode.Vertical45)
                     {
+                        if (!TryCreateVertical45Alignment(
+                            doc,
+                            mainPipe,
+                            branchPipe,
+                            movingEndIndex,
+                            newFixedPoint,
+                            targetPoint,
+                            minimumLength,
+                            out vertical45PipeId,
+                            out fittingId,
+                            out string verticalFailReason))
+                        {
+                            tx.RollBack();
+                            TaskDialog.Show("支管中心對齊", verticalFailReason);
+                            return Result.Cancelled;
+                        }
+
+                        vertical45Created = true;
+                    }
+                    else if (moveDistance >= oneMillimeter)
+                    {
+                        if (geometryMode == PipeCenterAlignGeometryMode.WholePipeElevation &&
+                            Math.Abs(verticalShift) >= oneMillimeter)
+                        {
+                            ICollection<ElementId> branchGroupIds = CollectConnectedBranchGroupIds(branchPipe, mainPipe.Id);
+                            if (branchGroupIds.Count > 0)
+                            {
+                                List<ElementId> verticalPipeIds = branchGroupIds
+                                    .Where(id => IsVerticalPipe(doc.GetElement(id) as Pipe))
+                                    .ToList();
+                                List<ElementId> movableGroupIds = branchGroupIds
+                                    .Where(id => !verticalPipeIds.Any(verticalId => verticalId == id))
+                                    .ToList();
+
+                                if (movableGroupIds.Count > 0)
+                                {
+                                    ElementTransformUtils.MoveElements(doc, movableGroupIds, XYZ.BasisZ.Multiply(verticalShift));
+                                    doc.Regenerate();
+                                }
+                            }
+                        }
+
                         LocationCurve locationCurve = branchPipe.Location as LocationCurve;
                         Line newLine = movingEndIndex == 0
-                            ? Line.CreateBound(targetPoint, fixedPoint)
-                            : Line.CreateBound(fixedPoint, targetPoint);
+                            ? Line.CreateBound(newMovingPoint, newFixedPoint)
+                            : Line.CreateBound(newFixedPoint, newMovingPoint);
 
                         locationCurve.Curve = newLine;
                         doc.Regenerate();
                     }
 
                     if (shouldCreateTee &&
-                        !TryCreateFittingAtIntersection(doc, mainPipe, branchPipe, targetPoint, out splitPipeId, out fittingId, out string teeFailReason))
+                        connectionMode != PipeCenterAlignConnectionMode.Vertical45 &&
+                        !TryCreateFittingAtIntersection(doc, mainPipe, branchPipe, targetPoint, connectionMode, out splitPipeId, out fittingId, out string teeFailReason))
                     {
                         tx.Commit();
                         TaskDialog.Show(
                             "支管中心對齊",
-                            teeFailReason + "\n\n已取消本次操作，模型未保留半完成的切管或接頭。");
+                            teeFailReason + "\n\n已完成支管端點對齊，但接頭建立失敗；未保留半完成的切管或接頭。");
                         return Result.Succeeded;
                     }
 
@@ -138,7 +220,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
 
                 double movedMm = UnitUtils.ConvertFromInternalUnits(moveDistance, UnitTypeId.Millimeters);
-                string teeSummary = shouldCreateTee
+                string teeSummary = vertical45Created
+                    ? fittingId == ElementId.InvalidElementId
+                        ? $"\n45°斜管 ID：{vertical45PipeId.GetIdValue()}\n未建立接頭：請檢查幹管 Routing Preferences 是否支援 Takeoff/Wye"
+                        : $"\n45°斜管 ID：{vertical45PipeId.GetIdValue()}\n接頭 ID：{fittingId.GetIdValue()}"
+                    : shouldCreateTee
                     ? splitPipeId == ElementId.InvalidElementId
                         ? $"\n接頭 ID：{fittingId.GetIdValue()}"
                         : $"\n新幹管段 ID：{splitPipeId.GetIdValue()}\n三通 ID：{fittingId.GetIdValue()}"
@@ -255,7 +341,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return true;
         }
 
-        private static Line GetPipeLine(Pipe pipe)
+        internal static Line GetPipeLine(Pipe pipe)
         {
             LocationCurve locationCurve = pipe?.Location as LocationCurve;
             return locationCurve?.Curve as Line;
@@ -266,14 +352,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return (line.GetEndPoint(1) - line.GetEndPoint(0)).Normalize();
         }
 
-        private static bool IsPlanMainCandidate(Line line)
+        internal static bool IsPlanMainCandidate(Line line)
         {
             XYZ delta = line.GetEndPoint(1) - line.GetEndPoint(0);
             double xyLength = Math.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
             return xyLength >= UnitUtils.ConvertToInternalUnits(10.0, UnitTypeId.Millimeters);
         }
 
-        private static bool AreParallelInPlan(Line first, Line second)
+        internal static bool AreParallelInPlan(Line first, Line second)
         {
             XYZ firstDirection = GetPlanDirection(first);
             XYZ secondDirection = GetPlanDirection(second);
@@ -285,16 +371,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return Math.Abs(Cross2D(firstDirection, secondDirection)) < ParallelTolerance;
         }
 
-        private static int GetNearestEndIndexToLineInPlan(Line branchLine, Line mainLine)
+        internal static int GetNearestEndIndexToLineInPlan(Line branchLine, Line mainLine)
         {
             double distance0 = DistancePointToSegmentInPlan(branchLine.GetEndPoint(0), mainLine);
             double distance1 = DistancePointToSegmentInPlan(branchLine.GetEndPoint(1), mainLine);
             return distance0 <= distance1 ? 0 : 1;
         }
 
-        private static bool TryGetAlignedEndpoint(Line mainLine, XYZ fixedPoint, XYZ movingPoint, out XYZ targetPoint, out string failReason)
+        internal static bool TryGetAlignedEndpoint(Line mainLine, XYZ fixedPoint, XYZ movingPoint, out XYZ targetPoint, out XYZ slopePoint, out string failReason)
         {
             targetPoint = null;
+            slopePoint = null;
             failReason = "無法計算支管中心線與幹管中心線的平面交點。";
 
             XYZ branchVector = movingPoint - fixedPoint;
@@ -339,6 +426,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             double targetZ = mainStart.Z + (mainEnd.Z - mainStart.Z) * mainRatio;
             XYZ planHit = mainStart + (mainEnd - mainStart).Multiply(mainRatio);
             targetPoint = new XYZ(planHit.X, planHit.Y, targetZ);
+            XYZ slopeHit = fixedPoint + branchVector.Multiply(branchRatio);
+            slopePoint = new XYZ(planHit.X, planHit.Y, slopeHit.Z);
             return true;
         }
 
@@ -385,7 +474,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return ToPlanVector(point - closest).GetLength();
         }
 
-        private static bool CanSplitMainPipe(Line mainLine, XYZ splitPoint, out string failReason)
+        internal static bool CanSplitMainPipe(Line mainLine, XYZ splitPoint, out string failReason)
         {
             failReason = null;
 
@@ -402,11 +491,160 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return true;
         }
 
-        private static bool TryCreateFittingAtIntersection(
+        private static string GetTransactionName(bool shouldCreateFitting, PipeCenterAlignConnectionMode connectionMode)
+        {
+            if (connectionMode == PipeCenterAlignConnectionMode.Vertical45)
+            {
+                return "支管 45°垂直翻彎對齊";
+            }
+
+            return shouldCreateFitting ? "支管中心對齊並建立三通" : "支管中心對齊";
+        }
+
+        internal static bool RequiresMainPipeSplit(PipeCenterAlignConnectionMode connectionMode, Pipe mainPipe, Pipe branchPipe)
+        {
+            if (connectionMode == PipeCenterAlignConnectionMode.Tee)
+            {
+                return true;
+            }
+
+            if (connectionMode == PipeCenterAlignConnectionMode.Takeoff)
+            {
+                return false;
+            }
+
+            if (connectionMode == PipeCenterAlignConnectionMode.Vertical45)
+            {
+                return false;
+            }
+
+            return IsTeeAngleCandidate(mainPipe, branchPipe);
+        }
+
+        private static bool TryCreateVertical45Alignment(
+            Document doc,
+            Pipe mainPipe,
+            Pipe branchPipe,
+            int movingEndIndex,
+            XYZ fixedPoint,
+            XYZ targetPoint,
+            double minimumLength,
+            out ElementId diagonalPipeId,
+            out ElementId fittingId,
+            out string failReason)
+        {
+            diagonalPipeId = ElementId.InvalidElementId;
+            fittingId = ElementId.InvalidElementId;
+            failReason = null;
+
+            XYZ planDirection = GetPlanDirection(fixedPoint, targetPoint);
+            if (planDirection == null)
+            {
+                failReason = "固定端與幹管交點在平面上距離過短，無法建立 45°垂直翻彎。";
+                return false;
+            }
+
+            double deltaZ = targetPoint.Z - fixedPoint.Z;
+            double verticalTolerance = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
+            if (Math.Abs(deltaZ) <= verticalTolerance)
+            {
+                failReason = "支管固定端與幹管交點高程幾乎相同，不需要建立 45°垂直翻彎。";
+                return false;
+            }
+
+            double angleRadians = 45.0 * Math.PI / 180.0;
+            double diagonalRun = Math.Abs(deltaZ) / Math.Tan(angleRadians);
+            double totalRun = ToPlanVector(targetPoint - fixedPoint).GetLength();
+            double requiredRun = diagonalRun + minimumLength;
+            if (totalRun < requiredRun)
+            {
+                double totalRunMm = UnitUtils.ConvertFromInternalUnits(totalRun, UnitTypeId.Millimeters);
+                double requiredRunMm = UnitUtils.ConvertFromInternalUnits(requiredRun, UnitTypeId.Millimeters);
+                failReason =
+                    "支管到幹管交點的平面距離不足，無法放入 45°垂直翻彎。\n\n" +
+                    $"目前可用距離：約 {totalRunMm:F1} mm\n" +
+                    $"至少需要：約 {requiredRunMm:F1} mm";
+                return false;
+            }
+
+            XYZ bendPlanPoint = targetPoint - planDirection.Multiply(diagonalRun);
+            XYZ bendPoint = new XYZ(bendPlanPoint.X, bendPlanPoint.Y, fixedPoint.Z);
+            if (bendPoint.DistanceTo(fixedPoint) < minimumLength ||
+                bendPoint.DistanceTo(targetPoint) < minimumLength)
+            {
+                failReason = "45°翻彎後的直管或斜管長度過短，已取消操作。";
+                return false;
+            }
+
+            ElementId systemTypeId = GetSystemTypeId(branchPipe);
+            ElementId pipeTypeId = branchPipe.GetTypeId();
+            ElementId levelId = GetReferenceLevelId(branchPipe);
+            if (systemTypeId == ElementId.InvalidElementId ||
+                pipeTypeId == ElementId.InvalidElementId ||
+                levelId == ElementId.InvalidElementId)
+            {
+                failReason = "無法取得支管的系統、管型或參考樓層。";
+                return false;
+            }
+
+            Pipe diagonalPipe;
+            try
+            {
+                LocationCurve locationCurve = branchPipe.Location as LocationCurve;
+                Line firstLine = movingEndIndex == 0
+                    ? Line.CreateBound(bendPoint, fixedPoint)
+                    : Line.CreateBound(fixedPoint, bendPoint);
+                locationCurve.Curve = firstLine;
+
+                diagonalPipe = Pipe.Create(
+                    doc,
+                    systemTypeId,
+                    pipeTypeId,
+                    levelId,
+                    bendPoint,
+                    targetPoint);
+
+                double diameter = GetPipeDiameter(branchPipe);
+                ApplyPipeDiameter(diagonalPipe, diameter);
+                doc.Regenerate();
+            }
+            catch (Exception ex)
+            {
+                failReason = $"建立 45°垂直翻彎管段失敗：{ex.Message}";
+                return false;
+            }
+
+            diagonalPipeId = diagonalPipe.Id;
+
+            Connector branchAtBend = GetOpenEndConnectorNear(branchPipe, bendPoint);
+            Connector diagonalAtBend = GetOpenEndConnectorNear(diagonalPipe, bendPoint);
+            if (!TryCreateElbow(doc, branchAtBend, diagonalAtBend, out string elbowFailReason))
+            {
+                failReason =
+                    "無法在支管與 45°斜管之間建立彎頭。\n\n" +
+                    elbowFailReason;
+                return false;
+            }
+
+            Connector diagonalAtMain = GetOpenEndConnectorNear(diagonalPipe, targetPoint);
+            if (!TryCreateTakeoffFitting(doc, mainPipe, diagonalPipe, diagonalAtMain, out fittingId, out string takeoffFailReason))
+            {
+                fittingId = ElementId.InvalidElementId;
+                failReason =
+                    "已建立 45°垂直翻彎，但無法建立幹管 Takeoff/Wye 接頭。\n\n" +
+                    takeoffFailReason;
+                return true;
+            }
+
+            return true;
+        }
+
+        internal static bool TryCreateFittingAtIntersection(
             Document doc,
             Pipe mainPipe,
             Pipe branchPipe,
             XYZ intersectionPoint,
+            PipeCenterAlignConnectionMode connectionMode,
             out ElementId splitPipeId,
             out ElementId fittingId,
             out string failReason)
@@ -414,6 +652,24 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             splitPipeId = ElementId.InvalidElementId;
             fittingId = ElementId.InvalidElementId;
             failReason = null;
+
+            bool teeCandidate = IsTeeAngleCandidate(mainPipe, branchPipe);
+            if (connectionMode == PipeCenterAlignConnectionMode.Takeoff ||
+                (connectionMode == PipeCenterAlignConnectionMode.Auto && !teeCandidate))
+            {
+                Connector branchConnector = GetOpenEndConnectorNear(branchPipe, intersectionPoint);
+                if (TryCreateTakeoffAtIntersection(doc, mainPipe, branchPipe, branchConnector, out fittingId, out failReason))
+                {
+                    return true;
+                }
+
+                if (connectionMode == PipeCenterAlignConnectionMode.Takeoff)
+                {
+                    return false;
+                }
+
+                failReason += "\n\n自動模式已改嘗試三通。";
+            }
 
             using (SubTransaction teeTx = new SubTransaction(doc))
             {
@@ -432,15 +688,28 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     doc.Regenerate();
 
                     Pipe splitPipe = doc.GetElement(splitPipeId) as Pipe;
-                    if (!TryGetThreeConnectorsClosest(
-                        mainPipe,
-                        splitPipe,
-                        branchPipe,
-                        out Connector mainConnectorA,
-                        out Connector mainConnectorB,
-                        out Connector branchConnector,
-                        out failReason))
+                    Connector mainConnectorA = GetOpenEndConnectorNear(mainPipe, intersectionPoint) ?? GetEndConnectorNear(mainPipe, intersectionPoint);
+                    Connector mainConnectorB = GetOpenEndConnectorNear(splitPipe, intersectionPoint) ?? GetEndConnectorNear(splitPipe, intersectionPoint);
+                    Connector branchConnector = GetOpenEndConnectorNear(branchPipe, intersectionPoint) ?? GetEndConnectorNear(branchPipe, intersectionPoint);
+                    TeeConnectorCandidate bestTeeCandidate = BuildTeeConnectorCandidates(mainPipe, splitPipe, branchPipe, intersectionPoint)
+                        .FirstOrDefault();
+                    if (bestTeeCandidate != null)
                     {
+                        mainConnectorA = bestTeeCandidate.MainConnectorA;
+                        mainConnectorB = bestTeeCandidate.MainConnectorB;
+                        branchConnector = bestTeeCandidate.BranchConnector;
+                    }
+
+                    if (mainConnectorA == null || mainConnectorB == null || branchConnector == null)
+                    {
+                        failReason = "找不到可用的 Tee Connector。\n\n請確認支管端點已對齊幹管中心，且接入端不是被其他管件完全佔用。";
+                        teeTx.RollBack();
+                        return false;
+                    }
+
+                    if (HasExternalConnection(branchConnector, branchPipe.Id))
+                    {
+                        failReason = "支管接入端已連接其他管件，無法再直接建立 Tee。\n\n請選取靠近幹管且端點可接入的水平支管段，或先使用只對齊後由 Revit 配件鎖點連動調整。";
                         teeTx.RollBack();
                         return false;
                     }
@@ -453,10 +722,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         out FamilyInstance connectedFitting,
                         out string connectFailReason))
                     {
-                        fittingId = connectedFitting.Id;
                         doc.Regenerate();
-                        teeTx.Commit();
-                        return true;
+                        if (IsTeeConnectedToExpectedPipes(connectedFitting, mainPipe.Id, splitPipeId, branchPipe.Id))
+                        {
+                            fittingId = connectedFitting.Id;
+                            teeTx.Commit();
+                            return true;
+                        }
+
+                        doc.Delete(connectedFitting.Id);
+                        doc.Regenerate();
+                        connectFailReason = "Connector.ConnectTo 產生了管件，但未正確連接到兩段幹管與支管。";
                     }
 
                     if (!TryCreateValidatedTee(
@@ -495,6 +771,44 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         "Revit 依三段管最近 Connector 建立可變角度三通失敗。\n\n" +
                         $"Tee 訊息：{ex.Message}";
                     failReason = teeFailure;
+                    return false;
+                }
+            }
+        }
+
+        private static bool TryCreateTakeoffAtIntersection(
+            Document doc,
+            Pipe mainPipe,
+            Pipe branchPipe,
+            Connector branchConnector,
+            out ElementId fittingId,
+            out string failReason)
+        {
+            fittingId = ElementId.InvalidElementId;
+            failReason = null;
+
+            using (SubTransaction takeoffTx = new SubTransaction(doc))
+            {
+                try
+                {
+                    takeoffTx.Start();
+                    if (!TryCreateTakeoffFitting(doc, mainPipe, branchPipe, branchConnector, out fittingId, out failReason))
+                    {
+                        takeoffTx.RollBack();
+                        return false;
+                    }
+
+                    takeoffTx.Commit();
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    if (takeoffTx.HasStarted())
+                    {
+                        takeoffTx.RollBack();
+                    }
+
+                    failReason = $"建立斜接 Takeoff/Wye 失敗：{ex.Message}";
                     return false;
                 }
             }
@@ -562,6 +876,88 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     "45 度支管通常需要管路類型 Routing Preference 設定 Tap、Takeoff 或 Wye 類接頭，而不是一般 90 度 Tee。\n\n" +
                     $"Revit 訊息：{ex.Message}";
                 return false;
+            }
+        }
+
+        private static bool TryCreateElbow(Document doc, Connector first, Connector second, out string failReason)
+        {
+            failReason = null;
+            if (first == null || second == null)
+            {
+                failReason = "找不到建立彎頭所需的開放端點 Connector。";
+                return false;
+            }
+
+            List<ConnectorPairCandidate> connectorCandidates = BuildConnectorPairCandidates(first.Owner, second.Owner);
+            foreach (ConnectorPairCandidate connectorCandidate in connectorCandidates.Take(12))
+            {
+                if (!connectorCandidate.IsValidTurnAngle)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    FamilyInstance candidateElbow = doc.Create.NewElbowFitting(connectorCandidate.First, connectorCandidate.Second);
+                    doc.Regenerate();
+                    if (candidateElbow != null && candidateElbow.IsValidObject)
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            try
+            {
+                FamilyInstance elbow = doc.Create.NewElbowFitting(first, second);
+                doc.Regenerate();
+                if (elbow == null || !elbow.IsValidObject)
+                {
+                    failReason = "Revit 未能建立彎頭。請確認管路類型 Routing Preference 已設定相容彎頭。";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                failReason = $"Revit 彎頭訊息：{ex.Message}";
+                return false;
+            }
+        }
+
+        private static ElementId GetSystemTypeId(Pipe pipe)
+        {
+            Parameter parameter = pipe.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM);
+            ElementId systemTypeId = parameter?.AsElementId() ?? ElementId.InvalidElementId;
+            return systemTypeId != ElementId.InvalidElementId
+                ? systemTypeId
+                : pipe?.MEPSystem?.GetTypeId() ?? ElementId.InvalidElementId;
+        }
+
+        private static ElementId GetReferenceLevelId(Pipe pipe)
+        {
+            Parameter parameter = pipe.get_Parameter(BuiltInParameter.RBS_START_LEVEL_PARAM);
+            return parameter?.AsElementId() ?? ElementId.InvalidElementId;
+        }
+
+        private static double GetPipeDiameter(Pipe pipe)
+        {
+            return pipe
+                .get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?
+                .AsDouble() ?? 0.0;
+        }
+
+        private static void ApplyPipeDiameter(Pipe pipe, double diameter)
+        {
+            Parameter parameter = pipe
+                .get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM);
+            if (parameter != null && !parameter.IsReadOnly && diameter > 0.0)
+            {
+                parameter.Set(diameter);
             }
         }
 
@@ -757,6 +1153,253 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                    categoryId == (long)BuiltInCategory.OST_PipeAccessory;
         }
 
+        private static List<ConnectorPairCandidate> BuildConnectorPairCandidates(Element firstElement, Element secondElement)
+        {
+            List<Connector> firstConnectors = GetElementConnectors(firstElement)
+                .Where(connector => connector.ConnectorType == ConnectorType.End)
+                .ToList();
+            List<Connector> secondConnectors = GetElementConnectors(secondElement)
+                .Where(connector => connector.ConnectorType == ConnectorType.End)
+                .ToList();
+
+            List<ConnectorPairCandidate> candidates = new List<ConnectorPairCandidate>();
+            foreach (Connector firstConnector in firstConnectors)
+            {
+                foreach (Connector secondConnector in secondConnectors)
+                {
+                    if (!AreConnectorsCompatible(firstConnector, secondConnector))
+                    {
+                        continue;
+                    }
+
+                    candidates.Add(new ConnectorPairCandidate(firstConnector, secondConnector));
+                }
+            }
+
+            return candidates
+                .OrderBy(candidate => candidate.SortKey)
+                .ToList();
+        }
+
+        private static List<TeeConnectorCandidate> BuildTeeConnectorCandidates(Pipe mainPipe, Pipe splitPipe, Pipe branchPipe, XYZ intersectionPoint)
+        {
+            List<Connector> mainConnectors = GetEndConnectors(mainPipe);
+            List<Connector> splitConnectors = GetEndConnectors(splitPipe);
+            List<Connector> branchConnectors = GetEndConnectors(branchPipe);
+            List<TeeConnectorCandidate> candidates = new List<TeeConnectorCandidate>();
+
+            foreach (Connector mainConnector in mainConnectors)
+            {
+                foreach (Connector splitConnector in splitConnectors)
+                {
+                    if (!AreConnectorsCompatible(mainConnector, splitConnector))
+                    {
+                        continue;
+                    }
+
+                    foreach (Connector branchConnector in branchConnectors)
+                    {
+                        if (!AreConnectorsCompatible(mainConnector, branchConnector) ||
+                            !AreConnectorsCompatible(splitConnector, branchConnector) ||
+                            HasExternalConnection(branchConnector, branchPipe.Id))
+                        {
+                            continue;
+                        }
+
+                        candidates.Add(new TeeConnectorCandidate(
+                            mainConnector,
+                            splitConnector,
+                            branchConnector,
+                            intersectionPoint));
+                    }
+                }
+            }
+
+            return candidates
+                .OrderBy(candidate => candidate.SortKey)
+                .ToList();
+        }
+
+        private static bool AreConnectorsCompatible(Connector firstConnector, Connector secondConnector)
+        {
+            if (firstConnector == null || secondConnector == null)
+            {
+                return false;
+            }
+
+            if (firstConnector.Domain != secondConnector.Domain)
+            {
+                return false;
+            }
+
+            try
+            {
+                return firstConnector.Shape == secondConnector.Shape;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private static int GetConnectorConnectedCount(Connector connector)
+        {
+            if (connector == null)
+            {
+                return 1;
+            }
+
+            try
+            {
+                return connector.IsConnected ? 1 : 0;
+            }
+            catch
+            {
+                return 1;
+            }
+        }
+
+        private static double GetConnectorRawAngle(Connector firstConnector, Connector secondConnector)
+        {
+            XYZ firstDirection = GetConnectorDirection(firstConnector);
+            XYZ secondDirection = GetConnectorDirection(secondConnector);
+            if (firstDirection == null || secondDirection == null)
+            {
+                return double.NaN;
+            }
+
+            double radians = firstDirection.AngleTo(secondDirection);
+            return radians * 180.0 / Math.PI;
+        }
+
+        private static double GetConnectorTurnAngle(Connector firstConnector, Connector secondConnector)
+        {
+            double rawAngle = GetConnectorRawAngle(firstConnector, secondConnector);
+            if (double.IsNaN(rawAngle))
+            {
+                return double.NaN;
+            }
+
+            return Math.Min(rawAngle, Math.Abs(180.0 - rawAngle));
+        }
+
+        private static bool IsValidElbowTurnAngle(double turnAngle)
+        {
+            return !double.IsNaN(turnAngle) &&
+                   turnAngle > 1.0 &&
+                   turnAngle <= 95.0;
+        }
+
+        private sealed class ConnectorPairCandidate
+        {
+            public ConnectorPairCandidate(Connector firstConnector, Connector secondConnector)
+            {
+                First = firstConnector;
+                Second = secondConnector;
+                RawAngle = GetConnectorRawAngle(firstConnector, secondConnector);
+                TurnAngle = GetConnectorTurnAngle(firstConnector, secondConnector);
+                Distance = firstConnector?.Origin.DistanceTo(secondConnector?.Origin) ?? double.MaxValue;
+                ConnectedCount = GetConnectorConnectedCount(firstConnector) + GetConnectorConnectedCount(secondConnector);
+                IsValidTurnAngle = IsValidElbowTurnAngle(TurnAngle);
+            }
+
+            public Connector First { get; }
+            public Connector Second { get; }
+            public double RawAngle { get; }
+            public double TurnAngle { get; }
+            public double Distance { get; }
+            public int ConnectedCount { get; }
+            public bool IsValidTurnAngle { get; }
+            public double SortKey => (IsValidTurnAngle ? 0.0 : 1000000.0) + ConnectedCount * 1000.0 + Distance;
+        }
+
+        private sealed class TeeConnectorCandidate
+        {
+            public TeeConnectorCandidate(Connector mainConnectorA, Connector mainConnectorB, Connector branchConnector, XYZ intersectionPoint)
+            {
+                MainConnectorA = mainConnectorA;
+                MainConnectorB = mainConnectorB;
+                BranchConnector = branchConnector;
+
+                double mainRawAngle = GetConnectorRawAngle(mainConnectorA, mainConnectorB);
+                double branchTurnA = GetConnectorTurnAngle(mainConnectorA, branchConnector);
+                double branchTurnB = GetConnectorTurnAngle(mainConnectorB, branchConnector);
+                double branchTurn = new[] { branchTurnA, branchTurnB }
+                    .Where(value => !double.IsNaN(value))
+                    .DefaultIfEmpty(double.NaN)
+                    .Min();
+
+                bool branchAngleValid = IsValidElbowTurnAngle(branchTurn);
+                double mainAnglePenalty = double.IsNaN(mainRawAngle)
+                    ? 180.0
+                    : Math.Abs(180.0 - mainRawAngle);
+                double distancePenalty =
+                    (mainConnectorA?.Origin.DistanceTo(intersectionPoint) ?? double.MaxValue / 4.0) +
+                    (mainConnectorB?.Origin.DistanceTo(intersectionPoint) ?? double.MaxValue / 4.0) +
+                    (branchConnector?.Origin.DistanceTo(intersectionPoint) ?? double.MaxValue / 4.0);
+                int connectedCount =
+                    GetConnectorConnectedCount(mainConnectorA) +
+                    GetConnectorConnectedCount(mainConnectorB) +
+                    GetConnectorConnectedCount(branchConnector);
+
+                SortKey =
+                    (branchAngleValid ? 0.0 : 1000000.0) +
+                    mainAnglePenalty * 1000.0 +
+                    connectedCount * 100.0 +
+                    distancePenalty;
+            }
+
+            public Connector MainConnectorA { get; }
+            public Connector MainConnectorB { get; }
+            public Connector BranchConnector { get; }
+            public double SortKey { get; }
+        }
+
+        private static List<Connector[]> BuildTeeConnectorOrders(Connector mainConnectorA, Connector mainConnectorB, Connector branchConnector)
+        {
+            List<Connector[]> attempts = new List<Connector[]>
+            {
+                new[] { mainConnectorA, mainConnectorB, branchConnector },
+                new[] { mainConnectorB, mainConnectorA, branchConnector },
+                new[] { mainConnectorA, branchConnector, mainConnectorB },
+                new[] { mainConnectorB, branchConnector, mainConnectorA },
+                new[] { branchConnector, mainConnectorA, mainConnectorB },
+                new[] { branchConnector, mainConnectorB, mainConnectorA }
+            };
+
+            return attempts
+                .OrderBy(GetTeeConnectorOrderScore)
+                .ToList();
+        }
+
+        private static double GetTeeConnectorOrderScore(Connector[] attempt)
+        {
+            if (attempt == null || attempt.Length < 3)
+            {
+                return double.MaxValue;
+            }
+
+            double firstSecondRawAngle = GetConnectorRawAngle(attempt[0], attempt[1]);
+            double mainPenalty = double.IsNaN(firstSecondRawAngle)
+                ? 180.0
+                : Math.Abs(180.0 - firstSecondRawAngle);
+            double branchTurnA = GetConnectorTurnAngle(attempt[0], attempt[2]);
+            double branchTurnB = GetConnectorTurnAngle(attempt[1], attempt[2]);
+            double branchTurn = new[] { branchTurnA, branchTurnB }
+                .Where(value => !double.IsNaN(value))
+                .DefaultIfEmpty(double.NaN)
+                .Min();
+            bool branchAngleValid = IsValidElbowTurnAngle(branchTurn);
+            double distancePenalty =
+                (attempt[0]?.Origin.DistanceTo(attempt[1]?.Origin) ?? 1000.0) +
+                (attempt[2]?.Origin.DistanceTo(attempt[0]?.Origin) ?? 1000.0) +
+                (attempt[2]?.Origin.DistanceTo(attempt[1]?.Origin) ?? 1000.0);
+
+            return (branchAngleValid ? 0.0 : 1000000.0) +
+                   mainPenalty * 1000.0 +
+                   distancePenalty;
+        }
+
         private static bool TryCreateValidatedTee(
             Document doc,
             Connector mainConnectorA,
@@ -772,15 +1415,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             failReason = null;
             List<string> attemptMessages = new List<string>();
 
-            Connector[][] attempts =
-            {
-                new[] { mainConnectorA, mainConnectorB, branchConnector },
-                new[] { mainConnectorB, mainConnectorA, branchConnector },
-                new[] { mainConnectorA, branchConnector, mainConnectorB },
-                new[] { mainConnectorB, branchConnector, mainConnectorA },
-                new[] { branchConnector, mainConnectorA, mainConnectorB },
-                new[] { branchConnector, mainConnectorB, mainConnectorA }
-            };
+            List<Connector[]> attempts = BuildTeeConnectorOrders(mainConnectorA, mainConnectorB, branchConnector);
 
             foreach (Connector[] attempt in attempts)
             {
@@ -794,13 +1429,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                         if (candidate != null)
                         {
-                            subTx.Commit();
-                            tee = candidate;
-                            return true;
+                            if (IsTeeConnectedToExpectedPipes(candidate, mainPipeId, splitPipeId, branchPipeId))
+                            {
+                                subTx.Commit();
+                                tee = candidate;
+                                return true;
+                            }
+
+                            subTx.RollBack();
+                            attemptMessages.Add("Revit 已建立三通，但未正確連接到兩段幹管與支管。");
+                            continue;
                         }
 
                         subTx.RollBack();
-                        attemptMessages.Add("Revit 已建立接頭，但未正確連接到兩段幹管與支管。");
+                        attemptMessages.Add("Revit 未建立三通。");
                     }
                     catch (Exception ex)
                     {
@@ -902,6 +1544,33 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return nearest;
         }
 
+        private static Connector GetEndConnectorNear(Pipe pipe, XYZ point)
+        {
+            if (pipe?.ConnectorManager?.Connectors == null || point == null)
+            {
+                return null;
+            }
+
+            Connector nearest = null;
+            double nearestDistance = double.MaxValue;
+            foreach (Connector connector in pipe.ConnectorManager.Connectors)
+            {
+                if (connector.ConnectorType != ConnectorType.End)
+                {
+                    continue;
+                }
+
+                double distance = connector.Origin.DistanceTo(point);
+                if (distance < nearestDistance)
+                {
+                    nearest = connector;
+                    nearestDistance = distance;
+                }
+            }
+
+            return nearest;
+        }
+
         private static bool IsEndpointConnected(Pipe pipe, XYZ endpoint)
         {
             if (pipe?.ConnectorManager?.Connectors == null)
@@ -925,6 +1594,104 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
 
             return false;
+        }
+
+        internal static ICollection<ElementId> CollectConnectedBranchGroupIds(Pipe branchPipe, ElementId mainPipeId)
+        {
+            var result = new HashSet<long>();
+            var queue = new Queue<Element>();
+            Document doc = branchPipe?.Document;
+            if (branchPipe == null || doc == null)
+            {
+                return new List<ElementId>();
+            }
+
+            queue.Enqueue(branchPipe);
+            int guard = 0;
+            while (queue.Count > 0 && guard++ < 200)
+            {
+                Element current = queue.Dequeue();
+                if (current == null || current.Id == mainPipeId)
+                {
+                    continue;
+                }
+
+                if (!IsMovableBranchElement(current))
+                {
+                    continue;
+                }
+
+                long idValue = current.Id.GetIdValue();
+                if (!result.Add(idValue))
+                {
+                    continue;
+                }
+
+                foreach (Connector connector in GetElementConnectors(current))
+                {
+                    foreach (Connector connected in connector.AllRefs)
+                    {
+                        Element owner = connected?.Owner;
+                        if (owner == null || owner.Id == current.Id || owner.Id == mainPipeId)
+                        {
+                            continue;
+                        }
+
+                        if (IsMovableBranchElement(owner) && !result.Contains(owner.Id.GetIdValue()))
+                        {
+                            queue.Enqueue(owner);
+                        }
+                    }
+                }
+            }
+
+            return result
+                .Select(RevitApiCompatibility.CreateElementId)
+                .ToList();
+        }
+
+        internal static bool IsVerticalPipe(Pipe pipe)
+        {
+            LocationCurve locationCurve = pipe?.Location as LocationCurve;
+            Line line = locationCurve?.Curve as Line;
+            if (line == null)
+            {
+                return false;
+            }
+
+            XYZ direction = (line.GetEndPoint(1) - line.GetEndPoint(0)).Normalize();
+            return Math.Abs(direction.Z) >= 0.98;
+        }
+
+        private static bool IsMovableBranchElement(Element element)
+        {
+            if (element is Pipe)
+            {
+                return true;
+            }
+
+            FamilyInstance family = element as FamilyInstance;
+            if (family?.Category == null)
+            {
+                return false;
+            }
+
+            long categoryId = family.Category.Id.GetIdValue();
+            return categoryId == (long)BuiltInCategory.OST_PipeFitting ||
+                   categoryId == (long)BuiltInCategory.OST_PipeAccessory;
+        }
+
+        private static IEnumerable<Connector> GetElementConnectors(Element element)
+        {
+            if (element is Pipe pipe)
+            {
+                return GetEndConnectors(pipe);
+            }
+
+            FamilyInstance family = element as FamilyInstance;
+            return family?.MEPModel?.ConnectorManager?.Connectors != null
+                ? family.MEPModel.ConnectorManager.Connectors.Cast<Connector>()
+                : Enumerable.Empty<Connector>();
         }
 
         private static bool HasExternalConnection(Connector connector, ElementId ownerId)
@@ -994,6 +1761,351 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     }
 
     [Transaction(TransactionMode.Manual)]
+    public class CmdPipeBatchCenterAlign : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            UIDocument uiDoc = commandData.Application.ActiveUIDocument;
+            Document doc = uiDoc.Document;
+
+            try
+            {
+                Reference mainReference = uiDoc.Selection.PickObject(
+                    ObjectType.Element,
+                    new BatchPipeSelectionFilter(),
+                    "選取幹管");
+                Pipe mainPipe = doc.GetElement(mainReference) as Pipe;
+                if (mainPipe == null)
+                {
+                    return Result.Cancelled;
+                }
+
+                IList<Reference> branchReferences = uiDoc.Selection.PickObjects(
+                    ObjectType.Element,
+                    new BatchPipeSelectionFilter(mainPipe.Id),
+                    "選取要批次對齊的支管");
+                List<Pipe> branchPipes = branchReferences
+                    .Select(reference => doc.GetElement(reference) as Pipe)
+                    .Where(pipe => pipe != null && pipe.Id != mainPipe.Id)
+                    .GroupBy(pipe => pipe.Id.GetIdValue())
+                    .Select(group => group.First())
+                    .ToList();
+
+                if (!branchPipes.Any())
+                {
+                    TaskDialog.Show("批次支管對齊", "未選取支管。");
+                    return Result.Cancelled;
+                }
+
+                PipeCenterAlignGeometryMode geometryMode = PipeCenterAlignSettings.GetGeometryMode();
+                if (!PipeCenterAlignSettings.TryGetCreateFittingChoice(out bool shouldCreateFitting, out PipeCenterAlignConnectionMode connectionMode))
+                {
+                    return Result.Cancelled;
+                }
+
+                if (connectionMode == PipeCenterAlignConnectionMode.Vertical45)
+                {
+                    TaskDialog.Show("批次支管對齊", "批次模式目前不支援 45° 垂直接入，請改用 Auto / Tee / Align only。");
+                    return Result.Cancelled;
+                }
+
+                int successCount = 0;
+                int fittingFailCount = 0;
+                int failCount = 0;
+                List<string> reportLines = new List<string>();
+                List<string> errorReportLines = new List<string>();
+
+                using (Transaction tx = new Transaction(doc, shouldCreateFitting ? "批次支管對齊與接入" : "批次支管對齊"))
+                {
+                    tx.Start();
+
+                    foreach (Pipe branchPipe in branchPipes)
+                    {
+                        using (SubTransaction subTx = new SubTransaction(doc))
+                        {
+                            subTx.Start();
+                            BatchAlignResult result = TryAlignOneBranch(
+                                doc,
+                                mainPipe,
+                                branchPipe,
+                                geometryMode,
+                                shouldCreateFitting,
+                                connectionMode);
+
+                            if (result.Success)
+                            {
+                                subTx.Commit();
+                                successCount++;
+                                if (result.FittingRequested && !result.FittingCreated)
+                                {
+                                    fittingFailCount++;
+                                }
+                            }
+                            else
+                            {
+                                subTx.RollBack();
+                                failCount++;
+                            }
+
+                            string reportLine = result.GetReportLine();
+                            reportLines.Add(reportLine);
+                            if (!result.Success || (result.FittingRequested && !result.FittingCreated))
+                            {
+                                errorReportLines.Add(reportLine);
+                            }
+                        }
+                    }
+
+                    tx.Commit();
+                }
+
+                bool hasError = errorReportLines.Count > 0;
+                string title = hasError ? "批次支管對齊 - 有錯誤" : "批次支管對齊";
+                List<string> displayLines = hasError ? errorReportLines : reportLines;
+                string detail = displayLines.Any()
+                    ? string.Join("\n", displayLines.Take(18)) +
+                      (displayLines.Count > 18 ? $"\n...其餘 {displayLines.Count - 18} 筆略" : string.Empty)
+                    : "所有選取支管皆已處理。";
+
+                TaskDialog.Show(
+                    title,
+                    $"完成批次支管對齊。\n\n" +
+                    $"成功：{successCount}\n" +
+                    $"接頭失敗但已對齊：{fittingFailCount}\n" +
+                    $"失敗：{failCount}\n\n" +
+                    (hasError ? "錯誤/警告項目：\n" : "處理項目：\n") +
+                    detail);
+
+                return Result.Succeeded;
+            }
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+            {
+                return Result.Cancelled;
+            }
+            catch (Exception ex)
+            {
+                message = ex.Message;
+                TaskDialog.Show("批次支管對齊", $"執行失敗：\n{ex.Message}");
+                return Result.Failed;
+            }
+        }
+
+        private static BatchAlignResult TryAlignOneBranch(
+            Document doc,
+            Pipe mainPipe,
+            Pipe branchPipe,
+            PipeCenterAlignGeometryMode geometryMode,
+            bool shouldCreateFitting,
+            PipeCenterAlignConnectionMode connectionMode)
+        {
+            BatchAlignResult result = new BatchAlignResult
+            {
+                BranchId = branchPipe?.Id ?? ElementId.InvalidElementId,
+                FittingRequested = shouldCreateFitting
+            };
+
+            Line mainLine = CmdPipeCenterAlign.GetPipeLine(mainPipe);
+            Line branchLine = CmdPipeCenterAlign.GetPipeLine(branchPipe);
+            if (mainLine == null || branchLine == null)
+            {
+                return result.Fail("不是有效直線管");
+            }
+
+            if (!CmdPipeCenterAlign.IsPlanMainCandidate(mainLine))
+            {
+                return result.Fail("幹管不是水平/斜率很小的平面管");
+            }
+
+            if (CmdPipeCenterAlign.IsVerticalPipe(branchPipe))
+            {
+                return result.Fail("略過立管");
+            }
+
+            if (CmdPipeCenterAlign.AreParallelInPlan(mainLine, branchLine))
+            {
+                return result.Fail("支管與幹管平面平行");
+            }
+
+            int movingEndIndex = CmdPipeCenterAlign.GetNearestEndIndexToLineInPlan(branchLine, mainLine);
+            XYZ oldMovingPoint = branchLine.GetEndPoint(movingEndIndex);
+            XYZ fixedPoint = branchLine.GetEndPoint(1 - movingEndIndex);
+
+            if (geometryMode == PipeCenterAlignGeometryMode.EndpointOnly &&
+                IsEndpointConnectedForBatch(branchPipe, oldMovingPoint))
+            {
+                return result.Fail("支管接入端已連接，EndpointOnly 模式略過");
+            }
+
+            if (!CmdPipeCenterAlign.TryGetAlignedEndpoint(mainLine, fixedPoint, oldMovingPoint, out XYZ targetPoint, out XYZ slopePoint, out string failReason))
+            {
+                return result.Fail(failReason);
+            }
+
+            XYZ newFixedPoint = fixedPoint;
+            XYZ newMovingPoint = targetPoint;
+            double verticalShift = 0.0;
+            if (geometryMode == PipeCenterAlignGeometryMode.WholePipeElevation)
+            {
+                verticalShift = targetPoint.Z - slopePoint.Z;
+                XYZ elevationMove = XYZ.BasisZ.Multiply(verticalShift);
+                newFixedPoint = fixedPoint + elevationMove;
+                newMovingPoint = slopePoint + elevationMove;
+            }
+
+            double oneMillimeter = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
+            double minimumLength = UnitUtils.ConvertToInternalUnits(10.0, UnitTypeId.Millimeters);
+            double moveDistance = Math.Max(oldMovingPoint.DistanceTo(newMovingPoint), fixedPoint.DistanceTo(newFixedPoint));
+            if (moveDistance >= oneMillimeter && newMovingPoint.DistanceTo(newFixedPoint) < minimumLength)
+            {
+                return result.Fail("支管調整後長度不足");
+            }
+
+            if (shouldCreateFitting &&
+                CmdPipeCenterAlign.RequiresMainPipeSplit(connectionMode, mainPipe, branchPipe) &&
+                !CmdPipeCenterAlign.CanSplitMainPipe(mainLine, targetPoint, out string splitFailReason))
+            {
+                return result.Fail(splitFailReason);
+            }
+
+            if (moveDistance >= oneMillimeter)
+            {
+                if (geometryMode == PipeCenterAlignGeometryMode.WholePipeElevation &&
+                    Math.Abs(verticalShift) >= oneMillimeter)
+                {
+                    ICollection<ElementId> branchGroupIds = CmdPipeCenterAlign.CollectConnectedBranchGroupIds(branchPipe, mainPipe.Id);
+                    List<ElementId> movableGroupIds = branchGroupIds
+                        .Where(id => !CmdPipeCenterAlign.IsVerticalPipe(doc.GetElement(id) as Pipe))
+                        .ToList();
+
+                    if (movableGroupIds.Count > 0)
+                    {
+                        ElementTransformUtils.MoveElements(doc, movableGroupIds, XYZ.BasisZ.Multiply(verticalShift));
+                        doc.Regenerate();
+                    }
+                }
+
+                LocationCurve locationCurve = branchPipe.Location as LocationCurve;
+                if (locationCurve == null)
+                {
+                    return result.Fail("支管無 LocationCurve");
+                }
+
+                locationCurve.Curve = movingEndIndex == 0
+                    ? Line.CreateBound(newMovingPoint, newFixedPoint)
+                    : Line.CreateBound(newFixedPoint, newMovingPoint);
+                doc.Regenerate();
+            }
+
+            result.Success = true;
+            result.MovedMm = UnitUtils.ConvertFromInternalUnits(moveDistance, UnitTypeId.Millimeters);
+
+            if (shouldCreateFitting)
+            {
+                if (CmdPipeCenterAlign.TryCreateFittingAtIntersection(doc, mainPipe, branchPipe, targetPoint, connectionMode, out ElementId splitPipeId, out ElementId fittingId, out string teeFailReason))
+                {
+                    result.FittingCreated = true;
+                    result.FittingId = fittingId;
+                    result.SplitPipeId = splitPipeId;
+                }
+                else
+                {
+                    result.FittingCreated = false;
+                    result.Message = teeFailReason;
+                }
+            }
+
+            return result;
+        }
+
+        private static bool IsEndpointConnectedForBatch(Pipe pipe, XYZ endpoint)
+        {
+            if (pipe?.ConnectorManager?.Connectors == null)
+            {
+                return false;
+            }
+
+            double connectorTolerance = UnitUtils.ConvertToInternalUnits(2.0, UnitTypeId.Millimeters);
+            foreach (Connector connector in pipe.ConnectorManager.Connectors)
+            {
+                if (connector.Origin.DistanceTo(endpoint) <= connectorTolerance && connector.IsConnected)
+                {
+                    foreach (Connector connected in connector.AllRefs)
+                    {
+                        if (connected.Owner != null && connected.Owner.Id != pipe.Id)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private sealed class BatchAlignResult
+        {
+            public ElementId BranchId { get; set; } = ElementId.InvalidElementId;
+            public bool Success { get; set; }
+            public bool FittingRequested { get; set; }
+            public bool FittingCreated { get; set; }
+            public ElementId FittingId { get; set; } = ElementId.InvalidElementId;
+            public ElementId SplitPipeId { get; set; } = ElementId.InvalidElementId;
+            public double MovedMm { get; set; }
+            public string Message { get; set; }
+
+            public BatchAlignResult Fail(string message)
+            {
+                Success = false;
+                Message = message;
+                return this;
+            }
+
+            public string GetReportLine()
+            {
+                string idText = BranchId == ElementId.InvalidElementId ? "?" : BranchId.GetIdValue().ToString();
+                if (!Success)
+                {
+                    return $"ID {idText}：失敗 - {Message}";
+                }
+
+                if (FittingRequested && !FittingCreated)
+                {
+                    return $"ID {idText}：已對齊 {MovedMm:F1} mm，接頭失敗 - {Message}";
+                }
+
+                return FittingCreated
+                    ? $"ID {idText}：已對齊 {MovedMm:F1} mm，接頭 ID {FittingId.GetIdValue()}"
+                    : $"ID {idText}：已對齊 {MovedMm:F1} mm";
+            }
+        }
+
+        private sealed class BatchPipeSelectionFilter : ISelectionFilter
+        {
+            private readonly ElementId _excludedId;
+
+            public BatchPipeSelectionFilter()
+            {
+                _excludedId = ElementId.InvalidElementId;
+            }
+
+            public BatchPipeSelectionFilter(ElementId excludedId)
+            {
+                _excludedId = excludedId ?? ElementId.InvalidElementId;
+            }
+
+            public bool AllowElement(Element elem)
+            {
+                return elem is Pipe && elem.Id != _excludedId;
+            }
+
+            public bool AllowReference(Reference reference, XYZ position)
+            {
+                return true;
+            }
+        }
+    }
+
+    [Transaction(TransactionMode.Manual)]
     public class CmdPipeCenterAlignSettings : IExternalCommand
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
@@ -1014,6 +2126,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     public class PipeCenterAlignSettingsData
     {
         public PipeCenterAlignFittingMode FittingMode { get; set; } = PipeCenterAlignFittingMode.AskEveryTime;
+        public PipeCenterAlignGeometryMode GeometryMode { get; set; } = PipeCenterAlignGeometryMode.WholePipeElevation;
     }
 
     public static class PipeCenterAlignSettings
@@ -1025,17 +2138,19 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             get
             {
                 string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                return Path.Combine(appData, "YD_BIM_Tools", "PipeCenterAlignSettings.xml");
+                return Path.Combine(appData, "HB_BIM_Tools", "PipeCenterAlignSettings.xml");
             }
         }
 
-        public static bool TryGetCreateFittingChoice(out bool shouldCreateFitting)
+        public static bool TryGetCreateFittingChoice(out bool shouldCreateFitting, out PipeCenterAlignConnectionMode connectionMode)
         {
+            connectionMode = PipeCenterAlignConnectionMode.Auto;
             PipeCenterAlignSettingsData settings = Load();
             switch (settings.FittingMode)
             {
                 case PipeCenterAlignFittingMode.AlwaysCreate:
                     shouldCreateFitting = true;
+                    connectionMode = PipeCenterAlignConnectionMode.Auto;
                     return true;
 
                 case PipeCenterAlignFittingMode.AlignOnly:
@@ -1043,8 +2158,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     return true;
 
                 default:
-                    return AskCreateFitting(out shouldCreateFitting);
+                    return AskCreateFitting(out shouldCreateFitting, out connectionMode);
             }
+        }
+
+        public static PipeCenterAlignGeometryMode GetGeometryMode()
+        {
+            return Load().GeometryMode;
         }
 
         public static bool ShowSettingsDialog(bool showSavedMessage)
@@ -1088,20 +2208,23 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return true;
         }
 
-        private static bool AskCreateFitting(out bool shouldCreateFitting)
+        private static bool AskCreateFitting(out bool shouldCreateFitting, out PipeCenterAlignConnectionMode connectionMode)
         {
             shouldCreateFitting = false;
+            connectionMode = PipeCenterAlignConnectionMode.Auto;
 
             while (true)
             {
                 TaskDialog dialog = new TaskDialog("支管中心對齊");
-                dialog.MainInstruction = "是否在對齊後自動建立接頭？";
+                dialog.MainInstruction = "選擇本次對齊後的配管方式";
                 dialog.MainContent =
-                    "90 度支管會嘗試建立三通；45 度等斜接支管會嘗試建立 Takeoff/Wye。\n\n" +
+                    "Auto 會依支管與幹管角度判斷：接近 90 度走三通，斜接走 Takeoff/Wye。\n" +
+                    "45°垂直翻彎會依高差計算水平退距：run = Abs(dz) / tan(45°)。\n\n" +
                     "可到「支管設定」改成自動建立或只對齊，避免每次詢問。";
-                dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "本次建立接頭");
-                dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "本次只對齊端點");
-                dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink3, "設定預設行為...");
+                dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Auto 自動判斷接頭", "90° 建立三通；斜接建立 Takeoff/Wye。");
+                dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "90° 三通", "切開幹管並建立 Tee fitting。");
+                dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink3, "45° 垂直翻彎對齊", "依高差建立水平段＋45°斜管，並嘗試接入幹管。");
+                dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink4, "本次只對齊端點", "只延伸/修剪支管，不建立接頭。");
                 dialog.CommonButtons = TaskDialogCommonButtons.Cancel;
 
                 TaskDialogResult result = dialog.Show();
@@ -1109,30 +2232,19 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 {
                     case TaskDialogResult.CommandLink1:
                         shouldCreateFitting = true;
+                        connectionMode = PipeCenterAlignConnectionMode.Auto;
                         return true;
                     case TaskDialogResult.CommandLink2:
-                        shouldCreateFitting = false;
+                        shouldCreateFitting = true;
+                        connectionMode = PipeCenterAlignConnectionMode.Tee;
                         return true;
                     case TaskDialogResult.CommandLink3:
-                        if (!ShowSettingsDialog(false))
-                        {
-                            return false;
-                        }
-
-                        PipeCenterAlignFittingMode mode = Load().FittingMode;
-                        if (mode == PipeCenterAlignFittingMode.AlwaysCreate)
-                        {
-                            shouldCreateFitting = true;
-                            return true;
-                        }
-
-                        if (mode == PipeCenterAlignFittingMode.AlignOnly)
-                        {
-                            shouldCreateFitting = false;
-                            return true;
-                        }
-
-                        continue;
+                        shouldCreateFitting = true;
+                        connectionMode = PipeCenterAlignConnectionMode.Vertical45;
+                        return true;
+                    case TaskDialogResult.CommandLink4:
+                        shouldCreateFitting = false;
+                        return true;
                     default:
                         return false;
                 }

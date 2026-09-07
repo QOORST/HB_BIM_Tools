@@ -1,20 +1,46 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Mechanical;
 using Autodesk.Revit.DB.Plumbing;
 using Autodesk.Revit.UI;
+using System.Xml.Serialization;
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP
 {
     public partial class PipeSleeveWindow : Window
     {
-        private Document _doc;
-        private List<Element> _pipes;
-        private List<SleeveInfo> _sleeveInfos;
+        private const string BuiltInSleeveFamilyVersion = "2026.08.27.01";
+        private const string FamilyVersionParameterName = "HB_族群版本";
+
+        private static readonly string[] DefaultFamilyFileNames =
+        {
+            "套管-圓形_無.rfa",
+            "開孔-矩形_無.rfa"
+        };
+
+        private static readonly Dictionary<string, string> BuiltInFamilyVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "套管-圓形_無", BuiltInSleeveFamilyVersion }
+        };
+
+        private static readonly string[] NetworkDefaultFamilyPaths =
+        {
+            @"\\192.168.0.200\w01_bim\02_進行中專案\0003_Revit族庫_MEP(2024統整工作區)-2021.2022\12_管附件(PA)\套管\套管-圓形_無.rfa",
+            @"\\192.168.0.200\w01_bim\02_進行中專案\0003_Revit族庫_MEP(2024統整工作區)-2021.2022\12_管附件(PA)\套管\開孔-矩形_無.rfa"
+        };
+        private readonly Document _doc;
+        private readonly List<Element> _pipes;
+        private readonly List<SleeveInfo> _sleeveInfos;
+        private readonly PipeSleeveSettings _settings;
+
+        public ObservableCollection<SleeveSymbolChoice> SleeveSymbolChoices { get; } = new ObservableCollection<SleeveSymbolChoice>();
+        public ObservableCollection<PipeSleeveSizeRow> SleeveSizeRows { get; } = new ObservableCollection<PipeSleeveSizeRow>();
 
         public PipeSleeveWindow(Document doc, List<Element> pipes)
         {
@@ -22,37 +48,362 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             _doc = doc;
             _pipes = pipes;
             _sleeveInfos = new List<SleeveInfo>();
+            DataContext = this;
 
             LoadSleeveFamilies();
+            _settings = PipeSleeveSettingsStore.Load();
+            LoadDefaultSizeRows();
+            ApplySettings(_settings);
             UpdatePreview();
         }
 
         /// <summary>
-        /// 載入套管族群
+        /// 載入套管類型
         /// </summary>
         private void LoadSleeveFamilies()
         {
-            // 收集所有可用的套管族群
-            FilteredElementCollector collector = new FilteredElementCollector(_doc);
-            var families = collector.OfClass(typeof(Autodesk.Revit.DB.Family))
-                .Cast<Autodesk.Revit.DB.Family>()
-                .Where(f => f.FamilyCategory != null &&
-                       (f.FamilyCategory.Id.IntegerValue == (int)BuiltInCategory.OST_PipeAccessory ||
-                        f.FamilyCategory.Id.IntegerValue == (int)BuiltInCategory.OST_GenericModel))
+            SleeveSymbolChoices.Clear();
+            EnsureDefaultFamiliesLoaded();
+
+            var symbols = new FilteredElementCollector(_doc)
+                .OfClass(typeof(FamilySymbol))
+                .OfType<FamilySymbol>()
+                .Where(IsSleeveSymbol)
+                .OrderBy(GetSleeveSymbolSortGroup)
+                .ThenBy(s => GetSleeveDiameterForSort(GetSleeveSymbolSearchText(s)))
+                .ThenBy(s => s.FamilyName)
+                .ThenBy(s => s.Name)
                 .ToList();
 
-            // 填充下拉選單
-            cmbWallSleeveFamily.ItemsSource = families;
-            cmbWallSleeveFamily.DisplayMemberPath = "Name";
-            cmbFloorSleeveFamily.ItemsSource = families;
-            cmbFloorSleeveFamily.DisplayMemberPath = "Name";
-
-            // 預設選擇第一個
-            if (families.Count > 0)
+            foreach (FamilySymbol symbol in symbols)
             {
-                cmbWallSleeveFamily.SelectedIndex = 0;
-                cmbFloorSleeveFamily.SelectedIndex = 0;
+                SleeveSymbolChoices.Add(new SleeveSymbolChoice
+                {
+                    IdValue = symbol.Id.IntegerValue,
+                    DisplayName = $"{symbol.FamilyName}: {symbol.Name}",
+                    Symbol = symbol
+                });
             }
+
+            cmbWallSleeveFamily.ItemsSource = SleeveSymbolChoices;
+            cmbWallSleeveFamily.DisplayMemberPath = "DisplayName";
+            cmbWallSleeveFamily.SelectedValuePath = "IdValue";
+
+            cmbFloorSleeveFamily.ItemsSource = SleeveSymbolChoices;
+            cmbFloorSleeveFamily.DisplayMemberPath = "DisplayName";
+            cmbFloorSleeveFamily.SelectedValuePath = "IdValue";
+
+            if (SleeveSymbolChoices.Count > 0)
+            {
+                SleeveSymbolChoice roundSleeve = FindPreferredRoundSleeveChoice();
+                cmbWallSleeveFamily.SelectedValue = roundSleeve != null ? roundSleeve.IdValue : SleeveSymbolChoices[0].IdValue;
+                cmbFloorSleeveFamily.SelectedValue = roundSleeve != null ? roundSleeve.IdValue : SleeveSymbolChoices[0].IdValue;
+            }
+        }
+
+        private void EnsureDefaultFamiliesLoaded()
+        {
+            var loadedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string path in GetDefaultFamilyCandidatePaths())
+            {
+                string familyName = Path.GetFileNameWithoutExtension(path);
+                if (string.IsNullOrWhiteSpace(familyName) || loadedNames.Contains(familyName))
+                {
+                    continue;
+                }
+
+                string builtInVersion = GetBuiltInFamilyVersion(familyName);
+                if (IsFamilyAlreadyLoaded(familyName) && IsLoadedFamilyVersionCurrent(familyName, builtInVersion))
+                {
+                    loadedNames.Add(familyName);
+                    continue;
+                }
+
+                try
+                {
+                    if (!File.Exists(path))
+                    {
+                        continue;
+                    }
+
+                    using (Transaction transaction = new Transaction(_doc, "載入預設套管族群"))
+                    {
+                        transaction.Start();
+                        Autodesk.Revit.DB.Family loadedFamily;
+                        _doc.LoadFamily(path, new OverwriteSleeveFamilyLoadOptions(), out loadedFamily);
+                        _doc.Regenerate();
+                        transaction.Commit();
+                    }
+
+                    loadedNames.Add(familyName);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"載入預設套管族群失敗: {path}, {ex.Message}");
+                }
+            }
+        }
+
+        private static IEnumerable<string> GetDefaultFamilyCandidatePaths()
+        {
+            string assemblyDir = Path.GetDirectoryName(typeof(PipeSleeveWindow).Assembly.Location) ?? string.Empty;
+            string installedFamiliesDir = Path.Combine(assemblyDir, "Resources", "Families");
+
+            foreach (string fileName in DefaultFamilyFileNames)
+            {
+                yield return Path.Combine(installedFamiliesDir, fileName);
+            }
+
+            foreach (string path in NetworkDefaultFamilyPaths)
+            {
+                yield return path;
+            }
+        }
+
+        private sealed class OverwriteSleeveFamilyLoadOptions : IFamilyLoadOptions
+        {
+            public bool OnFamilyFound(bool familyInUse, out bool overwriteParameterValues)
+            {
+                overwriteParameterValues = true;
+                return true;
+            }
+
+            public bool OnSharedFamilyFound(Autodesk.Revit.DB.Family sharedFamily, bool familyInUse, out FamilySource source, out bool overwriteParameterValues)
+            {
+                source = FamilySource.Family;
+                overwriteParameterValues = true;
+                return true;
+            }
+        }
+        private bool IsFamilyAlreadyLoaded(string familyName)
+        {
+            if (string.IsNullOrWhiteSpace(familyName))
+            {
+                return false;
+            }
+
+            return new FilteredElementCollector(_doc)
+                .OfClass(typeof(Autodesk.Revit.DB.Family))
+                .OfType<Autodesk.Revit.DB.Family>()
+                .Any(family => string.Equals(family.Name, familyName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string GetBuiltInFamilyVersion(string familyName)
+        {
+            if (string.IsNullOrWhiteSpace(familyName))
+            {
+                return null;
+            }
+
+            return BuiltInFamilyVersions.TryGetValue(familyName, out string version) ? version : null;
+        }
+
+        private bool IsLoadedFamilyVersionCurrent(string familyName, string builtInVersion)
+        {
+            if (string.IsNullOrWhiteSpace(builtInVersion))
+            {
+                return true;
+            }
+
+            string loadedVersion = new FilteredElementCollector(_doc)
+                .OfClass(typeof(FamilySymbol))
+                .OfType<FamilySymbol>()
+                .Where(symbol => string.Equals(symbol.FamilyName, familyName, StringComparison.OrdinalIgnoreCase))
+                .Select(ReadFamilyVersion)
+                .Where(version => !string.IsNullOrWhiteSpace(version))
+                .OrderByDescending(version => version, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
+            return CompareVersionText(loadedVersion, builtInVersion) >= 0;
+        }
+
+        private static string ReadFamilyVersion(FamilySymbol symbol)
+        {
+            Parameter parameter = symbol?.LookupParameter(FamilyVersionParameterName);
+            return parameter?.AsString()?.Trim();
+        }
+
+        private static int CompareVersionText(string loadedVersion, string builtInVersion)
+        {
+            if (string.IsNullOrWhiteSpace(loadedVersion))
+            {
+                return -1;
+            }
+
+            string[] loadedParts = loadedVersion.Split('.');
+            string[] builtInParts = builtInVersion.Split('.');
+            int count = Math.Max(loadedParts.Length, builtInParts.Length);
+            for (int i = 0; i < count; i++)
+            {
+                int loaded = i < loadedParts.Length && int.TryParse(loadedParts[i], out int loadedValue) ? loadedValue : 0;
+                int builtIn = i < builtInParts.Length && int.TryParse(builtInParts[i], out int builtInValue) ? builtInValue : 0;
+                int comparison = loaded.CompareTo(builtIn);
+                if (comparison != 0)
+                {
+                    return comparison;
+                }
+            }
+
+            return 0;
+        }
+
+        private SleeveSymbolChoice FindPreferredRoundSleeveChoice()
+        {
+            return SleeveSymbolChoices.FirstOrDefault(choice =>
+                       choice.DisplayName.IndexOf("套管-圓形_無", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                       IsGeneralSleeveChoice(choice)) ??
+                   SleeveSymbolChoices.FirstOrDefault(choice =>
+                       choice.DisplayName.IndexOf("套管", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                       choice.DisplayName.IndexOf("開孔", StringComparison.OrdinalIgnoreCase) < 0 &&
+                       IsGeneralSleeveChoice(choice));
+        }
+
+        private static bool IsSleeveSymbol(FamilySymbol symbol)
+        {
+            if (symbol == null || symbol.Category == null)
+            {
+                return false;
+            }
+
+            int categoryId = symbol.Category.Id.IntegerValue;
+            if (categoryId != (int)BuiltInCategory.OST_PipeAccessory && categoryId != (int)BuiltInCategory.OST_GenericModel)
+            {
+                return false;
+            }
+
+            string text = GetSleeveSymbolSearchText(symbol);
+            string[] requiredTokens = { "sleeve", "套管", "開孔", "开孔" };
+            string[] excludeTokens =
+            {
+                "消防", "子母", "母管", "管束", "閥", "阀", "valve", "sprinkler",
+                "窗", "窗帘", "窗簾", "window", "door", "門", "风口", "風口", "grille", "louver"
+            };
+
+            return ContainsAny(text, requiredTokens) && !ContainsAny(text, excludeTokens);
+        }
+
+        private static string GetSleeveSymbolSearchText(FamilySymbol symbol)
+        {
+            return ((symbol.FamilyName ?? string.Empty) + " " + (symbol.Name ?? string.Empty)).ToLowerInvariant();
+        }
+
+        private static bool ContainsAny(string text, IEnumerable<string> tokens)
+        {
+            return tokens.Any(token => text.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+        private void LoadDefaultSizeRows()
+        {
+            SleeveSizeRows.Clear();
+            int[] sizes = { 15, 20, 25, 32, 40, 50, 65, 80, 100, 125, 150, 200 };
+
+            foreach (int size in sizes)
+            {
+                SleeveSymbolChoice match = FindBestSleeveChoice(size);
+                SleeveSizeRows.Add(new PipeSleeveSizeRow
+                {
+                    NominalDiameterMm = size,
+                    NominalName = $"DN{size}",
+                    SymbolIdValue = match != null ? match.IdValue : 0
+                });
+            }
+        }
+
+        private SleeveSymbolChoice FindBestSleeveChoice(int nominalDiameterMm)
+        {
+            if (SleeveSymbolChoices.Count == 0)
+            {
+                return null;
+            }
+
+            int sleeveDiameterMm = GetNextSleeveDiameterMm(nominalDiameterMm);
+            SleeveSymbolChoice named = FindSleeveChoiceByDiameter(sleeveDiameterMm);
+            if (named != null)
+            {
+                return named;
+            }
+
+            int[] fallbackDiameters = { 25, 50, 80, 100, 125, 150, 200, 250, 300 };
+            foreach (int fallback in fallbackDiameters.Where(size => size > sleeveDiameterMm))
+            {
+                named = FindSleeveChoiceByDiameter(fallback);
+                if (named != null)
+                {
+                    return named;
+                }
+            }
+
+            return SleeveSymbolChoices.FirstOrDefault();
+        }
+
+        private static int GetNextSleeveDiameterMm(int nominalDiameterMm)
+        {
+            int[] sleeveDiameters = { 25, 50, 80, 100, 125, 150, 200, 250, 300 };
+            foreach (int diameter in sleeveDiameters)
+            {
+                if (diameter > nominalDiameterMm)
+                {
+                    return diameter;
+                }
+            }
+
+            return nominalDiameterMm;
+        }
+
+        private SleeveSymbolChoice FindSleeveChoiceByDiameter(int diameterMm)
+        {
+            string[] tokens =
+            {
+                $"-{diameterMm}mm",
+                $"-{diameterMm} mm",
+                $"_{diameterMm}mm",
+                $"_{diameterMm} mm",
+                $" {diameterMm}mm",
+                $" {diameterMm} mm",
+                $"DN{diameterMm}"
+            };
+
+            return SleeveSymbolChoices.FirstOrDefault(choice =>
+                       IsGeneralSleeveChoice(choice) &&
+                       tokens.Any(token => choice.DisplayName.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)) ??
+                   SleeveSymbolChoices.FirstOrDefault(choice =>
+                       tokens.Any(token => choice.DisplayName.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0));
+        }
+
+        private static bool IsGeneralSleeveChoice(SleeveSymbolChoice choice)
+        {
+            return choice != null && !ContainsAny(choice.DisplayName ?? string.Empty, GetSpecialSleeveTokens());
+        }
+
+        private static int GetSleeveSymbolSortGroup(FamilySymbol symbol)
+        {
+            string text = GetSleeveSymbolSearchText(symbol);
+            if (ContainsAny(text, GetSpecialSleeveTokens()))
+            {
+                return 1;
+            }
+
+            if (IsOpeningSymbolName(text))
+            {
+                return 2;
+            }
+
+            return 0;
+        }
+
+        private static int GetSleeveDiameterForSort(string text)
+        {
+            System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(text ?? string.Empty, @"(?:dn|[-_ ])(\d{2,3})(?:a|mm|\b)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return match.Success && int.TryParse(match.Groups[1].Value, out int value) ? value : int.MaxValue;
+        }
+
+        private static bool IsOpeningSymbolName(string text)
+        {
+            return ContainsAny(text ?? string.Empty, new[] { "開孔", "开孔", "開口", "opening" });
+        }
+
+        private static IEnumerable<string> GetSpecialSleeveTokens()
+        {
+            return new[] { "止水", "防水", "waterstop", "water stop" };
         }
 
         /// <summary>
@@ -60,8 +411,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         /// </summary>
         private void UpdatePreview()
         {
-            txtPreview.Text = $"已選擇管線: {_pipes.Count} 條\n\n" +
-                             "點擊「分析」按鈕以檢測管線與牆體及結構的交集。";
+            txtPreview.Text = $"已選擇管線: {_pipes.Count} 條\n" +
+                              $"可用套管類型: {SleeveSymbolChoices.Count} 個\n" +
+                              "確認設定後按「開始執行」。";
+            progressExecution.Value = 0;
         }
 
         /// <summary>
@@ -69,282 +422,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         /// </summary>
         private void BtnAnalyze_Click(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                System.Diagnostics.Debug.WriteLine("\n========================================");
-                System.Diagnostics.Debug.WriteLine("開始分析管線...");
-                System.Diagnostics.Debug.WriteLine("========================================");
-
-                _sleeveInfos.Clear();
-                int wallIntersections = 0;
-                int floorIntersections = 0;
-                int sleeveCounter = 1;
-
-                System.Diagnostics.Debug.WriteLine($"管線總數: {_pipes.Count}");
-
-                foreach (Element pipe in _pipes)
-                {
-                    // 取得管線的位置曲線
-                    LocationCurve locCurve = pipe.Location as LocationCurve;
-                    if (locCurve == null) continue;
-
-                    Curve curve = locCurve.Curve;
-
-                    // 取得管線直徑
-                    double pipeDiameter = GetPipeDiameter(pipe);
-
-                    // 取得管線方向
-                    XYZ pipeDirection = (curve.GetEndPoint(1) - curve.GetEndPoint(0)).Normalize();
-
-                    // 計算管線與 Z 軸的夾角
-                    double dotProductZ = Math.Abs(pipeDirection.DotProduct(XYZ.BasisZ));
-                    double angleWithZ = Math.Acos(Math.Min(1.0, dotProductZ)) * 180 / Math.PI;
-                    bool isVertical = angleWithZ < 15;
-                    bool isHorizontal = angleWithZ > 75;
-
-                    // Debug: 輸出管線資訊
-                    System.Diagnostics.Debug.WriteLine($"\n========== 分析管線 ID={pipe.Id} ==========");
-                    System.Diagnostics.Debug.WriteLine($"起點: {FormatPoint(curve.GetEndPoint(0))}");
-                    System.Diagnostics.Debug.WriteLine($"終點: {FormatPoint(curve.GetEndPoint(1))}");
-                    System.Diagnostics.Debug.WriteLine($"方向: {FormatPoint(pipeDirection)}");
-                    System.Diagnostics.Debug.WriteLine($"與Z軸夾角: {angleWithZ:F1}° (垂直={isVertical}, 水平={isHorizontal})");
-
-                    // 檢測與牆的交集（當前文件）
-                    System.Diagnostics.Debug.WriteLine($"檢測與牆的交集...");
-                    var walls = FindIntersectingWalls(curve);
-                    wallIntersections += walls.Count;
-                    System.Diagnostics.Debug.WriteLine($"  找到 {walls.Count} 個牆交集");
-
-                    // 檢測與樓板/樑的交集（當前文件）
-                    System.Diagnostics.Debug.WriteLine($"檢測與樓板/樑的交集...");
-                    var floors = FindIntersectingFloors(curve);
-                    floorIntersections += floors.Count;
-                    System.Diagnostics.Debug.WriteLine($"  找到 {floors.Count} 個樓板/樑交集");
-
-                    // 儲存套管資訊（當前文件）
-                    foreach (var wall in walls)
-                    {
-                        XYZ intersectionPoint = GetIntersectionPoint(curve, wall);
-
-                        _sleeveInfos.Add(new SleeveInfo
-                        {
-                            Pipe = pipe,
-                            HostElement = wall,
-                            HostType = "Wall",
-                            IntersectionPoint = intersectionPoint,
-                            PipeDiameter = pipeDiameter,
-                            PipeDirection = pipeDirection,
-                            SleeveNumber = $"S-{sleeveCounter:D3}",
-                            DistanceToTop = 0,
-                            DistanceToBottom = 0,
-                            IsFromLinkedModel = false
-                        });
-                        sleeveCounter++;
-                    }
-
-                    foreach (var floor in floors)
-                    {
-                        XYZ intersectionPoint = GetIntersectionPoint(curve, floor);
-
-                        // 正確識別元素類型
-                        string hostType = "Floor";
-                        string categoryName = floor.Category?.Name ?? "Unknown";
-
-                        if (floor.Category.Id.IntegerValue == (int)BuiltInCategory.OST_StructuralFraming)
-                        {
-                            hostType = "Beam";
-                        }
-                        else if (floor.Category.Id.IntegerValue == (int)BuiltInCategory.OST_Floors)
-                        {
-                            hostType = "Floor";
-                        }
-
-                        System.Diagnostics.Debug.WriteLine($"\n  檢測到元素: ID={floor.Id}, 類別={categoryName}, 識別為={hostType}");
-
-                        // 根據管線方向判斷是否應該放置套管
-                        bool shouldCreateSleeve = ShouldCreateSleeveBasedOnDirection(pipeDirection, hostType, floor);
-
-                        if (!shouldCreateSleeve)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"  ✗ 跳過: 管線方向與{hostType}不匹配 (ID={floor.Id})");
-                            continue;
-                        }
-
-                        System.Diagnostics.Debug.WriteLine($"  ✓ 將建立套管於{hostType} (ID={floor.Id})");
-
-                        // 計算距離頂部和底部的距離
-                        var distances = CalculateDistances(intersectionPoint, floor);
-
-                        _sleeveInfos.Add(new SleeveInfo
-                        {
-                            Pipe = pipe,
-                            HostElement = floor,
-                            HostType = hostType,
-                            IntersectionPoint = intersectionPoint,
-                            PipeDiameter = pipeDiameter,
-                            PipeDirection = pipeDirection,
-                            SleeveNumber = $"S-{sleeveCounter:D3}",
-                            DistanceToTop = distances.Item1,
-                            DistanceToBottom = distances.Item2,
-                            IsFromLinkedModel = false
-                        });
-                        sleeveCounter++;
-                    }
-
-                    // 如果啟用連結模型支援，檢測連結模型中的交集
-                    if (chkIncludeLinks.IsChecked == true)
-                    {
-                        var linkedWalls = FindIntersectingWallsInLinks(curve);
-                        wallIntersections += linkedWalls.Count;
-
-                        foreach (var linkedWall in linkedWalls)
-                        {
-                            _sleeveInfos.Add(new SleeveInfo
-                            {
-                                Pipe = pipe,
-                                HostElement = linkedWall.Element,
-                                HostType = linkedWall.HostType,
-                                IntersectionPoint = linkedWall.IntersectionPoint,
-                                PipeDiameter = pipeDiameter,
-                                PipeDirection = pipeDirection,
-                                SleeveNumber = $"S-{sleeveCounter:D3}",
-                                DistanceToTop = 0,
-                                DistanceToBottom = 0,
-                                IsFromLinkedModel = true,
-                                LinkedDocument = linkedWall.LinkDocument,
-                                LinkTransform = linkedWall.LinkTransform
-                            });
-                            sleeveCounter++;
-                        }
-
-                        var linkedFloors = FindIntersectingFloorsInLinks(curve);
-                        floorIntersections += linkedFloors.Count;
-
-                        foreach (var linkedFloor in linkedFloors)
-                        {
-                            // 根據管線方向判斷是否應該放置套管
-                            bool shouldCreateSleeve = ShouldCreateSleeveBasedOnDirection(pipeDirection, linkedFloor.HostType, linkedFloor.Element);
-
-                            if (!shouldCreateSleeve)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"跳過連結模型: 管線方向與{linkedFloor.HostType}不匹配 (ID={linkedFloor.Element.Id})");
-                                continue;
-                            }
-
-                            // 計算距離（需要在連結座標系中計算）
-                            XYZ pointInLink = linkedFloor.LinkTransform.Inverse.OfPoint(linkedFloor.IntersectionPoint);
-                            var distances = CalculateDistances(pointInLink, linkedFloor.Element);
-
-                            _sleeveInfos.Add(new SleeveInfo
-                            {
-                                Pipe = pipe,
-                                HostElement = linkedFloor.Element,
-                                HostType = linkedFloor.HostType,
-                                IntersectionPoint = linkedFloor.IntersectionPoint,
-                                PipeDiameter = pipeDiameter,
-                                PipeDirection = pipeDirection,
-                                SleeveNumber = $"S-{sleeveCounter:D3}",
-                                DistanceToTop = distances.Item1,
-                                DistanceToBottom = distances.Item2,
-                                IsFromLinkedModel = true,
-                                LinkedDocument = linkedFloor.LinkDocument,
-                                LinkTransform = linkedFloor.LinkTransform
-                            });
-                            sleeveCounter++;
-                        }
-                    }
-                }
-
-                // 更新預覽
-                System.Diagnostics.Debug.WriteLine("\n========================================");
-                System.Diagnostics.Debug.WriteLine("分析完成！");
-                System.Diagnostics.Debug.WriteLine($"管線總數: {_pipes.Count}");
-                System.Diagnostics.Debug.WriteLine($"穿牆交集: {wallIntersections}");
-                System.Diagnostics.Debug.WriteLine($"穿樓板/樑交集: {floorIntersections}");
-                System.Diagnostics.Debug.WriteLine($"需要套管總數: {_sleeveInfos.Count}");
-                System.Diagnostics.Debug.WriteLine("========================================\n");
-
-                txtPreview.Text = $"分析結果:\n\n" +
-                                 $"管線總數: {_pipes.Count} 條\n" +
-                                 $"穿牆交集: {wallIntersections} 處\n" +
-                                 $"穿樓板/樑交集: {floorIntersections} 處\n" +
-                                 $"需要套管總數: {_sleeveInfos.Count} 個\n\n" +
-                                 "點擊「執行」按鈕以放置套管。";
-
-                btnExecute.IsEnabled = _sleeveInfos.Count > 0;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"\n!!! 分析失敗 !!!");
-                System.Diagnostics.Debug.WriteLine($"錯誤訊息: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"堆疊追蹤:\n{ex.StackTrace}");
-
-                txtPreview.Text = $"分析失敗:\n\n{ex.Message}\n\n詳細資訊請查看 DebugView。";
-
-                MessageBox.Show($"分析失敗:\n\n{ex.Message}\n\n詳細資訊:\n{ex.StackTrace}", "錯誤",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        /// <summary>
-        /// 取得管線直徑
-        /// </summary>
-        private double GetPipeDiameter(Element pipe)
-        {
-            try
-            {
-                // 嘗試從不同的參數取得直徑
-                Parameter diamParam = pipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM) ??
-                                     pipe.get_Parameter(BuiltInParameter.RBS_CURVE_DIAMETER_PARAM) ??
-                                     pipe.LookupParameter("直徑") ??
-                                     pipe.LookupParameter("Diameter");
-
-                if (diamParam != null && diamParam.HasValue)
-                {
-                    return diamParam.AsDouble();
-                }
-
-                // 如果是風管
-                if (pipe is Duct)
-                {
-                    Parameter widthParam = pipe.get_Parameter(BuiltInParameter.RBS_CURVE_WIDTH_PARAM);
-                    Parameter heightParam = pipe.get_Parameter(BuiltInParameter.RBS_CURVE_HEIGHT_PARAM);
-
-                    if (widthParam != null && heightParam != null)
-                    {
-                        // 使用等效直徑
-                        double width = widthParam.AsDouble();
-                        double height = heightParam.AsDouble();
-                        return Math.Sqrt(width * height);
-                    }
-                }
-
-                return 0.5; // 預設值 (約 150mm)
-            }
-            catch
-            {
-                return 0.5;
-            }
-        }
-
-        /// <summary>
-        /// 計算距離頂部和底部的距離
-        /// </summary>
-        private Tuple<double, double> CalculateDistances(XYZ point, Element element)
-        {
-            try
-            {
-                BoundingBoxXYZ bbox = element.get_BoundingBox(null);
-                if (bbox != null)
-                {
-                    double distanceToTop = bbox.Max.Z - point.Z;
-                    double distanceToBottom = point.Z - bbox.Min.Z;
-                    return new Tuple<double, double>(distanceToTop, distanceToBottom);
-                }
-            }
-            catch { }
-
-            return new Tuple<double, double>(0, 0);
+            _sleeveInfos.Clear();
+            txtPreview.Text = $"已選擇管線: {_pipes.Count} 條\n" +
+                              $"檢測來源: {(chkIncludeCurrentModel.IsChecked == true ? "當前模型 " : string.Empty)}{(chkIncludeLinks.IsChecked == true ? "連結模型" : string.Empty)}\n" +
+                              "按「開始執行」會依設定建立套管。";
+            btnExecute.IsEnabled = _pipes.Count > 0;
         }
 
         /// <summary>
@@ -354,45 +436,211 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         {
             try
             {
-                if (cmbWallSleeveFamily.SelectedItem == null || cmbFloorSleeveFamily.SelectedItem == null)
+                double clearance = ReadMillimeterTextBox(txtClearance, "間隙距離");
+                SaveSettings(false);
+
+                var symbolMap = new Dictionary<int, ElementId>();
+                foreach (PipeSleeveSizeRow row in SleeveSizeRows.Where(r => r.SymbolIdValue > 0))
                 {
-                    MessageBox.Show("請選擇套管族群。", "警告",
-                        MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
+                    symbolMap[row.NominalDiameterMm] = new ElementId(row.SymbolIdValue);
                 }
 
-                double clearance = 50; // 預設 50mm
-                if (!string.IsNullOrEmpty(txtClearance.Text))
-                {
-                    double.TryParse(txtClearance.Text, out clearance);
-                }
+                btnExecute.IsEnabled = false;
+                progressExecution.IsIndeterminate = true;
+                txtPreview.Text = "執行中...\n正在分析穿越位置並建立套管。";
+                Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.Background);
 
-                using (Transaction trans = new Transaction(_doc, "放置管線套管"))
+                using (Transaction trans = new Transaction(_doc, "自動放置管線套管"))
                 {
                     trans.Start();
-
-                    int successCount = 0;
-                    foreach (var sleeveInfo in _sleeveInfos)
-                    {
-                        bool success = PlaceSleeve(sleeveInfo, clearance);
-                        if (success) successCount++;
-                    }
-
+                    PipeSleeveResult result = PipeSleeveService.CreateSleeves(
+                        _doc,
+                        _pipes,
+                        new PipeSleeveOptions
+                        {
+                            ClearanceMm = clearance,
+                            IncludeCurrentModel = chkIncludeCurrentModel.IsChecked == true,
+                            IncludeLinks = chkIncludeLinks.IsChecked == true,
+                            ExcludeAdditionElements = chkExcludeAdditionElements.IsChecked == true,
+                            UseDiameterSymbolMap = chkUseDiameterMap.IsChecked == true,
+                            SleeveSymbolByDiameterMm = symbolMap,
+                            DefaultWallSleeveSymbolId = GetSelectedSymbolId(cmbWallSleeveFamily),
+                            DefaultFloorSleeveSymbolId = GetSelectedSymbolId(cmbFloorSleeveFamily),
+                            AutoNumber = chkAutoNumber.IsChecked == true,
+                            SkipExisting = chkUpdateExisting.IsChecked != true,
+                            LimitToActiveView = true,
+                            ActiveViewId = _doc.ActiveView != null ? _doc.ActiveView.Id : ElementId.InvalidElementId
+                        });
                     trans.Commit();
 
-                    MessageBox.Show($"套管放置完成！\n\n" +
-                                   $"成功放置: {successCount} / {_sleeveInfos.Count} 個",
-                                   "完成", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
+                    progressExecution.IsIndeterminate = false;
+                    progressExecution.Value = 100;
 
-                DialogResult = true;
-                Close();
+                    string completionText = BuildCompletionText(result);
+                    txtPreview.Text = completionText;
+                    MessageBox.Show(completionText, result.CreatedCount > 0 || result.UpdatedCount > 0 ? "管線套管完成" : "管線套管",
+                        MessageBoxButton.OK,
+                        result.CreatedCount > 0 || result.UpdatedCount > 0 || result.SkippedExistingCount > 0
+                            ? MessageBoxImage.Information
+                            : MessageBoxImage.Warning);
+
+                    btnExecute.IsEnabled = true;
+                    if (result.CreatedCount > 0 || result.UpdatedCount > 0 || result.SkippedExistingCount > 0)
+                    {
+                        DialogResult = true;
+                        Close();
+                    }
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"執行失敗:\n{ex.Message}", "錯誤",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private string BuildCompletionText(PipeSleeveResult result)
+        {
+            if (result.CreatedCount > 0 || result.UpdatedCount > 0)
+            {
+                string numbering = result.NumberingOrganized
+                    ? $"編號狀態: 已自動整理，目前範圍共 {result.OrganizedCount} 個套管\n"
+                    : chkAutoNumber.IsChecked == true
+                        ? "編號狀態: 已建立暫時編號\n"
+                        : string.Empty;
+
+                return "建立完成\n" +
+                       $"新建立套管數量: {result.CreatedCount} 個\n" +
+                       $"更新既有套管: {result.UpdatedCount} 個\n" +
+                       numbering +
+                       $"找到穿越點: {result.CandidateCount}\n" +
+                       $"略過既有: {result.SkippedExistingCount}\n" +
+                       $"失敗: {result.FailedCount}";
+            }
+
+            return result.ToTaskDialogText();
+        }
+        private void BtnSaveDefaults_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                SaveSettings(true);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"儲存預設失敗:\n{ex.Message}", "管線套管", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void SaveSettings(bool showMessage)
+        {
+            PipeSleeveSettingsStore.Save(BuildSettings());
+            if (showMessage)
+            {
+                txtPreview.Text = "已儲存套管預設族群與尺寸對應。";
+                MessageBox.Show("已儲存套管預設族群與尺寸對應。", "管線套管", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private PipeSleeveSettings BuildSettings()
+        {
+            var settings = new PipeSleeveSettings
+            {
+                DefaultWallSleeveDisplayName = GetSelectedDisplayName(cmbWallSleeveFamily),
+                DefaultFloorSleeveDisplayName = GetSelectedDisplayName(cmbFloorSleeveFamily),
+                ClearanceMm = ReadMillimeterTextBox(txtClearance, "間隙距離"),
+                IncludeCurrentModel = chkIncludeCurrentModel.IsChecked == true,
+                IncludeLinks = chkIncludeLinks.IsChecked == true,
+                ExcludeAdditionElements = chkExcludeAdditionElements.IsChecked == true,
+                UseDiameterMap = chkUseDiameterMap.IsChecked == true,
+                AutoNumber = chkAutoNumber.IsChecked == true,
+                UpdateExisting = chkUpdateExisting.IsChecked == true
+            };
+
+            foreach (PipeSleeveSizeRow row in SleeveSizeRows)
+            {
+                SleeveSymbolChoice choice = SleeveSymbolChoices.FirstOrDefault(c => c.IdValue == row.SymbolIdValue);
+                if (choice == null) continue;
+                settings.SizeMappings.Add(new PipeSleeveSizeSetting
+                {
+                    NominalDiameterMm = row.NominalDiameterMm,
+                    SleeveDisplayName = choice.DisplayName
+                });
+            }
+
+            return settings;
+        }
+
+        private void ApplySettings(PipeSleeveSettings settings)
+        {
+            if (settings == null)
+            {
+                return;
+            }
+
+            SelectComboByDisplayName(cmbWallSleeveFamily, settings.DefaultWallSleeveDisplayName);
+            SelectComboByDisplayName(cmbFloorSleeveFamily, settings.DefaultFloorSleeveDisplayName);
+            txtClearance.Text = settings.ClearanceMm.ToString("0.##");
+            chkIncludeCurrentModel.IsChecked = settings.IncludeCurrentModel;
+            chkIncludeLinks.IsChecked = settings.IncludeLinks;
+            chkExcludeAdditionElements.IsChecked = settings.ExcludeAdditionElements;
+            chkUseDiameterMap.IsChecked = settings.UseDiameterMap;
+            chkAutoNumber.IsChecked = settings.AutoNumber;
+            chkUpdateExisting.IsChecked = settings.UpdateExisting;
+
+            foreach (PipeSleeveSizeSetting saved in settings.SizeMappings ?? new List<PipeSleeveSizeSetting>())
+            {
+                PipeSleeveSizeRow row = SleeveSizeRows.FirstOrDefault(r => r.NominalDiameterMm == saved.NominalDiameterMm);
+                SleeveSymbolChoice choice = FindSleeveChoiceByDisplayName(saved.SleeveDisplayName);
+                if (row != null && choice != null)
+                {
+                    row.SymbolIdValue = choice.IdValue;
+                }
+            }
+
+            gridSleeveSizes.Items.Refresh();
+        }
+
+        private static string GetSelectedDisplayName(System.Windows.Controls.ComboBox comboBox)
+        {
+            SleeveSymbolChoice choice = comboBox.SelectedItem as SleeveSymbolChoice;
+            return choice?.DisplayName ?? string.Empty;
+        }
+
+        private void SelectComboByDisplayName(System.Windows.Controls.ComboBox comboBox, string displayName)
+        {
+            SleeveSymbolChoice choice = FindSleeveChoiceByDisplayName(displayName);
+            if (choice != null)
+            {
+                comboBox.SelectedValue = choice.IdValue;
+            }
+        }
+
+        private SleeveSymbolChoice FindSleeveChoiceByDisplayName(string displayName)
+        {
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                return null;
+            }
+
+            return SleeveSymbolChoices.FirstOrDefault(choice =>
+                string.Equals(choice.DisplayName, displayName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static double ReadMillimeterTextBox(System.Windows.Controls.TextBox textBox, string label)
+        {
+            double value;
+            if (!double.TryParse(textBox.Text, out value) || value < 0)
+            {
+                throw new InvalidOperationException($"{label}必須是 0 或正數。 ");
+            }
+
+            return value;
+        }
+        private static ElementId GetSelectedSymbolId(System.Windows.Controls.ComboBox comboBox)
+        {
+            SleeveSymbolChoice choice = comboBox.SelectedItem as SleeveSymbolChoice;
+            return choice != null ? new ElementId(choice.IdValue) : ElementId.InvalidElementId;
         }
 
         /// <summary>
@@ -403,7 +651,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             DialogResult = false;
             Close();
         }
-
         /// <summary>
         /// 尋找與曲線相交的牆
         /// </summary>
@@ -1722,6 +1969,88 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     /// <summary>
     /// 套管資訊類別
     /// </summary>
+    public class SleeveSymbolChoice
+    {
+        public int IdValue { get; set; }
+        public string DisplayName { get; set; }
+        public FamilySymbol Symbol { get; set; }
+    }
+
+    public class PipeSleeveSizeRow
+    {
+        public int NominalDiameterMm { get; set; }
+        public string NominalName { get; set; }
+        public int SymbolIdValue { get; set; }
+    }
+
+    public class PipeSleeveSettings
+    {
+        public string DefaultWallSleeveDisplayName { get; set; } = string.Empty;
+        public string DefaultFloorSleeveDisplayName { get; set; } = string.Empty;
+        public double ClearanceMm { get; set; } = 50.0;
+        public bool IncludeCurrentModel { get; set; } = false;
+        public bool IncludeLinks { get; set; } = true;
+        public bool ExcludeAdditionElements { get; set; } = true;
+        public bool UseDiameterMap { get; set; } = true;
+        public bool AutoNumber { get; set; } = true;
+        public bool UpdateExisting { get; set; } = false;
+        public List<PipeSleeveSizeSetting> SizeMappings { get; set; } = new List<PipeSleeveSizeSetting>();
+    }
+
+    public class PipeSleeveSizeSetting
+    {
+        public int NominalDiameterMm { get; set; }
+        public string SleeveDisplayName { get; set; } = string.Empty;
+    }
+
+    internal static class PipeSleeveSettingsStore
+    {
+        private static readonly XmlSerializer Serializer = new XmlSerializer(typeof(PipeSleeveSettings));
+
+        public static string DefaultPath
+        {
+            get
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                return Path.Combine(appData, "HB_BIM_Tools", "PipeSleeveSettings.xml");
+            }
+        }
+
+        public static PipeSleeveSettings Load()
+        {
+            try
+            {
+                if (!File.Exists(DefaultPath))
+                {
+                    return new PipeSleeveSettings();
+                }
+
+                using (StreamReader reader = new StreamReader(DefaultPath))
+                {
+                    return Serializer.Deserialize(reader) as PipeSleeveSettings ?? new PipeSleeveSettings();
+                }
+            }
+            catch
+            {
+                return new PipeSleeveSettings();
+            }
+        }
+
+        public static void Save(PipeSleeveSettings settings)
+        {
+            string directory = Path.GetDirectoryName(DefaultPath);
+            if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            using (StreamWriter writer = new StreamWriter(DefaultPath))
+            {
+                Serializer.Serialize(writer, settings ?? new PipeSleeveSettings());
+            }
+        }
+    }
+
     public class SleeveInfo
     {
         public Element Pipe { get; set; }
@@ -1752,3 +2081,31 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         public string LinkName { get; set; }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

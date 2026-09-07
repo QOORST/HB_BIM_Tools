@@ -97,7 +97,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
 
         public string GetName()
         {
-            return "YD BIM Tools - MEP 檢查動作";
+            return "HB_BIM Tools - MEP 檢查動作";
         }
 
         private static void Navigate(

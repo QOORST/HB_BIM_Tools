@@ -7,7 +7,7 @@ using Autodesk.Revit.DB.Mechanical;
 using Autodesk.Revit.DB.Plumbing;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
-
+using YD_RevitTools.LicenseManager.Helpers;
 namespace YD_RevitTools.LicenseManager.Commands.MEP
 {
     [Transaction(TransactionMode.Manual)]
@@ -32,19 +32,54 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 Document doc = uidoc.Document;
 
 #if REVIT2025 || REVIT2026
-                TaskDialog.Show("管線套管",
-                    "管線套管功能在 Revit 2026 版本已納入本次上線範圍，但設定介面仍在精簡化調整中。\n\n目前先維持安全提示模式，避免執行失敗。完整可視化介面將於下一版補齊。");
-                return Result.Cancelled;
+                IList<Reference> selectedRefs = uidoc.Selection.PickObjects(
+                    ObjectType.Element,
+                    new PipeSelectionFilter(),
+                    "請選擇要放置套管的管線、風管、電管或電纜線架");
+
+                if (selectedRefs == null || selectedRefs.Count == 0)
+                {
+                    TaskDialog.Show("提示", "未選擇任何管線、風管、電管或電纜線架。");
+                    return Result.Cancelled;
+                }
+
+                List<Element> pipes = selectedRefs
+                    .Select(reference => doc.GetElement(reference))
+                    .Where(element => element != null)
+                    .ToList();
+
+                using (Transaction tx = new Transaction(doc, "自動放置管線套管"))
+                {
+                    tx.Start();
+                    PipeSleeveResult result = PipeSleeveService.CreateSleeves(
+                        doc,
+                        pipes,
+                        new PipeSleeveOptions
+                        {
+                            ClearanceMm = 50.0,
+                            IncludeLinks = true,
+                            AutoNumber = true,
+                            SkipExisting = true,
+                            LimitToActiveView = true,
+                            ActiveViewId = doc.ActiveView != null ? doc.ActiveView.Id : ElementId.InvalidElementId
+                        });
+                    tx.Commit();
+
+                    TaskDialog.Show("管線套管", result.ToTaskDialogText());
+                    return result.CreatedCount > 0 || result.SkippedExistingCount > 0
+                        ? Result.Succeeded
+                        : Result.Cancelled;
+                }
 #else
                 // 選擇管線
                 IList<Reference> selectedRefs = uidoc.Selection.PickObjects(
                     ObjectType.Element,
                     new PipeSelectionFilter(),
-                    "請選擇要放置套管的管線");
+                    "請選擇要放置套管的管線、風管、電管或電纜線架");
 
                 if (selectedRefs == null || selectedRefs.Count == 0)
                 {
-                    TaskDialog.Show("提示", "未選擇任何管線。");
+                    TaskDialog.Show("提示", "未選擇任何管線、風管、電管或電纜線架。");
                     return Result.Cancelled;
                 }
 
@@ -62,9 +97,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                 if (dialogResult == true)
                 {
-                    TaskDialog.Show("完成",
-                        $"管線套管放置完成！\n\n" +
-                        $"已處理 {pipes.Count} 條管線。");
                     return Result.Succeeded;
                 }
                 else
@@ -93,8 +125,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     {
         public bool AllowElement(Element elem)
         {
-            // 允許選擇管線（Pipe）和風管（Duct）
-            return elem is Pipe || elem is Duct;
+            // 允許選擇管線（Pipe）、風管（Duct）、電管（Conduit）和電纜線架（CableTray）
+            return elem is Pipe || elem is Duct || IsElementOfCategory(elem, BuiltInCategory.OST_Conduit) || IsElementOfCategory(elem, BuiltInCategory.OST_CableTray);
+        }
+
+        private static bool IsElementOfCategory(Element element, BuiltInCategory category)
+        {
+            return element?.Category != null && element.Category.Id.GetIdValue() == (long)category;
         }
 
         public bool AllowReference(Reference reference, XYZ position)
@@ -103,4 +140,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
