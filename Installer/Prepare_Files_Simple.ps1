@@ -8,6 +8,8 @@ $installerDir = $PSScriptRoot
 $projectRoot = Split-Path $installerDir -Parent
 $revitApiRoot = Split-Path (Split-Path $projectRoot -Parent) -Parent
 $familyLibraryProjectRoot = Join-Path $revitApiRoot "Codex\work\family-library-management\addin"
+$supportedVersions = @("2022", "2024", "2025", "2026")
+$netStandardOpenXmlVersions = @("2025", "2026")
 
 function Resolve-FamilyLibraryDll {
     param(
@@ -73,49 +75,29 @@ $dependencyDlls = @(
 )
 
 # Version-specific DLLs
-$sourceDll2022 = Join-Path $projectRoot "bin\Release2022\YD_RevitTools.LicenseManager.dll"
-$sourceDll2024 = Join-Path $projectRoot "bin\Release2024\YD_RevitTools.LicenseManager.dll"
-$sourceDll2025 = Join-Path $projectRoot "bin\Release2025\YD_RevitTools.LicenseManager.dll"
-$sourceFamilyLibraryDll2022 = Resolve-FamilyLibraryDll -Version "2022"
-$sourceFamilyLibraryDll2024 = Resolve-FamilyLibraryDll -Version "2024"
-$sourceFamilyLibraryDll2025 = Resolve-FamilyLibraryDll -Version "2025"
+$mainDlls = @{}
+$familyLibraryDlls = @{}
 
-# Revit 2026 uses its own DLL when available, otherwise falls back to 2025
-$sourceDll2026Path = Join-Path $projectRoot "bin\Release2026\YD_RevitTools.LicenseManager.dll"
-if (Test-Path $sourceDll2026Path) {
-    $sourceDll2026 = $sourceDll2026Path
-} else {
-    $sourceDll2026 = $sourceDll2025
-    Write-Host "[INFO] Using Revit 2025 DLL for Revit 2026 (Release2026 not found)" -ForegroundColor Yellow
-}
+foreach ($version in $supportedVersions) {
+    $sourceDll = Join-Path $projectRoot "bin\Release$version\YD_RevitTools.LicenseManager.dll"
+    if ($version -eq "2026" -and -not (Test-Path $sourceDll)) {
+        $sourceDll = Join-Path $projectRoot "bin\Release2025\YD_RevitTools.LicenseManager.dll"
+        Write-Host "[INFO] Using Revit 2025 DLL for Revit 2026 (Release2026 not found)" -ForegroundColor Yellow
+    }
 
-$sourceFamilyLibraryDll2026 = Resolve-FamilyLibraryDll -Version "2026" -FallbackVersion "2025"
-
-$requiredMainDlls = @(
-    @{ Version = "2022"; Path = $sourceDll2022 },
-    @{ Version = "2024"; Path = $sourceDll2024 },
-    @{ Version = "2025"; Path = $sourceDll2025 }
-)
-
-foreach ($dllInfo in $requiredMainDlls) {
-    if (-not (Test-Path $dllInfo.Path)) {
-        Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit $($dllInfo.Version)" -ForegroundColor Red
-        Write-Host "Path: $($dllInfo.Path)" -ForegroundColor Gray
+    if (-not (Test-Path $sourceDll)) {
+        Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit $version" -ForegroundColor Red
+        Write-Host "Path: $sourceDll" -ForegroundColor Gray
         exit 1
     }
-}
 
-$familyLibraryDlls = @(
-    @{ Version = "2022"; Path = $sourceFamilyLibraryDll2022 },
-    @{ Version = "2024"; Path = $sourceFamilyLibraryDll2024 },
-    @{ Version = "2025"; Path = $sourceFamilyLibraryDll2025 },
-    @{ Version = "2026"; Path = $sourceFamilyLibraryDll2026 }
-)
+    $mainDlls[$version] = $sourceDll
+    $fallbackVersion = if ($version -eq "2026") { "2025" } else { $null }
+    $familyLibraryDlls[$version] = Resolve-FamilyLibraryDll -Version $version -FallbackVersion $fallbackVersion
 
-foreach ($dllInfo in $familyLibraryDlls) {
-    if ([string]::IsNullOrWhiteSpace($dllInfo.Path) -or -not (Test-Path $dllInfo.Path)) {
-        Write-Host "[WARNING] CompanyFamilyLibraryMvp.dll not found for Revit $($dllInfo.Version); the company library button will be skipped for that version." -ForegroundColor Yellow
-        Write-Host "Path: $($dllInfo.Path)" -ForegroundColor Gray
+    if ([string]::IsNullOrWhiteSpace($familyLibraryDlls[$version]) -or -not (Test-Path $familyLibraryDlls[$version])) {
+        Write-Host "[WARNING] CompanyFamilyLibraryMvp.dll not found for Revit $version; the company library button will be skipped for that version." -ForegroundColor Yellow
+        Write-Host "Path: $($familyLibraryDlls[$version])" -ForegroundColor Gray
     }
 }
 
@@ -142,7 +124,7 @@ if (-not (Test-Path $sourceResources)) {
     Write-Host ""
 }
 
-Write-Host "[OK] Main DLL found (2022, 2024, 2025, 2026)" -ForegroundColor Green
+Write-Host "[OK] Main DLL found ($($supportedVersions -join ', '))" -ForegroundColor Green
 Write-Host "[OK] Dependency DLLs checked" -ForegroundColor Green
 if (Test-Path $sourceResources) {
     Write-Host "[OK] Resources directory found" -ForegroundColor Green
@@ -237,65 +219,31 @@ $packagingNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\system.io.pa
 # Create version directories
 Write-Host "Creating version directories..." -ForegroundColor Yellow
 
-# Revit 2022
-$versionDir2022 = Join-Path $installerDir "2022"
-if (Test-Path $versionDir2022) {
-    Remove-Item $versionDir2022 -Recurse -Force
-}
-New-Item -ItemType Directory -Path $versionDir2022 -Force | Out-Null
-Copy-Item $sourceDll2022 -Destination $versionDir2022 -Force
-if (-not [string]::IsNullOrWhiteSpace($sourceFamilyLibraryDll2022) -and (Test-Path $sourceFamilyLibraryDll2022)) {
-    Copy-Item $sourceFamilyLibraryDll2022 -Destination $versionDir2022 -Force
-}
-Write-Host "[OK] Revit 2022 ready" -ForegroundColor Green
+foreach ($version in $supportedVersions) {
+    $versionDir = Join-Path $installerDir $version
+    if (Test-Path $versionDir) {
+        Remove-Item $versionDir -Recurse -Force
+    }
 
-# Revit 2024
-$versionDir2024 = Join-Path $installerDir "2024"
-if (Test-Path $versionDir2024) {
-    Remove-Item $versionDir2024 -Recurse -Force
-}
-New-Item -ItemType Directory -Path $versionDir2024 -Force | Out-Null
-Copy-Item $sourceDll2024 -Destination $versionDir2024 -Force
-if (-not [string]::IsNullOrWhiteSpace($sourceFamilyLibraryDll2024) -and (Test-Path $sourceFamilyLibraryDll2024)) {
-    Copy-Item $sourceFamilyLibraryDll2024 -Destination $versionDir2024 -Force
-}
-Write-Host "[OK] Revit 2024 ready" -ForegroundColor Green
+    New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
+    Copy-Item $mainDlls[$version] -Destination $versionDir -Force
 
-# Revit 2025
-$versionDir2025 = Join-Path $installerDir "2025"
-if (Test-Path $versionDir2025) {
-    Remove-Item $versionDir2025 -Recurse -Force
-}
-New-Item -ItemType Directory -Path $versionDir2025 -Force | Out-Null
-Copy-Item $sourceDll2025 -Destination $versionDir2025 -Force
-if (-not [string]::IsNullOrWhiteSpace($sourceFamilyLibraryDll2025) -and (Test-Path $sourceFamilyLibraryDll2025)) {
-    Copy-Item $sourceFamilyLibraryDll2025 -Destination $versionDir2025 -Force
-}
-if (Test-Path $openXmlNetStandard) {
-    Copy-Item $openXmlNetStandard -Destination $versionDir2025 -Force
-}
-if (Test-Path $packagingNetStandard) {
-    Copy-Item $packagingNetStandard -Destination $versionDir2025 -Force
-}
-Write-Host "[OK] Revit 2025 ready" -ForegroundColor Green
+    $familyLibraryDll = $familyLibraryDlls[$version]
+    if (-not [string]::IsNullOrWhiteSpace($familyLibraryDll) -and (Test-Path $familyLibraryDll)) {
+        Copy-Item $familyLibraryDll -Destination $versionDir -Force
+    }
 
-# Revit 2026
-$versionDir2026 = Join-Path $installerDir "2026"
-if (Test-Path $versionDir2026) {
-    Remove-Item $versionDir2026 -Recurse -Force
+    if ($netStandardOpenXmlVersions -contains $version) {
+        if (Test-Path $openXmlNetStandard) {
+            Copy-Item $openXmlNetStandard -Destination $versionDir -Force
+        }
+        if (Test-Path $packagingNetStandard) {
+            Copy-Item $packagingNetStandard -Destination $versionDir -Force
+        }
+    }
+
+    Write-Host "[OK] Revit $version ready" -ForegroundColor Green
 }
-New-Item -ItemType Directory -Path $versionDir2026 -Force | Out-Null
-Copy-Item $sourceDll2026 -Destination $versionDir2026 -Force
-if (-not [string]::IsNullOrWhiteSpace($sourceFamilyLibraryDll2026) -and (Test-Path $sourceFamilyLibraryDll2026)) {
-    Copy-Item $sourceFamilyLibraryDll2026 -Destination $versionDir2026 -Force
-}
-if (Test-Path $openXmlNetStandard) {
-    Copy-Item $openXmlNetStandard -Destination $versionDir2026 -Force
-}
-if (Test-Path $packagingNetStandard) {
-    Copy-Item $packagingNetStandard -Destination $versionDir2026 -Force
-}
-Write-Host "[OK] Revit 2026 ready" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "===============================================================" -ForegroundColor Cyan
@@ -305,14 +253,10 @@ Write-Host ""
 Write-Host "Installer\" -ForegroundColor White
 Write-Host "+-- Resources\" -ForegroundColor White
 Write-Host "|   +-- ... ($resourceFileCount files)" -ForegroundColor Cyan
-Write-Host "+-- 2022\" -ForegroundColor White
-Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
-Write-Host "+-- 2024\" -ForegroundColor White
-Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
-Write-Host "+-- 2025\" -ForegroundColor White
-Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
-Write-Host "+-- 2026\" -ForegroundColor White
-Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
+foreach ($version in $supportedVersions) {
+    Write-Host "+-- $version\" -ForegroundColor White
+    Write-Host "|   +-- YD_RevitTools.LicenseManager.dll" -ForegroundColor Gray
+}
 Write-Host "+-- Newtonsoft.Json.dll" -ForegroundColor Cyan
 Write-Host "+-- System.Text.Json.dll" -ForegroundColor Cyan
 Write-Host "+-- System.Text.Encodings.Web.dll" -ForegroundColor Cyan
@@ -346,9 +290,8 @@ foreach ($dll in $dependencyDlls) {
 $totalSize += $dependencySize
 
 # Calculate version-specific DLLs size
-$versions = @("2022", "2024", "2025", "2026")
 $dllsSize = 0
-foreach ($version in $versions) {
+foreach ($version in $supportedVersions) {
     $versionDir = Join-Path $installerDir $version
     if (Test-Path $versionDir) {
         $versionFiles = Get-ChildItem $versionDir -Recurse -ErrorAction SilentlyContinue
@@ -371,7 +314,5 @@ Write-Host "  Preparation Complete!" -ForegroundColor Green
 Write-Host "===============================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
-Write-Host "  1. Open Inno Setup Compiler" -ForegroundColor White
-Write-Host "  2. Open HB_BIM_Setup.iss" -ForegroundColor White
-Write-Host "  3. Click Build -> Compile" -ForegroundColor White
+Write-Host "  Run .\Installer\Build_Installer.ps1 to compile and sign the installer." -ForegroundColor White
 Write-Host ""
