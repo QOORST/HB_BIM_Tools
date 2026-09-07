@@ -6,6 +6,15 @@
 - Visual Studio 2022 或 .NET SDK 8.0
 - Revit 2022 / 2024 / 2025 / 2026（用於測試參考）
 
+新電腦完成 clone 後，先執行：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\Tools\Check-DevelopmentEnvironment.ps1 -Mode Development -RestorePackages
+```
+
+一般開發模式不要求公司族庫原始碼、Inno Setup、簽章私鑰或授權私鑰。缺少公司族庫時只略過該選配模組，其餘 HB_BIM Tools 仍可編譯。
+
 ---
 
 ## 編譯指令
@@ -43,8 +52,11 @@ dotnet build -c Release2026
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\Tools\Check-DevelopmentEnvironment.ps1 -Mode Release -RestorePackages
 .\Installer\Build_Installer.ps1
 ```
+
+正式發版模式要求所有支援 Revit 年版、Inno Setup、LAN 簽章私鑰憑證，以及各年版公司族庫 payload。建議固定在可連公司內網的公司電腦執行。
 
 輸出位置：
 
@@ -180,4 +192,4 @@ cd Tools
 
 ---
 
-*最後更新：2026-08-31*
+*最後更新：2026-09-07*
