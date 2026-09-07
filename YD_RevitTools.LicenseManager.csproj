@@ -85,7 +85,6 @@
 
   <ItemGroup>
     <!-- 暫時排除有編譯錯誤的功能（缺少實作檔案） -->
-    <Compile Remove="Commands\AR\CmdTestImprovedEngine.cs" />
     <Compile Remove="Commands\LicenseManagementCommand.cs" />
   </ItemGroup>
 
