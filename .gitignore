@@ -64,8 +64,7 @@ PUSH_TO_GITHUB.md
 GIT_QUICK_START.md
 
 # Documentation and reports (temporary)
-Docs/Archive/*.md
-Docs/Archive/*.txt
+Docs/Archive/
 Commands/AR/Finishings/*.md
 *_report.md
 *_summary.md
