@@ -2,9 +2,9 @@
 
 **專業的 Revit 工具集 - 提升 BIM 工作效率**
 
-[![Version](https://img.shields.io/badge/version-2.5.10-blue.svg)](https://github.com/QOORST/HB_BIM_Tools/releases)
+[![Version](https://img.shields.io/badge/version-2.5.11-blue.svg)](https://github.com/QOORST/HB_BIM_Tools/releases)
 [![Revit](https://img.shields.io/badge/Revit-2022%20|%202024%20|%202025%20|%202026-orange.svg)](https://www.autodesk.com/products/revit)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
 
 ---
 
@@ -57,7 +57,7 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 1. **下載安裝程式**
    - 前往 [Releases](https://github.com/QOORST/HB_BIM_Tools/releases) 頁面
-   - 下載最新版本的 `HB_BIM_Tools_v2.5.10_Setup.exe`
+   - 下載最新版本的 `HB_BIM_Tools_v2.5.11_Setup.exe`
 
 2. **執行安裝**
    - 關閉所有 Revit 實例
@@ -106,30 +106,27 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 - [完整使用手冊](https://github.com/QOORST/HB_BIM_Tools/wiki)
 - [對齊牆輪廓使用手冊](Docs/對齊牆輪廓使用手冊.md)
 - [對齊牆輪廓圖文使用手冊](Docs/對齊牆輪廓圖文使用手冊.html)
-- [自動更新功能說明](docs/auto-update.md)
-- [管線避讓工具指南](docs/pipe-avoid.md)
-- [常見問題 FAQ](docs/FAQ.md)
+- [安裝與診斷指南](Docs/手動部署指南.md)
+- [部署方案總結](Docs/部署方案總結.md)
+- [授權管理使用說明](Docs/授權管理使用說明.md)
+- [管線套管使用手冊](Docs/管線套管使用手冊.md)
 
 ---
 
 ## 🔄 更新日誌
 
-### v2.2.0 (2025-12-05)
-
-#### 新功能
-- ✨ 新增自動更新功能
-- ✨ 新增管線避讓工具
+### v2.5.11 (2026-08-31)
 
 #### 改進
-- 🔨 優化 COBie 匯出性能
-- 🔨 提升授權驗證速度
-- 🔨 改進 UI 響應性能
+- 強化授權機器碼指紋，並保留既有授權相容性。
+- 安裝器更新流程移除暫存命令檔，降低更新啟動風險。
+- 發佈流程統一為正式安裝檔，並排除安裝包中的開發用資源。
 
-#### 修復
-- 🐛 修復管線套管放置問題
-- 🐛 修復連結模型元素識別
+#### 整理
+- 清理舊備份程式碼、舊封存文件與手動部署腳本。
+- 安裝 payload 準備流程改由版本清單集中管理。
 
-查看 [完整更新日誌](CHANGELOG.md)
+查看 [完整更新日誌](Docs/CHANGELOG.md)
 
 ---
 
@@ -157,7 +154,7 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 ## 📄 授權
 
-本專案採用 MIT 授權 - 查看 [LICENSE](LICENSE) 檔案了解詳情。
+本專案採用 MIT 授權 - 查看 [LICENSE.txt](LICENSE.txt) 檔案了解詳情。
 
 ---
 
