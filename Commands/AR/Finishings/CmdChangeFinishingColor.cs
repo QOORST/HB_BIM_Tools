@@ -165,7 +165,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
             if (elem is DirectShape ds)
             {
                 if (elem.Category?.Id.GetIdValue() == (long)BuiltInCategory.OST_GenericModel
-                    && ds.ApplicationId == "YD_BIM_Finishings")
+                    && ds.ApplicationId == "HB_BIM_Finishings")
                 {
                     Debug.WriteLine($"✅ 允許選擇裝修面: {elem.Name} (ID: {elem.Id.GetIdValue()})");
                     return true;

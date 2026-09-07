@@ -11,7 +11,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         get
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            return Path.Combine(appData, "YD_BIM", "AutoJoin", "settings.xml");
+            return Path.Combine(appData, "HB_BIM", "AutoJoin", "settings.xml");
         }
     }
 

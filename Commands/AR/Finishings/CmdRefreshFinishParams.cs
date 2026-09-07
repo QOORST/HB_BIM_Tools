@@ -63,7 +63,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                 if (allItems.Count == 0)
                 {
                     TaskDialog.Show("更新粉刷面參數",
-                        "模型中未找到已標記的 AR 粉刷元素（YD_BIM_Finishings）。\n\n" +
+                        "模型中未找到已標記的 AR 粉刷元素（HB_BIM_Finishings）。\n\n" +
                         "請先透過「房間裝修」或「面生面」功能生成粉刷元素。");
                     return Result.Cancelled;
                 }
@@ -172,7 +172,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
 
         /// <summary>
         /// 判斷元素是否為 AR 裝修系統產生的粉刷元素：
-        /// 1. ALL_MODEL_INSTANCE_COMMENTS 含 "YD_BIM_Finishings"（新版標記）
+        /// 1. ALL_MODEL_INSTANCE_COMMENTS 含 "HB_BIM_Finishings"（新版標記）
         /// 2. 或 AR_RoomId 參數有值（舊版生成但有房間參數）
         /// </summary>
         private static bool IsFinishingElement(Element elem, List<Room> rooms = null)
@@ -182,7 +182,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                 // 優先：穩定識別標記
                 var comments = elem.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
                 if (!string.IsNullOrEmpty(comments) &&
-                    comments.IndexOf("YD_BIM_Finishings", StringComparison.OrdinalIgnoreCase) >= 0)
+                    comments.IndexOf("HB_BIM_Finishings", StringComparison.OrdinalIgnoreCase) >= 0)
                     return true;
 
                 // 備用：有 AR_RoomId 參數且有值

@@ -37,6 +37,17 @@ internal static class AutoDimensionModelessController
         {
             if (_form is not null && !_form.IsDisposed)
             {
+                if (!_lockMode && !lockMode)
+                {
+                    _mode = mode;
+                    _form.SelectMode(mode);
+                    _form.Show();
+                    _form.Activate();
+                    _handler?.RequestRefresh();
+                    RaiseExternalEvent();
+                    return Result.Succeeded;
+                }
+
                 if (_mode == mode && _lockMode == lockMode)
                 {
                     _form.Show();
@@ -52,6 +63,7 @@ internal static class AutoDimensionModelessController
             Document doc = uiDoc.Document;
             View view = doc.ActiveView;
             SourceData source = CollectSources(doc, view);
+            IReadOnlyDictionary<DimensionMode, AutoDimensionSavedSettings> savedSettings = AutoDimensionSettingsStore.LoadAll(doc);
 
             _mode = mode;
             _lockMode = lockMode;
@@ -64,6 +76,7 @@ internal static class AutoDimensionModelessController
                 mode,
                 lockMode,
                 windowTitle,
+                savedSettings,
                 RequestApply,
                 RequestRefresh);
 
@@ -136,11 +149,25 @@ internal static class AutoDimensionModelessController
         IReadOnlyList<string> typeNames = new FilteredElementCollector(doc)
             .OfClass(typeof(DimensionType))
             .ToElements()
+            .OfType<DimensionType>()
+            .Where(IsLinearDimensionType)
             .Select(e => e.Name)
             .Distinct()
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return new SourceData(typeNames, horizontal, vertical);
+    }
+
+    private static bool IsLinearDimensionType(DimensionType dimensionType)
+    {
+        try
+        {
+            return string.Equals(dimensionType.StyleType.ToString(), "Linear", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private sealed class SourceData
@@ -198,6 +225,11 @@ internal static class AutoDimensionModelessController
 
         public void RequestApply(DimensionOptions options)
         {
+            if (_sourceDocument is not null)
+            {
+                AutoDimensionSettingsStore.Save(_sourceDocument, options);
+            }
+
             _requestKind = RequestKind.Apply;
             _options = options;
         }
@@ -227,14 +259,14 @@ internal static class AutoDimensionModelessController
                     return;
                 }
 
-                if (!ReferenceEquals(doc, _sourceDocument) || view.Id != _sourceViewId)
+                if (!IsSameDocument(doc, _sourceDocument) || view.Id != _sourceViewId)
                 {
-                    RefreshSources(doc, view, "文件或視圖已切換；設定已重新整理，請確認後再次套用。");
+                    RefreshSources(doc, view, "文件或視圖已切換；設定已重新整理，請確認後再次執行。");
                     return;
                 }
 
                 DimensionOptions options = _options;
-                if (_mode == DimensionMode.ColumnSetout && options.Mode == PlacementMode.Manual)
+                if (options.ModeType == DimensionMode.ColumnSetout && options.Mode == PlacementMode.Manual)
                 {
                     if (!TryResolveManualPlacement(uiDoc, view, options))
                     {
@@ -250,7 +282,7 @@ internal static class AutoDimensionModelessController
                 if (created == 0)
                 {
                     tx.RollBack();
-                    Complete(DimensionCommandRunner.BuildNoChangeMessage(_mode, doc, view), true);
+                    Complete(DimensionCommandRunner.BuildNoChangeMessage(options.ModeType, doc, view), true);
                     return;
                 }
 
@@ -274,7 +306,7 @@ internal static class AutoDimensionModelessController
 
         public string GetName()
         {
-            return "YD BIM Auto Dimension";
+            return "HB_BIM Auto Dimension";
         }
 
         private void RefreshSources(Document doc, View view, string status)
@@ -284,6 +316,40 @@ internal static class AutoDimensionModelessController
             _sourceViewId = view.Id;
             _form?.UpdateSources(source.DimensionTypeNames, source.HorizontalGrids, source.VerticalGrids);
             Complete(status);
+        }
+
+        private static bool IsSameDocument(Document current, Document? expected)
+        {
+            if (expected is null)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(current, expected))
+            {
+                return true;
+            }
+
+            try
+            {
+                if (!expected.IsValidObject || !current.IsValidObject)
+                {
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(current.PathName) ||
+                    !string.IsNullOrWhiteSpace(expected.PathName))
+                {
+                    return string.Equals(current.PathName, expected.PathName, StringComparison.OrdinalIgnoreCase);
+                }
+
+                return current.IsFamilyDocument == expected.IsFamilyDocument &&
+                       string.Equals(current.Title, expected.Title, StringComparison.Ordinal);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private bool TryResolveManualPlacement(UIDocument uiDoc, View view, DimensionOptions options)

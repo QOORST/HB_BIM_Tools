@@ -287,7 +287,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             try
             {
                 var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                directShape.ApplicationId = "YD_BIM_Formwork";
+                directShape.ApplicationId = "HB_BIM_Formwork";
                 directShape.ApplicationDataId = "ImprovedEngine";
                 directShape.SetShape(new GeometryObject[] { solid });
                 directShape.Name = $"改進模板_{hostElement.Id}";

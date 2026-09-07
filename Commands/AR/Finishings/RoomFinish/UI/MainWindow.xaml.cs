@@ -330,6 +330,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             public double WallHeightMm    { get; set; }
             public double FloorAreaM2     { get; set; }
             public double CeilingAreaM2   { get; set; }
+            public double ManualFaceAreaM2 { get; set; }
             public double SkirtingLengthM { get; set; }
             public long   WallTypeId      { get; set; }
             public long   FloorTypeId     { get; set; }
@@ -338,6 +339,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             public HashSet<ElementId> WallElementIds { get; } = new HashSet<ElementId>();
             public HashSet<ElementId> FloorElementIds { get; } = new HashSet<ElementId>();
             public HashSet<ElementId> CeilingElementIds { get; } = new HashSet<ElementId>();
+            public HashSet<ElementId> ManualFaceElementIds { get; } = new HashSet<ElementId>();
             public HashSet<ElementId> SkirtingElementIds { get; } = new HashSet<ElementId>();
             public HashSet<long> WallTypeIds { get; } = new HashSet<long>();
             public HashSet<long> FloorTypeIds { get; } = new HashSet<long>();
@@ -346,6 +348,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             public Dictionary<long, double> WallAreaByTypeM2 { get; } = new Dictionary<long, double>();
             public Dictionary<long, double> FloorAreaByTypeM2 { get; } = new Dictionary<long, double>();
             public Dictionary<long, double> CeilingAreaByTypeM2 { get; } = new Dictionary<long, double>();
+            public Dictionary<string, double> ManualFaceAreaByMaterialM2 { get; } = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         }
 
         private sealed class ModelDifferenceRow
@@ -661,10 +664,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
 
             txtStatus.Text = $"已載入 {_roomRows.Count} 間房間。";
 
-            LoadCurrentRoomParameterStatus();
+            // 開窗時只讀取房間參數與模型狀態，不用既有粉刷面反向覆蓋下拉欄位。
+            // 使用者明確按「同步模型」時，才將模型粉刷面回填為目前設定。
+            LoadCurrentRoomParameterStatus(applyModelValuesToRows: false, showCompletionMessage: false);
         }
 
-        private void LoadCurrentRoomParameterStatus()
+        private void LoadCurrentRoomParameterStatus(bool applyModelValuesToRows = true, bool showCompletionMessage = true)
         {
             var doc = _uiDoc.Document;
             var syncCount = 0;
@@ -696,13 +701,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 row.CeilingTypeId  = ResolveRoomParameterTypeId(row.CurrentCeilingFinish, CeilingTypeOptions);
                 row.SkirtingTypeId = ResolveRoomParameterTypeId(skirtingParam?.AsString() ?? string.Empty, SkirtingTypeOptions);
 
-                // 面生面/手動/既有模型粉刷元素回讀：以模型實際粉刷元素為準，避免房間參數舊值造成不一致。
+                // 面生面/手動/既有模型粉刷元素回讀：
+                // 開窗預覽時只做狀態檢查，不覆蓋設定欄位；使用者按「同步模型」時才回填。
                 var roomIdVal = RevitCompat.GetElementIdValue(row.RoomId);
                 ModelFinishData md = null;
                 row.CurrentWallHeightMm = 0;
                 if (_modelFinishIndex != null && _modelFinishIndex.TryGetValue(roomIdVal, out md))
                 {
-                    if (md.WallTypeId > 0)
+                    if (applyModelValuesToRows && md.WallTypeId > 0)
                     {
                         row.WallTypeId = md.WallTypeId;
                         row.CurrentWallFinish = JoinTypeNamesByIds(WallTypeOptions, md.WallTypeIds);
@@ -710,19 +716,19 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
 
                     row.CurrentWallHeightMm = md.WallHeightMm;
 
-                    if (md.FloorTypeId > 0)
+                    if (applyModelValuesToRows && md.FloorTypeId > 0)
                     {
                         row.FloorTypeId = md.FloorTypeId;
                         row.CurrentFloorFinish = JoinTypeNamesByIds(FloorTypeOptions, md.FloorTypeIds);
                     }
 
-                    if (md.CeilingTypeId > 0)
+                    if (applyModelValuesToRows && md.CeilingTypeId > 0)
                     {
                         row.CeilingTypeId = md.CeilingTypeId;
                         row.CurrentCeilingFinish = JoinTypeNamesByIds(CeilingTypeOptions, md.CeilingTypeIds);
                     }
 
-                    if (md.SkirtingTypeId > 0)
+                    if (applyModelValuesToRows && md.SkirtingTypeId > 0)
                     {
                         row.SkirtingTypeId = md.SkirtingTypeId;
                     }
@@ -735,7 +741,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 else if (ceilingHeightParam != null)
                     row.CeilingHeightMm = ParseDouble(txtCeilingHeight.Text, 2700);
 
-                if (row.CurrentWallHeightMm > 0)
+                if (applyModelValuesToRows && row.CurrentWallHeightMm > 0)
                     row.WallHeightMm = row.CurrentWallHeightMm;
 
                 row.UpdateStatus();
@@ -743,10 +749,18 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             }
 
             dgRooms.Items.Refresh();
-            _hasSyncedFromModelOnce = true;
-            _lastModelSyncAt = DateTime.Now;
-            txtStatus.Text = $"已從房間參數/模型粉刷元素同步 {syncCount} 間房間到下拉設定欄。";
-            MessageBox.Show($"同步模型完成，已更新 {syncCount} 間房間。", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            if (applyModelValuesToRows)
+            {
+                _hasSyncedFromModelOnce = true;
+                _lastModelSyncAt = DateTime.Now;
+                txtStatus.Text = $"已從房間參數/模型粉刷元素同步 {syncCount} 間房間到下拉設定欄。";
+                if (showCompletionMessage)
+                    MessageBox.Show($"同步模型完成，已更新 {syncCount} 間房間。", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                txtStatus.Text = $"已載入 {syncCount} 間房間；尚未以模型粉刷面覆蓋設定欄，需按「同步模型」才會回填。";
+            }
         }
 
         private void ApplyReplacementToModel()
@@ -968,7 +982,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                     scheduleMsg = $"\n（明細表建立失敗：{exSched.Message}）";
                 }
 
-                LoadCurrentRoomParameterStatus();
+                LoadCurrentRoomParameterStatus(applyModelValuesToRows: true, showCompletionMessage: false);
                 var mixedInfo = skippedMixedRows.Count > 0
                     ? $"\n已略過混合品類 {skippedMixedRows.Count} 間（保留手動調整）。"
                     : string.Empty;
@@ -983,7 +997,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
         }
 
         // ── Public wrappers called by ExternalEvent handlers ──────────────
-        public void SyncRoomsInternal()             => LoadRooms();
+        public void SyncRoomsInternal()
+        {
+            LoadRooms();
+            LoadCurrentRoomParameterStatus(applyModelValuesToRows: true, showCompletionMessage: true);
+        }
         public void ApplyAndUpdateInternal()        => ApplyReplacementToModel();
         public void PickRoomsInternal()             => PickRooms();
         public void FocusRoomsInternal()            => FocusRoomsFromGrid();
@@ -1035,19 +1053,34 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             var useSelection = selectedIds.Count > 0;
 
             var message = useSelection
-                ? $"將清除目前選取 {selectedIds.Count} 個元素上的 AR 裝修參數值。\n\n是否繼續？"
+                ? $"將清除目前選取 {selectedIds.Count} 個元素中「非房間裝修生成元素」上的 AR 裝修參數值。\n\n已生成粉刷面會自動保留，不會清除其 AR_RoomId / 驗算參數。\n\n是否繼續？"
                 : "目前未選取元素。\n\n將掃描牆、樓板、天花、一般模型，清除「非 AR 裝修元素」上殘留的 AR 裝修參數值，避免結構牆/樓板被誤判。\n\n是否繼續？";
 
             if (MessageBox.Show(message, "清理AR參數", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                 return;
 
+            var skippedManaged = 0;
             var targets = useSelection
-                ? selectedIds.Select(id => doc.GetElement(id)).Where(e => e != null).ToList()
+                ? selectedIds.Select(id => doc.GetElement(id))
+                    .Where(e => e != null)
+                    .Where(e =>
+                    {
+                        if (IsProtectedGeneratedFinishElement(e))
+                        {
+                            skippedManaged++;
+                            return false;
+                        }
+                        return HasAnyArFinishParameterValue(e);
+                    })
+                    .ToList()
                 : CollectNonManagedElementsWithArParams(doc);
 
             if (targets.Count == 0)
             {
-                MessageBox.Show("沒有找到需要清理的元素。", "清理AR參數", MessageBoxButton.OK, MessageBoxImage.Information);
+                var noTargetMsg = skippedManaged > 0
+                    ? $"沒有找到需要清理的非粉刷元素。\n已保留 {skippedManaged} 個房間裝修生成粉刷面。"
+                    : "沒有找到需要清理的元素。";
+                MessageBox.Show(noTargetMsg, "清理AR參數", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -1060,7 +1093,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
 
                 foreach (var element in targets)
                 {
-                    var count = ClearArFinishParameterValues(element, clearStableMarker: useSelection);
+                    var count = ClearArFinishParameterValues(element, clearStableMarker: true);
                     if (count > 0)
                     {
                         clearedElements++;
@@ -1071,10 +1104,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 t.Commit();
             }
 
-            LoadCurrentRoomParameterStatus();
-            txtStatus.Text = $"已清理 {clearedElements} 個元素、{clearedValues} 個 AR 參數值。";
+            LoadCurrentRoomParameterStatus(applyModelValuesToRows: false, showCompletionMessage: false);
+            txtStatus.Text = $"已清理 {clearedElements} 個元素、{clearedValues} 個 AR 參數值；保留 {skippedManaged} 個生成粉刷面。";
             MessageBox.Show(
-                $"清理完成。\n已清理 {clearedElements} 個元素、{clearedValues} 個 AR 參數值。",
+                $"清理完成。\n已清理 {clearedElements} 個元素、{clearedValues} 個 AR 參數值。" +
+                (skippedManaged > 0 ? $"\n已保留 {skippedManaged} 個房間裝修生成粉刷面。" : string.Empty),
                 "清理AR參數", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
@@ -1099,7 +1133,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                     t.Commit();
                 }
 
-                LoadCurrentRoomParameterStatus();
+                LoadCurrentRoomParameterStatus(applyModelValuesToRows: false, showCompletionMessage: false);
                 txtStatus.Text = $"已更新 {targetRows.Count} 間房間的參數。";
                 MessageBox.Show(
                     $"參數更新完成。\n已更新 {targetRows.Count} 間房間。",
@@ -1185,7 +1219,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
 
                 foreach (var element in elements)
                 {
-                    if (!FinishingElementGuard.IsManagedFinishingElement(element))
+                    if (!IsProtectedGeneratedFinishElement(element))
                         continue;
 
                     var roomParam = element.LookupParameter("房間ID(AR_RoomId)") ?? element.LookupParameter("房間ID") ?? element.LookupParameter("AR_RoomId");
@@ -1249,7 +1283,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
 
                 foreach (var elem in elements)
                 {
-                    if (!FinishingElementGuard.IsManagedFinishingElement(elem))
+                    if (!IsTrustedModelFinishElementForSync(elem))
                         continue;
 
                     var rp = elem.LookupParameter("房間ID(AR_RoomId)")
@@ -1555,6 +1589,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 }
             }
 
+            var targetMap = targetRows
+                .GroupBy(r => RevitCompat.GetElementIdValue(r.RoomId))
+                .ToDictionary(g => g.Key, g => g.First());
+            AddOwnershipAnomalyRows(targetMap, Add);
+            var ownershipIssueRoomIds = new HashSet<long>(rows
+                .Where(r => r.Severity == "歸戶異常" || r.Severity == "未歸戶")
+                .Select(r => r.RoomId));
+
             foreach (var row in targetRows.Distinct().OrderBy(r => r.Level).ThenBy(r => r.Number).ThenBy(r => r.Name))
             {
                 var roomId = RevitCompat.GetElementIdValue(row.RoomId);
@@ -1585,7 +1627,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 CheckType(row, md, "踢腳板", row.SkirtingTypeId, SkirtingTypeOptions,
                     md?.SkirtingTypeIds ?? new HashSet<long>(), md?.SkirtingLengthM ?? 0, "踢腳板");
 
-                if (rows.Count == beforeCount)
+                if (rows.Count == beforeCount && !ownershipIssueRoomIds.Contains(roomId))
                 {
                     Add(row, "通過", "總覽",
                         BuildRoomSettingSummary(row),
@@ -1602,12 +1644,71 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 .ToList();
         }
 
+        private void AddOwnershipAnomalyRows(
+            Dictionary<long, RoomFinishRow> targetMap,
+            Action<RoomFinishRow, string, string, string, string, string> add)
+        {
+            var doc = _uiDoc.Document;
+            var cats = new[]
+            {
+                BuiltInCategory.OST_Walls,
+                BuiltInCategory.OST_Floors,
+                BuiltInCategory.OST_Ceilings,
+                BuiltInCategory.OST_GenericModel
+            };
+
+            foreach (var cat in cats)
+            {
+                foreach (var elem in new FilteredElementCollector(doc)
+                    .OfCategory(cat)
+                    .WhereElementIsNotElementType()
+                    .ToElements())
+                {
+                    if (!FinishingElementGuard.IsManagedFinishingElement(elem))
+                        continue;
+
+                    var taggedRoomId = ReadRoomIdFromElement(elem);
+                    var spatialRoomIds = FindRoomIdsBySpatialQuery(elem);
+                    var elemLabel = $"{elem.Category?.Name ?? "Element"} {elem.Id}";
+
+                    if (taggedRoomId > 0 && targetMap.TryGetValue(taggedRoomId, out var taggedRow))
+                    {
+                        if (spatialRoomIds.Count == 1 && !spatialRoomIds.Contains(taggedRoomId))
+                        {
+                            var spatialRoom = doc.GetElement(RevitCompat.CreateElementId(spatialRoomIds.First())) as Room;
+                            add(taggedRow, "歸戶異常", "房間歸戶",
+                                $"AR_RoomId={taggedRow.Number}",
+                                spatialRoom != null ? $"{spatialRoom.Number} {spatialRoom.Name}" : spatialRoomIds.First().ToString(),
+                                $"{elemLabel} 的 AR_RoomId 指向本房間，但幾何取樣位於其他房間，可能為複製/移動後未更新參數。");
+                        }
+                        else if (spatialRoomIds.Count > 1)
+                        {
+                            add(taggedRow, "歸戶異常", "房間歸戶",
+                                $"AR_RoomId={taggedRow.Number}",
+                                string.Join(",", spatialRoomIds),
+                                $"{elemLabel} 幾何取樣命中多間房間，驗算不應任意歸戶。");
+                        }
+                    }
+                    else if (taggedRoomId <= 0 && spatialRoomIds.Count == 1
+                             && targetMap.TryGetValue(spatialRoomIds.First(), out var spatialRow))
+                    {
+                        add(spatialRow, "未歸戶", "房間歸戶",
+                            "（無 AR_RoomId）",
+                            $"{spatialRow.Number} {spatialRow.Name}",
+                            $"{elemLabel} 空間判斷屬於本房間，但缺少 AR_RoomId；報表可提示人工確認，避免交付明細漏算。");
+                    }
+                }
+            }
+        }
+
         private static int SeverityRank(string severity)
         {
             return severity switch
             {
+                "歸戶異常" => 0,
                 "不一致" => 0,
                 "缺少模型" => 1,
+                "未歸戶" => 1,
                 "模型未同步" => 2,
                 "混合型" => 3,
                 "通過" => 8,
@@ -1634,6 +1735,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             if (md.WallAreaM2 > 0) parts.Add($"牆:{JoinTypeNamesByIds(WallTypeOptions, md.WallTypeIds)} / {md.WallHeightMm:0.#}mm / {md.WallAreaM2:0.###}m²");
             if (md.FloorAreaM2 > 0) parts.Add($"地:{JoinTypeNamesByIds(FloorTypeOptions, md.FloorTypeIds)} / {md.FloorAreaM2:0.###}m²");
             if (md.CeilingAreaM2 > 0) parts.Add($"天:{JoinTypeNamesByIds(CeilingTypeOptions, md.CeilingTypeIds)} / {md.CeilingAreaM2:0.###}m²");
+            if (md.ManualFaceAreaM2 > 0) parts.Add($"手動面:{md.ManualFaceAreaM2:0.###}m²");
             if (md.SkirtingLengthM > 0) parts.Add($"踢:{JoinTypeNamesByIds(SkirtingTypeOptions, md.SkirtingTypeIds)} / {md.SkirtingLengthM:0.###}m");
             return parts.Any() ? string.Join("｜", parts) : "（無模型粉刷面）";
         }
@@ -1925,6 +2027,24 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                     AppendAcceptanceRow(sheetData, row, "踢腳板", typeName, modelQty, reportQty, "m", 0.01, "LocationCurve 長度 / 高度 ≤ 500mm 識別", viewName);
                 }
 
+                if (md != null && md.ManualFaceAreaM2 > 0)
+                {
+                    foreach (var kv in md.ManualFaceAreaByMaterialM2.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+                    {
+                        AppendAcceptanceRow(
+                            sheetData,
+                            row,
+                            "手動裝修面",
+                            kv.Key,
+                            kv.Value,
+                            kv.Value,
+                            "㎡",
+                            0.01,
+                            "一般模型/DirectShape 面積參數；多點空間歸戶；樓梯間/斜面手動面獨立列示",
+                            viewName);
+                    }
+                }
+
                 if (row.WallTypeId <= 0 && row.FloorTypeId <= 0 && row.CeilingTypeId <= 0 && row.SkirtingTypeId <= 0)
                 {
                     sheetData.Append(CreateReportRow("未設定", row.Level, row.Number, row.Name, "總覽", "（未設定）", "", "", "", "", "", "房間未設定裝修材料", viewName));
@@ -2168,6 +2288,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 "牆高" => md.WallElementIds,
                 "樓板" => md.FloorElementIds,
                 "天花" => md.CeilingElementIds,
+                "手動裝修面" => md.ManualFaceElementIds,
                 "踢腳板" => md.SkirtingElementIds,
                 _ => Enumerable.Empty<ElementId>()
             };
@@ -2184,6 +2305,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             foreach (var id in md.WallElementIds) yield return id;
             foreach (var id in md.FloorElementIds) yield return id;
             foreach (var id in md.CeilingElementIds) yield return id;
+            foreach (var id in md.ManualFaceElementIds) yield return id;
             foreach (var id in md.SkirtingElementIds) yield return id;
         }
 
@@ -2740,7 +2862,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                     .WhereElementIsNotElementType()
                     .ToElements())
                 {
-                    if (FinishingElementGuard.IsManagedFinishingElement(element))
+                    if (IsProtectedGeneratedFinishElement(element))
                         continue;
 
                     if (HasAnyArFinishParameterValue(element))
@@ -2754,6 +2876,24 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
         private static bool HasAnyArFinishParameterValue(Element element)
         {
             return ArFinishParameterNames.Any(name => HasParameterValue(element.LookupParameter(name)));
+        }
+
+        private static bool IsProtectedGeneratedFinishElement(Element element)
+        {
+            if (!FinishingElementGuard.IsSupportedFinishCategory(element))
+                return false;
+
+            if (element is DirectShape ds)
+                return string.Equals(ds.ApplicationId, FinishingElementGuard.StableMarker, StringComparison.OrdinalIgnoreCase);
+
+            return FinishingElementGuard.HasStableMarker(element);
+        }
+
+        private static bool IsTrustedModelFinishElementForSync(Element element)
+        {
+            // 同步模型只信任工具生成/標記過的粉刷面。
+            // 單純殘留 AR_RoomId 的結構牆/樓板不再回填下拉欄位，避免讀到 AR_RC 等非粉刷牆型。
+            return IsProtectedGeneratedFinishElement(element);
         }
 
         private static bool HasParameterValue(Autodesk.Revit.DB.Parameter parameter)
@@ -2883,17 +3023,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             if (wall == null)
                 return false;
 
-            if (FinishingElementGuard.IsManagedFinishingElement(wall))
-                return true;
-
-            var typeName = wall.WallType?.Name ?? string.Empty;
-            var name = wall.Name ?? string.Empty;
-            return typeName.IndexOf("AR_", StringComparison.OrdinalIgnoreCase) >= 0
-                || typeName.IndexOf("裝修", StringComparison.OrdinalIgnoreCase) >= 0
-                || typeName.IndexOf("finish", StringComparison.OrdinalIgnoreCase) >= 0
-                || name.IndexOf("AR_", StringComparison.OrdinalIgnoreCase) >= 0
-                || name.IndexOf("裝修", StringComparison.OrdinalIgnoreCase) >= 0
-                || name.IndexOf("finish", StringComparison.OrdinalIgnoreCase) >= 0;
+            return IsProtectedGeneratedFinishElement(wall);
         }
 
         private void ShowImportExportDialog()
@@ -3549,34 +3679,42 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
         }
 
         /// <summary>
-        /// 手動建置元素（無 AR_RoomId 參數）的備援：以元素包圍盒中心點查詢所在房間。
-        /// 從最後（施工）階段往前找，回傳第一個有效房間的 ElementId 值。
+        /// 手動建置元素（無 AR_RoomId 參數）的備援：以多個幾何取樣點查詢所在房間。
+        /// 若同一元素可歸屬多間房間，回傳 0，避免樓梯間、挑空或重疊房間被任意歸戶。
         /// </summary>
         private static long FindRoomIdBySpatialQuery(Element element)
         {
             try
             {
-                var doc = element.Document;
-                var bb = element.get_BoundingBox(null);
-                if (bb == null) return 0L;
+                var matchedRoomIds = FindRoomIdsBySpatialQuery(element, useFallback: false);
 
-                var center = new XYZ(
-                    (bb.Min.X + bb.Max.X) / 2.0,
-                    (bb.Min.Y + bb.Max.Y) / 2.0,
-                    (bb.Min.Z + bb.Max.Z) / 2.0);
-
-                // 從最後施工階段往前找，優先使用最新階段
-                var phases = doc.Phases;
-                for (int i = phases.Size - 1; i >= 0; i--)
+                if (matchedRoomIds.Count == 1)
                 {
-                    if (!(phases.get_Item(i) is Phase phase)) continue;
-                    var room = doc.GetRoomAtPoint(center, phase);
-                    if (room != null)
-                    {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"[FindRoomIdBySpatialQuery] 元素 {element.Id} → 房間 {room.Number} (phase={phase.Name})");
-                        return RevitCompat.GetElementIdValue(room.Id);
-                    }
+                    var roomId = matchedRoomIds.First();
+                    var room = element.Document.GetElement(RevitCompat.CreateElementId(roomId)) as Room;
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[FindRoomIdBySpatialQuery] 元素 {element.Id} → 房間 {room?.Number ?? roomId.ToString()} (multi-point)");
+                    return roomId;
+                }
+
+                if (matchedRoomIds.Count > 1)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[FindRoomIdBySpatialQuery] 元素 {element.Id} 命中多間房間，已略過自動歸戶：{string.Join(",", matchedRoomIds)}");
+                    return 0L;
+                }
+
+                // 備援：若 Room.IsPointInRoom 因階段或模型狀態沒有命中，才使用 Revit 的 GetRoomAtPoint。
+                // 仍然以多點結果去重，避免單點中心剛好落在樓梯間/挑空邊界時誤判。
+                var fallbackRoomIds = FindRoomIdsBySpatialQuery(element, useFallback: true);
+
+                if (fallbackRoomIds.Count == 1)
+                    return fallbackRoomIds.First();
+
+                if (fallbackRoomIds.Count > 1)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[FindRoomIdBySpatialQuery] 元素 {element.Id} 備援查詢命中多間房間，已略過自動歸戶：{string.Join(",", fallbackRoomIds)}");
                 }
             }
             catch (Exception ex)
@@ -3584,6 +3722,102 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 System.Diagnostics.Debug.WriteLine($"[FindRoomIdBySpatialQuery] 空間查詢失敗：{ex.Message}");
             }
             return 0L;
+        }
+
+        private static HashSet<long> FindRoomIdsBySpatialQuery(Element element, bool useFallback = true)
+        {
+            var result = new HashSet<long>();
+            try
+            {
+                var doc = element.Document;
+                var probePoints = GetElementRoomProbePoints(element).ToList();
+                if (probePoints.Count == 0) return result;
+
+                var rooms = new FilteredElementCollector(doc)
+                    .OfCategory(BuiltInCategory.OST_Rooms)
+                    .WhereElementIsNotElementType()
+                    .OfType<Room>()
+                    .Where(r => r.Area > 0)
+                    .ToList();
+
+                foreach (var point in probePoints)
+                {
+                    foreach (var room in rooms)
+                    {
+                        if (RoomOverlapGuard.IsPointInRoomSafe(room, point))
+                            result.Add(RevitCompat.GetElementIdValue(room.Id));
+                    }
+                }
+
+                if (result.Count > 0 || !useFallback)
+                    return result;
+
+                var phases = doc.Phases;
+                foreach (var point in probePoints)
+                {
+                    for (int i = phases.Size - 1; i >= 0; i--)
+                    {
+                        if (!(phases.get_Item(i) is Phase phase)) continue;
+                        var room = doc.GetRoomAtPoint(point, phase);
+                        if (room != null && room.Area > 0)
+                        {
+                            result.Add(RevitCompat.GetElementIdValue(room.Id));
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return result;
+        }
+
+        private static IEnumerable<XYZ> GetElementRoomProbePoints(Element element)
+        {
+            if (element == null)
+                yield break;
+
+            if (element.Location is LocationPoint lp)
+                yield return lp.Point;
+
+            if (element.Location is LocationCurve lc)
+                yield return lc.Curve.Evaluate(0.5, true);
+
+            var bb = element.get_BoundingBox(null);
+            if (bb == null)
+                yield break;
+
+            var center = new XYZ(
+                (bb.Min.X + bb.Max.X) / 2.0,
+                (bb.Min.Y + bb.Max.Y) / 2.0,
+                (bb.Min.Z + bb.Max.Z) / 2.0);
+
+            yield return center;
+
+            var categoryId = element.Category != null ? RevitCompat.GetElementIdValue(element.Category.Id) : 0;
+            const double probeOffset = 10.0 / 304.8; // 10mm，避免取樣點落在樓板/天花板厚度中心而不在房間內
+
+            if (categoryId == (int)BuiltInCategory.OST_Floors)
+                yield return new XYZ(center.X, center.Y, bb.Max.Z + probeOffset);
+            else if (categoryId == (int)BuiltInCategory.OST_Ceilings)
+                yield return new XYZ(center.X, center.Y, bb.Min.Z - probeOffset);
+
+            // 樓梯間或不規則面可能中心點落在洞口/邊界上，補四象限點提升判讀穩定性。
+            var z = center.Z;
+            if (categoryId == (int)BuiltInCategory.OST_Floors)
+                z = bb.Max.Z + probeOffset;
+            else if (categoryId == (int)BuiltInCategory.OST_Ceilings)
+                z = bb.Min.Z - probeOffset;
+
+            var x1 = bb.Min.X + (bb.Max.X - bb.Min.X) * 0.25;
+            var x3 = bb.Min.X + (bb.Max.X - bb.Min.X) * 0.75;
+            var y1 = bb.Min.Y + (bb.Max.Y - bb.Min.Y) * 0.25;
+            var y3 = bb.Min.Y + (bb.Max.Y - bb.Min.Y) * 0.75;
+
+            yield return new XYZ(x1, y1, z);
+            yield return new XYZ(x1, y3, z);
+            yield return new XYZ(x3, y1, z);
+            yield return new XYZ(x3, y3, z);
         }
 
         /// <summary>
@@ -3611,7 +3845,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 .WhereElementIsNotElementType()
                 .ToElements())
             {
-                if (!FinishingElementGuard.IsManagedFinishingElement(elem))
+                if (!IsTrustedModelFinishElementForSync(elem))
                     continue;
 
                 long typeIdVal = RevitCompat.GetElementIdValue(elem.GetTypeId());
@@ -3666,7 +3900,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 .WhereElementIsNotElementType()
                 .ToElements())
             {
-                if (!FinishingElementGuard.IsManagedFinishingElement(elem))
+                if (!IsTrustedModelFinishElementForSync(elem))
                     continue;
 
                 long typeIdVal = RevitCompat.GetElementIdValue(elem.GetTypeId());
@@ -3694,7 +3928,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 .WhereElementIsNotElementType()
                 .ToElements())
             {
-                if (!FinishingElementGuard.IsManagedFinishingElement(elem))
+                if (!IsTrustedModelFinishElementForSync(elem))
                     continue;
 
                 long typeIdVal = RevitCompat.GetElementIdValue(elem.GetTypeId());
@@ -3716,8 +3950,133 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                 if (data.CeilingTypeId <= 0) data.CeilingTypeId = typeIdVal;
             }
 
+            // 一般模型手動裝修面（例如樓梯間斜面、挑空側面、不規則面生面）。
+            // 其中 RoomFinish_ColumnWall 是房間裝修自動補生的柱側粉刷面，
+            // 應納入牆面粉刷驗算量；其他 DirectShape 仍獨立列為手動裝修面。
+            foreach (var elem in new FilteredElementCollector(doc)
+                .OfCategory(BuiltInCategory.OST_GenericModel)
+                .WhereElementIsNotElementType()
+                .ToElements())
+            {
+                if (!IsTrustedModelFinishElementForSync(elem))
+                    continue;
+
+                long roomId = ReadRoomIdFromElement(elem);
+                if (roomId <= 0)
+                {
+                    roomId = FindRoomIdBySpatialQuery(elem);
+                    if (roomId <= 0) continue;
+                }
+
+                var areaM2 = ReadManualFaceAreaM2(elem);
+                if (areaM2 <= 0) continue;
+
+                var data = GetOrCreate(roomId);
+                var materialName = GetManualFaceMaterialName(elem);
+
+                if (IsRoomFinishColumnWallFace(elem, out var wallTypeId))
+                {
+                    data.WallAreaM2 += areaM2;
+                    data.WallElementIds.Add(elem.Id);
+
+                    if (wallTypeId > 0)
+                    {
+                        data.WallTypeIds.Add(wallTypeId);
+                        data.WallAreaByTypeM2[wallTypeId] =
+                            (data.WallAreaByTypeM2.TryGetValue(wallTypeId, out var wallExisting) ? wallExisting : 0) + areaM2;
+                        if (data.WallTypeId <= 0) data.WallTypeId = wallTypeId;
+                    }
+
+                    continue;
+                }
+
+                data.ManualFaceAreaM2 += areaM2;
+                data.ManualFaceElementIds.Add(elem.Id);
+                data.ManualFaceAreaByMaterialM2[materialName] =
+                    (data.ManualFaceAreaByMaterialM2.TryGetValue(materialName, out var existing) ? existing : 0) + areaM2;
+            }
+
             System.Diagnostics.Debug.WriteLine($"[BuildModelFinishDataIndex] 完成，共 {index.Count} 間房間有粉刷元素");
             return index;
+        }
+
+        private static bool IsRoomFinishColumnWallFace(Element elem, out long wallTypeId)
+        {
+            wallTypeId = 0;
+
+            try
+            {
+                if (!(elem is DirectShape ds))
+                    return false;
+
+                var appData = ds.ApplicationDataId ?? string.Empty;
+                if (appData.IndexOf("RoomFinish_ColumnWall", StringComparison.OrdinalIgnoreCase) < 0)
+                    return false;
+
+                const string token = "WallTypeId=";
+                var idx = appData.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+                if (idx >= 0)
+                {
+                    var start = idx + token.Length;
+                    var end = appData.IndexOf('|', start);
+                    var text = end >= 0 ? appData.Substring(start, end - start) : appData.Substring(start);
+                    long.TryParse(text, out wallTypeId);
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static double ReadManualFaceAreaM2(Element elem)
+        {
+            try
+            {
+                var areaParam = elem.LookupParameter("面積")
+                    ?? elem.LookupParameter("裝修面積")
+                    ?? elem.LookupParameter("Area");
+                if (areaParam != null && areaParam.StorageType == StorageType.Double)
+                    return InternalAreaToSquareMeters(areaParam.AsDouble());
+
+                var hostArea = elem.get_Parameter(BuiltInParameter.HOST_AREA_COMPUTED);
+                if (hostArea != null && hostArea.StorageType == StorageType.Double)
+                    return InternalAreaToSquareMeters(hostArea.AsDouble());
+            }
+            catch { }
+
+            return 0;
+        }
+
+        private static string GetManualFaceMaterialName(Element elem)
+        {
+            try
+            {
+                var materialParam = elem.LookupParameter("裝修材質")
+                    ?? elem.LookupParameter("材料名稱")
+                    ?? elem.LookupParameter("材質")
+                    ?? elem.LookupParameter("Material");
+
+                if (materialParam != null && materialParam.StorageType == StorageType.String)
+                {
+                    var name = materialParam.AsString();
+                    if (!string.IsNullOrWhiteSpace(name))
+                        return name;
+                }
+
+                var materialIdParam = elem.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM);
+                if (materialIdParam != null && materialIdParam.StorageType == StorageType.ElementId)
+                {
+                    var material = elem.Document.GetElement(materialIdParam.AsElementId()) as Material;
+                    if (!string.IsNullOrWhiteSpace(material?.Name))
+                        return material.Name;
+                }
+            }
+            catch { }
+
+            return "手動裝修面";
         }
 
         private void GetRoomMetrics(RoomFinishRow row, out double roomAreaSqm, out double wallAreaEstimateSqm, out double floorAreaEstimateSqm, out double ceilingAreaEstimateSqm)
@@ -4607,25 +4966,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                     .Where(x => !string.IsNullOrWhiteSpace(x)));
             }
 
-            var text = fullName.Trim();
-            // 支援代號如 W1 / W1A / W1-A / C2-1
-            var m = System.Text.RegularExpressions.Regex.Match(
-                text,
-                @"^\s*([A-Za-z]+\d+[A-Za-z]?(?:-[A-Za-z0-9]+)*)\b");
-            if (m.Success) return m.Groups[1].Value.Trim();
-
-            // 退回明確分隔符，供少數非標準代號使用。
-            var idxUnderscore = text.IndexOf("_", StringComparison.Ordinal);
-            if (idxUnderscore > 0) return text.Substring(0, idxUnderscore).Trim();
-
-            var idxDoubleDash = text.IndexOf("--", StringComparison.Ordinal);
-            if (idxDoubleDash > 0) return text.Substring(0, idxDoubleDash).Trim();
-
-            var idxColon = text.IndexOf("：", StringComparison.Ordinal);
-            if (idxColon <= 0) idxColon = text.IndexOf(":", StringComparison.Ordinal);
-            if (idxColon > 0) return text.Substring(0, idxColon).Trim();
-
-            return text;
+            return TrySplitTypeName(fullName, out var code, out _) ? code : fullName.Trim();
         }
 
         private static string SplitTypeName(string fullName)
@@ -4638,22 +4979,64 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
                     .Where(x => !string.IsNullOrWhiteSpace(x)));
             }
 
-            var text = fullName.Trim();
-            var code = SplitTypeCode(text);
-            if (string.IsNullOrWhiteSpace(code)) return text;
+            return TrySplitTypeName(fullName, out _, out var name) ? name : fullName.Trim();
+        }
 
-            var remainder = text;
-            if (remainder.StartsWith(code, StringComparison.OrdinalIgnoreCase))
+        private static bool TrySplitTypeName(string fullName, out string code, out string name)
+        {
+            code = string.Empty;
+            name = string.Empty;
+
+            var text = (fullName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            // 支援代號本身含短尾碼，且材料以空白接續：W1-A 水泥漆、C2-1 油漆。
+            var codeWithSuffix = System.Text.RegularExpressions.Regex.Match(
+                text,
+                @"^\s*([A-Za-z]+\d+[A-Za-z]?-[A-Za-z0-9]+)\s+(.+)$");
+            if (codeWithSuffix.Success)
             {
-                remainder = remainder.Substring(code.Length).TrimStart();
+                code = codeWithSuffix.Groups[1].Value.Trim();
+                name = codeWithSuffix.Groups[2].Value.Trim();
+                return !string.IsNullOrWhiteSpace(code);
             }
 
-            while (remainder.StartsWith("_") || remainder.StartsWith("-") || remainder.StartsWith("：") || remainder.StartsWith(":"))
+            // 主要規則：代號-材料、代號_材料、代號：材料。
+            // 例如 W1-水泥漆、F1-EPOXY、C1-平頂、S1_踢腳板。
+            var separated = System.Text.RegularExpressions.Regex.Match(
+                text,
+                @"^\s*([A-Za-z]+\d+[A-Za-z]?)\s*[-_：:]\s*(.+)$");
+            if (separated.Success)
             {
-                remainder = remainder.Substring(1).TrimStart();
+                code = separated.Groups[1].Value.Trim();
+                name = separated.Groups[2].Value.Trim();
+                return !string.IsNullOrWhiteSpace(code);
             }
 
-            return string.IsNullOrWhiteSpace(remainder) ? text : remainder;
+            // 空白分隔：W1 水泥漆。
+            var spaced = System.Text.RegularExpressions.Regex.Match(
+                text,
+                @"^\s*([A-Za-z]+\d+[A-Za-z]?)\s+(.+)$");
+            if (spaced.Success)
+            {
+                code = spaced.Groups[1].Value.Trim();
+                name = spaced.Groups[2].Value.Trim();
+                return !string.IsNullOrWhiteSpace(code);
+            }
+
+            // 只有代號時，代號欄回傳原文，材料欄也維持原文，避免使用者看不到完整類型。
+            var codeOnly = System.Text.RegularExpressions.Regex.Match(
+                text,
+                @"^\s*([A-Za-z]+\d+[A-Za-z]?(?:-[A-Za-z0-9]+)*)\s*$");
+            if (codeOnly.Success)
+            {
+                code = codeOnly.Groups[1].Value.Trim();
+                name = text;
+                return !string.IsNullOrWhiteSpace(code);
+            }
+
+            return false;
         }
 
         private static bool TryResolveTypeId(IReadOnlyList<string> cells, int idCellIndex, int nameCellIndex, IEnumerable<TypeOption> options, out long resolvedId)

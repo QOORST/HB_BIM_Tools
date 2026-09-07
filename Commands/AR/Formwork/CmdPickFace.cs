@@ -470,7 +470,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 // 建立 DirectShape
                 var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                directShape.ApplicationId = "YD_BIM_Formwork";
+                directShape.ApplicationId = "HB_BIM_Formwork";
                 directShape.ApplicationDataId = "ImprovedPickFace";
                 directShape.SetShape(new GeometryObject[] { finalFormwork });
                 directShape.Name = $"面選改進模板_{hostElement.Id}";
@@ -825,7 +825,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 // 建立預覽 DirectShape
                 var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                directShape.ApplicationId = "YD_BIM_Formwork_Preview";
+                directShape.ApplicationId = "HB_BIM_Formwork_Preview";
                 directShape.ApplicationDataId = "Preview";
                 directShape.SetShape(new GeometryObject[] { previewSolid });
                 directShape.Name = $"預覽模板_{hostElement.Id}";
@@ -1067,7 +1067,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 try
                 {
                     var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                    directShape.ApplicationId = "YD_BIM_Formwork";
+                    directShape.ApplicationId = "HB_BIM_Formwork";
                     directShape.ApplicationDataId = "SingleFace";
                     directShape.SetShape(new GeometryObject[] { finalFormwork });
 

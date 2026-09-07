@@ -1077,7 +1077,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
         /// <summary>
         /// 使用一般模型（DirectShape）創建裝修面
         /// </summary>
-        private ElementId CreateGenericModelFromFace(Document doc, Element host, PlanarFace face, CurveLoop curveLoop, double thicknessMm, Material material)
+        private ElementId CreateGenericModelFromFace(Document doc, Element host, PlanarFace face, CurveLoop curveLoop, double thicknessMm, Material material, bool skipStructuralCut = false)
         {
             try
             {
@@ -1100,8 +1100,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
 
                 Debug.WriteLine($"✅ 創建擠出實體成功，體積: {solid.Volume * Math.Pow(304.8, 3):F2} mm³");
 
-                // 🎯 使用布林運算切割掉與所有結構元素重疊的部分
-                solid = CutSolidWithStructuralElements(doc, solid, host, face);
+                // 🎯 使用布林運算切割掉與所有結構元素重疊的部分。
+                // 柱面例外：柱常貼牆/梁/板，鄰近結構扣除會把有效柱面吃掉。
+                if (!skipStructuralCut)
+                    solid = CutSolidWithStructuralElements(doc, solid, host, face);
+                else
+                    Debug.WriteLine("🏛️ 柱面專用路徑：略過鄰近結構扣除，保留選取柱面");
 
                 if (solid == null || solid.Volume < 1e-6)
                 {
@@ -1109,9 +1113,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     return ElementId.InvalidElementId;
                 }
 
-                // 🎯 參考面選模板邏輯：使用原始面面積（而不是布林切割後的體積計算）
-                // 原因：布林切割可能會切掉部分體積，但面積應該基於原始選取的面
-                double originalAreaM2 = face.Area * 0.09290304; // ft² → m²
+                double originalAreaM2 = face.Area * 0.09290304; // ft² → m²，僅作為厚度異常時的備援
                 Debug.WriteLine($"📐 原始面面積: {originalAreaM2:F4} m²");
 
                 // 🎯 分解實體為多個獨立的實體（如果被切割成多個片段）
@@ -1130,17 +1132,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                         continue;
                     }
 
-                    // 🎯 參考面選模板邏輯：計算這個片段佔原始面積的比例
+                    // 一般模型是有厚度的實體；實際可計量面積應依扣除後體積 / 厚度回推。
+                    // 這樣門窗洞、鄰近結構扣除與分片後的數量才會與實體一致。
                     double volumeMm3 = separatedSolid.Volume * Math.Pow(304.8, 3);
-                    double totalVolumeMm3 = solid.Volume * Math.Pow(304.8, 3);
-                    double volumeRatio = volumeMm3 / totalVolumeMm3;
-                    double fragmentAreaM2 = originalAreaM2 * volumeRatio;
+                    double fragmentAreaM2 = CalculateAreaFromVolumeAndThickness(separatedSolid, thicknessFt, originalAreaM2);
 
-                    Debug.WriteLine($"  📐 實體 {index}: 體積={volumeMm3:F2} mm³, 體積比例={volumeRatio:F4}, 面積={fragmentAreaM2:F4} m²");
+                    Debug.WriteLine($"  📐 實體 {index}: 體積={volumeMm3:F2} mm³, 厚度={thicknessMm:F1} mm, 面積={fragmentAreaM2:F4} m²");
 
                     // 使用 DirectShape 創建一般模型
                     var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                    directShape.ApplicationId = "YD_BIM_Finishings";
+                    directShape.ApplicationId = "HB_BIM_Finishings";
                     directShape.ApplicationDataId = "FaceToFace_GenericModel";
                     directShape.SetShape(new GeometryObject[] { separatedSolid });
 
@@ -2002,7 +2003,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
 
                 // 創建 DirectShape
                 var directShape = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                directShape.ApplicationId = "YD_BIM_Finishings";
+                directShape.ApplicationId = "HB_BIM_Finishings";
                 directShape.ApplicationDataId = "FaceToFace_Sloped";
                 directShape.SetShape(new GeometryObject[] { formworkSolid });
                 directShape.Name = $"裝修面_斜面_{host.Id}_{DateTime.Now:HHmmss}";
@@ -2018,8 +2019,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     SetMaterialColorInAllViews(doc, directShape.Id, material);
                 }
 
-                // 設定共用參數
-                SetFinishingParameters(directShape, host, thicknessFt * 304.8, material, face.Area, face);
+                // 設定共用參數。
+                // DirectShape 一般模型面積以「體積 / 厚度」回推，確保扣除後數量與實體一致。
+                var areaM2 = CalculateAreaFromVolumeAndThickness(formworkSolid, thicknessFt, face.Area * 0.09290304);
+                SetFinishingParameters(directShape, host, thicknessFt * 304.8, material, areaM2, face);
                 VisualFeedbackHelper.ProtectStructureFromFinishingElement(doc, directShape);
 
                 Debug.WriteLine($"✅ DirectShape 創建成功 - ID: {directShape.Id}");
@@ -2095,6 +2098,38 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     Debug.WriteLine($"    ✅ 設定面積: {areaM2:F4} m² ({areaInSquareFeet:F4} sq ft)");
                 }
 
+                // 一般模型（DirectShape）沒有 Revit 內建 HOST_AREA_COMPUTED，
+                // 明細表若抓「裝修面積」而不是「面積」會漏量，因此兩個欄位都同步寫入。
+                var finishingAreaParam = element.LookupParameter(SharedParams.P_FinishingArea)
+                    ?? element.LookupParameter("裝修面積");
+                if (finishingAreaParam != null && !finishingAreaParam.IsReadOnly)
+                {
+                    double areaInSquareFeet = AreaCalculator.ConvertToSquareFeet(areaM2);
+                    finishingAreaParam.Set(areaInSquareFeet);
+                    Debug.WriteLine($"    ✅ 設定裝修面積: {areaM2:F4} m² ({areaInSquareFeet:F4} sq ft)");
+                }
+
+                if (clickedFace != null)
+                {
+                    var quantity = CalculateFaceQuantity(clickedFace);
+
+                    var lengthParam = element.LookupParameter(SharedParams.P_Length)
+                        ?? element.LookupParameter("長度");
+                    if (lengthParam != null && !lengthParam.IsReadOnly && quantity.LengthFt > 1e-9)
+                    {
+                        lengthParam.Set(quantity.LengthFt);
+                        Debug.WriteLine($"    ✅ 設定長度: {quantity.LengthFt * 0.3048:F3} m");
+                    }
+
+                    var heightParam = element.LookupParameter(SharedParams.P_Height)
+                        ?? element.LookupParameter("高度");
+                    if (heightParam != null && !heightParam.IsReadOnly && quantity.HeightFt > 1e-9)
+                    {
+                        heightParam.Set(quantity.HeightFt);
+                        Debug.WriteLine($"    ✅ 設定高度: {quantity.HeightFt * 0.3048:F3} m");
+                    }
+                }
+
                 // 設定材料名稱
                 var materialNameParam = element.LookupParameter(SharedParams.P_MaterialName);
                 if (materialNameParam != null && !materialNameParam.IsReadOnly && material != null)
@@ -2103,16 +2138,25 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     Debug.WriteLine($"    ✅ 設定材料名稱: {material.Name}");
                 }
 
+                // 與房間裝修自動產出一致：裝修面不得作為房間邊界，
+                // 避免後續房間面積、邊界、驗算歸戶被新生成的粉刷面干擾。
+                var roomBoundingParam = element.get_Parameter(BuiltInParameter.WALL_ATTR_ROOM_BOUNDING);
+                if (roomBoundingParam != null && !roomBoundingParam.IsReadOnly)
+                {
+                    roomBoundingParam.Set(0);
+                    Debug.WriteLine("    ✅ 已取消面生面粉刷面的房間邊界");
+                }
+
                 // 穩定識別標記：供刪除 / 篩選 / 後續維護使用
                 var commentsParam = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
                 if (commentsParam != null && !commentsParam.IsReadOnly)
                 {
                     var existing = commentsParam.AsString() ?? string.Empty;
-                    if (existing.IndexOf("YD_BIM_Finishings", StringComparison.OrdinalIgnoreCase) < 0)
+                    if (existing.IndexOf("HB_BIM_Finishings", StringComparison.OrdinalIgnoreCase) < 0)
                     {
                         var marker = string.IsNullOrWhiteSpace(existing)
-                            ? "YD_BIM_Finishings"
-                            : existing + " | YD_BIM_Finishings";
+                            ? "HB_BIM_Finishings"
+                            : existing + " | HB_BIM_Finishings";
                         commentsParam.Set(marker);
                     }
                 }
@@ -2123,6 +2167,94 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
             catch (Exception ex)
             {
                 Debug.WriteLine($"    ⚠️ 設定參數失敗: {ex.Message}");
+            }
+        }
+
+        private (double LengthFt, double HeightFt) CalculateFaceQuantity(Face face)
+        {
+            try
+            {
+                if (face == null) return (0, 0);
+
+                var loops = face.GetEdgesAsCurveLoops();
+                if (loops == null || loops.Count == 0) return (0, 0);
+
+                var outer = GetOuterLoop(loops);
+                if (outer == null) return (0, 0);
+
+                double minZ = double.MaxValue;
+                double maxZ = double.MinValue;
+                var points = new List<XYZ>();
+
+                foreach (var curve in outer)
+                {
+                    var tessellated = curve.Tessellate();
+                    if (tessellated == null || tessellated.Count == 0)
+                        tessellated = new List<XYZ> { curve.GetEndPoint(0), curve.GetEndPoint(1) };
+
+                    foreach (var p in tessellated)
+                    {
+                        points.Add(p);
+                        minZ = Math.Min(minZ, p.Z);
+                        maxZ = Math.Max(maxZ, p.Z);
+                    }
+                }
+
+                double heightFt = maxZ > minZ ? maxZ - minZ : 0;
+                double lengthFt = 0;
+
+                if (face is PlanarFace pf)
+                {
+                    var normal = pf.FaceNormal;
+                    bool isVertical = Math.Abs(normal.Z) < 0.1;
+
+                    if (isVertical && points.Count > 1)
+                    {
+                        // 垂直裝修面：長度取水平投影最大距離，高度取 Z 差。
+                        for (int i = 0; i < points.Count; i++)
+                        {
+                            for (int j = i + 1; j < points.Count; j++)
+                            {
+                                var a = points[i];
+                                var b = points[j];
+                                var horizontal = new XYZ(b.X - a.X, b.Y - a.Y, 0);
+                                lengthFt = Math.Max(lengthFt, horizontal.GetLength());
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // 水平/斜面：無單一可靠「長度」定義，取外環最長邊作為排程參考值。
+                        lengthFt = outer.Max(c => c.ApproximateLength);
+                    }
+                }
+                else
+                {
+                    lengthFt = outer.Max(c => c.ApproximateLength);
+                }
+
+                return (lengthFt, heightFt);
+            }
+            catch
+            {
+                return (0, 0);
+            }
+        }
+
+        private static double CalculateAreaFromVolumeAndThickness(Solid solid, double thicknessFt, double fallbackAreaM2)
+        {
+            try
+            {
+                if (solid == null || solid.Volume <= 1e-9 || thicknessFt <= 1e-9)
+                    return Math.Max(0, fallbackAreaM2);
+
+                // Revit 內部單位：Volume = ft³，Thickness = ft，因此面積 = ft²。
+                var areaFt2 = solid.Volume / thicknessFt;
+                return areaFt2 * 0.09290304;
+            }
+            catch
+            {
+                return Math.Max(0, fallbackAreaM2);
             }
         }
 
@@ -2187,15 +2319,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     .Where(r => r.Area > 0)
                     .ToList();
 
-                Room foundRoom = null;
+                var matchedRooms = new List<Room>();
                 foreach (var room in rooms)
                 {
                     if (room.IsPointInRoom(testPoint))
-                    {
-                        foundRoom = room;
-                        break;
-                    }
+                        matchedRooms.Add(room);
                 }
+
+                if (matchedRooms.Count > 1)
+                {
+                    Debug.WriteLine($"    ⚠️ 面生面房間歸戶命中多間房間，已略過 AR_RoomId 寫入: {string.Join(",", matchedRooms.Select(r => r.Number))}");
+                    return;
+                }
+
+                var foundRoom = matchedRooms.FirstOrDefault();
                 if (foundRoom == null) return;
 
                 // 寫入 AR_RoomId

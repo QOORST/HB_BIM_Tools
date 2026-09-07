@@ -15,8 +15,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
     internal static class RoomOverlapGuard
     {
         /// <summary>
-        /// 以房間定位點與包圍盒採樣點檢查「同一點是否同時屬於多間房」。
-        /// 若命中多間房，後續自動寫參數、刪除或生成皆應視為不安全。
+        /// 檢查目標房間是否存在空間歸屬不唯一的風險。
+        /// 取樣包含房間定位點、平面九宮格，以及低/中/高三個高度；
+        /// 可涵蓋樓梯間、挑空、跨層房間等只在部分高度重疊的情境。
         /// </summary>
         public static List<RoomOverlapCheckIssue> Detect(IList<Room> rooms)
         {
@@ -56,7 +57,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 
                     var issue = new RoomOverlapCheckIssue
                     {
-                        Description = $"偵測到房間重疊或空間歸屬不唯一：{string.Join("、", matched.Select(FormatRoomLabel))}。相關房間已禁止自動回寫參數、刪除或生成裝修面。"
+                        Description = $"偵測到房間重疊或空間歸屬不唯一：{string.Join("、", matched.Select(FormatRoomLabel))}。相關房間已禁止自動回寫或重產裝修面，避免誤改報表參數。"
                     };
 
                     foreach (var id in ids)
@@ -79,6 +80,18 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
             return $"{number} {name}";
         }
 
+        public static bool IsPointInRoomSafe(Room room, XYZ point)
+        {
+            try
+            {
+                return room != null && point != null && room.IsPointInRoom(point);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static IEnumerable<XYZ> GetRoomProbePoints(Room room)
         {
             if (room == null)
@@ -93,30 +106,34 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 
             var min = bbox.Min;
             var max = bbox.Max;
-            var z = (min.Z + max.Z) * 0.5;
-            var x1 = min.X + (max.X - min.X) * 0.25;
-            var x2 = min.X + (max.X - min.X) * 0.50;
-            var x3 = min.X + (max.X - min.X) * 0.75;
-            var y1 = min.Y + (max.Y - min.Y) * 0.25;
-            var y2 = min.Y + (max.Y - min.Y) * 0.50;
-            var y3 = min.Y + (max.Y - min.Y) * 0.75;
-
-            yield return new XYZ(x2, y2, z);
-            yield return new XYZ(x1, y1, z);
-            yield return new XYZ(x1, y3, z);
-            yield return new XYZ(x3, y1, z);
-            yield return new XYZ(x3, y3, z);
-        }
-
-        private static bool IsPointInRoomSafe(Room room, XYZ point)
-        {
-            try
+            var xs = new[]
             {
-                return room != null && point != null && room.IsPointInRoom(point);
-            }
-            catch
+                min.X + (max.X - min.X) * 0.25,
+                min.X + (max.X - min.X) * 0.50,
+                min.X + (max.X - min.X) * 0.75
+            };
+            var ys = new[]
             {
-                return false;
+                min.Y + (max.Y - min.Y) * 0.25,
+                min.Y + (max.Y - min.Y) * 0.50,
+                min.Y + (max.Y - min.Y) * 0.75
+            };
+            var zs = new[]
+            {
+                min.Z + (max.Z - min.Z) * 0.10,
+                min.Z + (max.Z - min.Z) * 0.50,
+                min.Z + (max.Z - min.Z) * 0.90
+            };
+
+            foreach (var z in zs)
+            {
+                foreach (var x in xs)
+                {
+                    foreach (var y in ys)
+                    {
+                        yield return new XYZ(x, y, z);
+                    }
+                }
             }
         }
     }

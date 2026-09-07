@@ -5,7 +5,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 {
     internal static class FinishingElementGuard
     {
-        internal const string StableMarker = "YD_BIM_Finishings";
+        internal const string StableMarker = "HB_BIM_Finishings";
 
         internal static bool IsManagedFinishingElement(Element element)
         {

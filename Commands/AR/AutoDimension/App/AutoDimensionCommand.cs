@@ -14,8 +14,8 @@ public sealed class AutoDimensionCommand : IExternalCommand
         return AutoDimensionModelessController.Show(
             commandData,
             ref message,
-            DimensionMode.ColumnSetout,
-            "YD BIM 自動標註",
+            DimensionMode.BeamGrid,
+            "HB_BIM 自動標註",
             lockMode: false);
     }
 }

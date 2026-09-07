@@ -189,7 +189,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 
             using (var form = new WinForms.Form())
             {
-                form.Text = "YD BIM Tools - 房間裝修 (2026)";
+                form.Text = "HB_BIM Tools - 房間裝修 (2026)";
                 form.FormBorderStyle = WinForms.FormBorderStyle.FixedDialog;
                 form.StartPosition = WinForms.FormStartPosition.CenterScreen;
                 form.ClientSize = new System.Drawing.Size(500, 430);
@@ -211,7 +211,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
                     Top = top,
                     Width = 450,
                     Height = 30,
-                    Text = "2026 已改為精簡介面。若要只處理部分房間，請先在模型中選取房間。"
+                    Text = "若要只處理部分房間，請先在模型中選取房間。"
                 };
                 form.Controls.Add(infoLabel);
                 top += 38;

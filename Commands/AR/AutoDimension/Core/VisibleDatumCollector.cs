@@ -50,7 +50,7 @@ internal static class VisibleDatumCollector
                 continue;
             }
 
-            bucket.Add(new DatumInfo(element, midpoint, direction, reference));
+            bucket.Add(new DatumInfo(element, midpoint, direction, reference, line.GetEndPoint(0), line.GetEndPoint(1)));
         }
     }
 

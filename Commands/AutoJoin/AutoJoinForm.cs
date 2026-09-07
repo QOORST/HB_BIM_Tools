@@ -48,10 +48,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     private readonly CheckBox _sameCategoryCheckbox = new();
     private readonly CheckBox _structuralBridgeCheckbox = new();
     private readonly CheckBox _detailCheckbox = new();
+    private readonly bool _alignOnlyMode;
 
     public AutoJoinForm(AutoJoinSettings settings)
+        : this(settings, false)
     {
-        Text = "YD BIM 自動接合";
+    }
+
+    public AutoJoinForm(AutoJoinSettings settings, bool alignOnlyMode)
+    {
+        _alignOnlyMode = alignOnlyMode;
+        Text = alignOnlyMode ? "HB_BIM 對齊牆輪廓" : "HB_BIM 自動接合";
         Width = 920;
         Height = 750;
         MinimumSize = new Size(800, 650);
@@ -230,6 +237,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         var alignWallButton = new Button { Text = "對齊牆輪廓", Width = 110, Height = 32 };
         var joinButton = new Button { Text = "自動接合", Width = 110, Height = 32, BackColor = accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         joinButton.FlatAppearance.BorderSize = 0;
+        if (_alignOnlyMode)
+        {
+            alignWallButton.Text = "執行對齊";
+            alignWallButton.Width = 120;
+            alignWallButton.BackColor = accentColor;
+            alignWallButton.ForeColor = Color.White;
+            alignWallButton.FlatStyle = FlatStyle.Flat;
+            alignWallButton.FlatAppearance.BorderSize = 0;
+        }
 
         cancelButton.Click += (_, _) =>
         {
@@ -262,13 +278,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             Close();
         };
 
-        AcceptButton = joinButton;
+        AcceptButton = _alignOnlyMode ? alignWallButton : joinButton;
         CancelButton = cancelButton;
 
         actionPanel.Controls.Add(cancelButton);
-        actionPanel.Controls.Add(unjoinButton);
         actionPanel.Controls.Add(alignWallButton);
-        actionPanel.Controls.Add(joinButton);
+        if (!_alignOnlyMode)
+        {
+            actionPanel.Controls.Add(unjoinButton);
+            actionPanel.Controls.Add(joinButton);
+        }
 
         root.Controls.Add(guideLabel, 0, 0);
         root.SetColumnSpan(guideLabel, 2);

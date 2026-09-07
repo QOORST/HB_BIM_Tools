@@ -5,6 +5,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
 using Autodesk.Revit.UI;
 using System.Text;
+using YD_RevitTools.LicenseManager.Commands.AR.Formwork;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 {
@@ -290,15 +291,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 
             var targetIds = new HashSet<long>(roomIds.Select(id => RevitCompat.GetElementIdValue(id)));
             var idsToDelete = new List<ElementId>();
+            var blockers = new List<string>();
+            var categoryCounts = new Dictionary<string, int>();
 
-            foreach (var cat in new[] { BuiltInCategory.OST_Walls, BuiltInCategory.OST_Floors, BuiltInCategory.OST_Ceilings })
+            foreach (var cat in new[] { BuiltInCategory.OST_Walls, BuiltInCategory.OST_Floors, BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_GenericModel })
             {
                 foreach (var elem in new FilteredElementCollector(Doc)
                     .OfCategory(cat)
                     .WhereElementIsNotElementType()
                     .ToElements())
                 {
-                    if (!FinishingElementGuard.IsManagedFinishingElement(elem))
+                    if (!IsProtectedGeneratedFinishElement(elem))
                         continue;
 
                     var p = elem.LookupParameter("房間ID(AR_RoomId)")
@@ -311,12 +314,35 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
                         : long.TryParse(p.AsString(), out var v) ? v : 0;
 
                     if (roomId > 0 && targetIds.Contains(roomId))
+                    {
+                        var label = $"{elem.Category?.Name ?? cat.ToString()} {elem.Id}";
+                        if (elem.Pinned)
+                            blockers.Add($"{label} 已釘選");
+                        if (elem.GroupId != ElementId.InvalidElementId)
+                            blockers.Add($"{label} 位於群組 {elem.GroupId}");
+
                         idsToDelete.Add(elem.Id);
+
+                        var catName = elem.Category?.Name ?? cat.ToString();
+                        categoryCounts[catName] = (categoryCounts.TryGetValue(catName, out var c) ? c : 0) + 1;
+                    }
                 }
             }
 
             if (idsToDelete.Count > 0)
             {
+                Logger.Log("刪除預檢：將刪除 " + idsToDelete.Count + " 個既有粉刷元素；" +
+                           string.Join("，", categoryCounts.Select(kv => $"{kv.Key}:{kv.Value}")));
+
+                if (blockers.Count > 0)
+                {
+                    var msg = "刪除預檢失敗，已停止重新產出以避免誤刪：\n" +
+                              string.Join("\n", blockers.Take(20)) +
+                              (blockers.Count > 20 ? $"\n...另有 {blockers.Count - 20} 項" : "");
+                    Logger.Log(msg);
+                    throw new InvalidOperationException(msg);
+                }
+
                 Doc.Delete(idsToDelete);
                 Logger.Log($"已刪除 {idsToDelete.Count} 個現有粉刷元素");
             }
@@ -966,6 +992,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 
                 var sbo = new SpatialElementBoundaryOptions();
                 var createdWalls = new List<Wall>();
+                var createdWallKeys = new HashSet<string>();
                 double halfWidth = wt.Width / 2.0;
                 double fullWidth = wt.Width;
                 double roomLowerOffset = room.get_Parameter(BuiltInParameter.ROOM_LOWER_OFFSET)?.AsDouble() ?? 0.0;
@@ -1034,11 +1061,22 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
                             continue;
                         }
 
+                        if (!TryRegisterFinishWallCurve(createdWallKeys, finishCenterline, wallHeight, roomLowerOffset, out var duplicateKey))
+                        {
+                            Logger.Log($"略過重複粉刷牆中心線: {duplicateKey}");
+                            continue;
+                        }
+
                         try
                         {
                             // Wall.Create(doc, curve, wallTypeId, levelId, height, offset, flip, structural)
                             var finishWall = Wall.Create(Doc, finishCenterline, wt.Id, level.Id, wallHeight, 0, false, false);
-                            if (finishWall == null) { Logger.Log("Wall.Create 返回 null"); continue; }
+                            if (finishWall == null)
+                            {
+                                createdWallKeys.Remove(duplicateKey);
+                                Logger.Log("Wall.Create 返回 null");
+                                continue;
+                            }
 
                             // 立即禁用兩端 Wall Join，防止 Revit 建牆瞬間自動接合至結構牆而移位其端點
                             try { WallUtils.DisallowWallJoinAtEnd(finishWall, 0); } catch { }
@@ -1083,12 +1121,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
                         }
                         catch (Exception wex)
                         {
+                            if (!string.IsNullOrWhiteSpace(duplicateKey))
+                                createdWallKeys.Remove(duplicateKey);
                             Logger.Log($"Wall.Create 失敗: {wex.Message}");
                         }
                     }
                 }
 
                 Logger.Log($"步驟2-3 ✓ 共建立 {createdWalls.Count} 面粉刷牆");
+
+                // Room.GetBoundarySegments 在部分外牆凸柱/結構柱模型中不會穩定回傳柱側面，
+                // 導致「面生面」可做、但「房間裝修」漏生柱面。這裡只補掃描柱側面的線段與高度，
+                // 實際仍用 Wall.Create 建立粉刷牆；房間裝修自動產物不得使用一般模型。
+                int columnFaceCount = CreateColumnWallFinishFacesForRoom(room, wt, wallHeight, roomLowerOffset, createdWalls, createdWallKeys);
+                if (columnFaceCount > 0)
+                    Logger.Log($"✓ 補建立 {columnFaceCount} 面柱側粉刷面");
 
                 // 對相鄰粉刷牆角點啟用 Wall Join，避免角落縫隙影響面積明細表
                 if (createdWalls.Count > 1)
@@ -1108,8 +1155,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
                 }
 
                 Logger.Log($"=== 完成房間 {room.Name} 粉刷牆建立 ===");
-                Logger.Log($"✓ 成功建立: {createdWalls.Count} 面粉刷牆");
-                return createdWalls.Any();
+                Logger.Log($"✓ 成功建立: {createdWalls.Count} 面粉刷牆，{columnFaceCount} 面柱側粉刷面");
+                return createdWalls.Any() || columnFaceCount > 0;
             }
             catch (Exception ex)
             { 
@@ -1117,6 +1164,447 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
                 Logger.Log($"堆疊追蹤: {ex.StackTrace}");
                 return false;
             }
+        }
+
+        private int CreateColumnWallFinishFacesForRoom(Room room, WallType wallType, double wallHeight, double roomLowerOffset, IList<Wall> existingFinishWalls, HashSet<string> createdWallKeys)
+        {
+            try
+            {
+                var roomBox = room.get_BoundingBox(null);
+                if (roomBox == null || wallType == null || wallHeight <= 1e-6)
+                    return 0;
+
+                var level = GetLevel(room.LevelId);
+                if (level == null)
+                    return 0;
+
+                double baseZ = level.Elevation + roomLowerOffset;
+                double topZ = baseZ + wallHeight;
+                double thickness = Math.Max(wallType.Width, 1.0 / 304.8); // 至少 1mm，避免零厚度失敗
+                var candidates = GetColumnCandidatesNearRoom(roomBox, thickness + (300.0 / 304.8));
+                var createdKeys = new HashSet<string>();
+                int created = 0;
+
+                foreach (var column in candidates)
+                {
+                    foreach (var face in GetVerticalPlanarFaces(column))
+                    {
+                        if (!TryGetColumnFaceFinishDirection(room, face, baseZ, topZ, out var inwardDir, out var faceCenter))
+                            continue;
+
+                        if (!TryBuildColumnFaceWallLine(face, inwardDir, thickness, level.Elevation, baseZ, topZ,
+                                out var centerline, out var height, out var baseOffset, out var areaM2))
+                            continue;
+
+                        if (areaM2 <= 0.0001 || centerline == null || centerline.Length < 1e-6)
+                            continue;
+
+                        if (IsDuplicateFinishWallCurve(centerline, height, baseOffset, existingFinishWalls, createdWallKeys, out var duplicateReason))
+                        {
+                            Logger.Log($"略過重複柱側粉刷面（柱 {column.Id}）：{duplicateReason}");
+                            continue;
+                        }
+
+                        if (!TryRegisterFinishWallCurve(createdWallKeys, centerline, height, baseOffset, out var duplicateKey))
+                        {
+                            Logger.Log($"略過重複柱側粉刷面（柱 {column.Id}）：{duplicateKey}");
+                            continue;
+                        }
+
+                        string key = $"{RevitCompat.GetElementIdValue(column.Id)}|" +
+                                     $"{Math.Round(faceCenter.X, 4)}|{Math.Round(faceCenter.Y, 4)}|" +
+                                     $"{Math.Round(face.FaceNormal.X, 3)}|{Math.Round(face.FaceNormal.Y, 3)}";
+                        if (!createdKeys.Add(key))
+                        {
+                            createdWallKeys?.Remove(duplicateKey);
+                            continue;
+                        }
+
+                        try
+                        {
+                            var wall = Wall.Create(Doc, centerline, wallType.Id, level.Id, height, baseOffset, false, false);
+                            if (wall == null)
+                            {
+                                createdWallKeys?.Remove(duplicateKey);
+                                continue;
+                            }
+
+                            try { WallUtils.DisallowWallJoinAtEnd(wall, 0); } catch { }
+                            try { WallUtils.DisallowWallJoinAtEnd(wall, 1); } catch { }
+
+                            wall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM)?.Set(height);
+                            var rb = wall.get_Parameter(BuiltInParameter.WALL_ATTR_ROOM_BOUNDING);
+                            if (rb != null && !rb.IsReadOnly) rb.Set(0);
+                            wall.get_Parameter(BuiltInParameter.WALL_KEY_REF_PARAM)?.Set(2);
+
+                            TagRoomOnElement(wall, room);
+                            existingFinishWalls?.Add(wall);
+
+                            created++;
+                            Logger.Log($"✓ 柱側粉刷牆 ID: {wall.Id}，柱: {column.Id}，面積估算: {areaM2:F3}m²");
+                        }
+                        catch (Exception ex)
+                        {
+                            createdWallKeys?.Remove(duplicateKey);
+                            Logger.Log($"柱側粉刷面建立失敗（柱 {column.Id}）: {ex.Message}");
+                        }
+                    }
+                }
+
+                return created;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"補建立柱側粉刷面異常: {ex.Message}");
+                return 0;
+            }
+        }
+
+        private bool TryRegisterFinishWallCurve(HashSet<string> keys, Curve centerline, double height, double baseOffset, out string key)
+        {
+            key = BuildFinishWallCurveKey(centerline, height, baseOffset);
+            if (string.IsNullOrWhiteSpace(key))
+                return false;
+
+            return keys == null || keys.Add(key);
+        }
+
+        private bool IsDuplicateFinishWallCurve(Curve centerline, double height, double baseOffset, IEnumerable<Wall> existingFinishWalls, HashSet<string> createdWallKeys, out string reason)
+        {
+            reason = null;
+
+            string key = BuildFinishWallCurveKey(centerline, height, baseOffset);
+            if (!string.IsNullOrWhiteSpace(key) && createdWallKeys != null && createdWallKeys.Contains(key))
+            {
+                reason = $"中心線已存在 {key}";
+                return true;
+            }
+
+            if (existingFinishWalls == null)
+                return false;
+
+            foreach (var wall in existingFinishWalls)
+            {
+                if (wall == null)
+                    continue;
+
+                var loc = wall.Location as LocationCurve;
+                var existingCurve = loc?.Curve;
+                if (existingCurve == null)
+                    continue;
+
+                double existingHeight = wall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM)?.AsDouble() ?? height;
+                double existingBaseOffset = wall.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET)?.AsDouble() ?? baseOffset;
+
+                if (AreFinishWallCurvesOverlapping(centerline, baseOffset, height, existingCurve, existingBaseOffset, existingHeight))
+                {
+                    reason = $"與既有粉刷牆 {wall.Id} 重疊";
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private string BuildFinishWallCurveKey(Curve curve, double height, double baseOffset)
+        {
+            if (!(curve is Line line))
+                return null;
+
+            var a = line.GetEndPoint(0);
+            var b = line.GetEndPoint(1);
+            if (a.DistanceTo(b) < 1e-6)
+                return null;
+
+            // 以 1mm 作為 fingerprint 粒度；端點排序後可避免同一段反向建立。
+            long ax = RoundFtToMm(a.X);
+            long ay = RoundFtToMm(a.Y);
+            long bx = RoundFtToMm(b.X);
+            long by = RoundFtToMm(b.Y);
+            if (ax > bx || (ax == bx && ay > by))
+            {
+                var tx = ax; ax = bx; bx = tx;
+                var ty = ay; ay = by; by = ty;
+            }
+
+            long z = RoundFtToMm(baseOffset);
+            long h = RoundFtToMm(height);
+            return $"{ax},{ay}|{bx},{by}|z{z}|h{h}";
+        }
+
+        private static long RoundFtToMm(double feet)
+        {
+            return (long)Math.Round(feet * 304.8, MidpointRounding.AwayFromZero);
+        }
+
+        private bool AreFinishWallCurvesOverlapping(Curve a, double aBaseOffset, double aHeight, Curve b, double bBaseOffset, double bHeight)
+        {
+            if (!(a is Line la) || !(b is Line lb))
+                return false;
+
+            double aMinZ = aBaseOffset;
+            double aMaxZ = aBaseOffset + aHeight;
+            double bMinZ = bBaseOffset;
+            double bMaxZ = bBaseOffset + bHeight;
+            if (Math.Min(aMaxZ, bMaxZ) - Math.Max(aMinZ, bMinZ) <= 10.0 / 304.8)
+                return false;
+
+            var a0 = ToXy(la.GetEndPoint(0));
+            var a1 = ToXy(la.GetEndPoint(1));
+            var b0 = ToXy(lb.GetEndPoint(0));
+            var b1 = ToXy(lb.GetEndPoint(1));
+            var ad = a1 - a0;
+            var bd = b1 - b0;
+            double al = ad.GetLength();
+            double bl = bd.GetLength();
+            if (al < 1e-6 || bl < 1e-6)
+                return false;
+
+            ad = ad.Normalize();
+            bd = bd.Normalize();
+
+            // 方向需近似平行，且兩線距離小於 10mm，才視為同一粉刷面。
+            if (Math.Abs(ad.DotProduct(bd)) < 0.999)
+                return false;
+
+            double lateralDistance = Math.Abs((b0 - a0).DotProduct(new XYZ(-ad.Y, ad.X, 0)));
+            if (lateralDistance > 10.0 / 304.8)
+                return false;
+
+            double b0u = (b0 - a0).DotProduct(ad);
+            double b1u = (b1 - a0).DotProduct(ad);
+            double overlap = Math.Min(al, Math.Max(b0u, b1u)) - Math.Max(0, Math.Min(b0u, b1u));
+            double minLen = Math.Min(al, bl);
+
+            return overlap > Math.Max(20.0 / 304.8, minLen * 0.80);
+        }
+
+        private static XYZ ToXy(XYZ p)
+        {
+            return new XYZ(p.X, p.Y, 0);
+        }
+
+        private List<Element> GetColumnCandidatesNearRoom(BoundingBoxXYZ roomBox, double expand)
+        {
+            var result = new List<Element>();
+            var seen = new HashSet<long>();
+
+            foreach (var cat in new[] { BuiltInCategory.OST_StructuralColumns, BuiltInCategory.OST_Columns })
+            {
+                foreach (var elem in new FilteredElementCollector(Doc)
+                    .OfCategory(cat)
+                    .WhereElementIsNotElementType()
+                    .ToElements())
+                {
+                    var box = elem.get_BoundingBox(null);
+                    if (box == null)
+                        continue;
+
+                    if (!BoxesOverlap(roomBox, box, expand))
+                        continue;
+
+                    if (seen.Add(RevitCompat.GetElementIdValue(elem.Id)))
+                        result.Add(elem);
+                }
+            }
+
+            Logger.Log($"房間周邊找到 {result.Count} 個柱候選元素");
+            return result;
+        }
+
+        private static bool BoxesOverlap(BoundingBoxXYZ a, BoundingBoxXYZ b, double expand)
+        {
+            return a.Min.X - expand <= b.Max.X && a.Max.X + expand >= b.Min.X
+                && a.Min.Y - expand <= b.Max.Y && a.Max.Y + expand >= b.Min.Y
+                && a.Min.Z - expand <= b.Max.Z && a.Max.Z + expand >= b.Min.Z;
+        }
+
+        private IEnumerable<PlanarFace> GetVerticalPlanarFaces(Element elem)
+        {
+            var opt = new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Fine };
+            var geo = elem.get_Geometry(opt);
+            if (geo == null)
+                yield break;
+
+            foreach (var solid in EnumerateSolids(geo))
+            {
+                foreach (Face f in solid.Faces)
+                {
+                    if (f is PlanarFace pf && Math.Abs(pf.FaceNormal.Z) < 0.01)
+                        yield return pf;
+                }
+            }
+        }
+
+        private IEnumerable<Solid> EnumerateSolids(GeometryElement geo)
+        {
+            foreach (GeometryObject obj in geo)
+            {
+                if (obj is Solid solid && solid.Faces.Size > 0 && solid.Volume > 1e-9)
+                {
+                    yield return solid;
+                }
+                else if (obj is GeometryInstance gi)
+                {
+                    var instGeo = gi.GetInstanceGeometry();
+                    if (instGeo == null)
+                        continue;
+
+                    foreach (var s in EnumerateSolids(instGeo))
+                        yield return s;
+                }
+            }
+        }
+
+        private bool TryGetColumnFaceFinishDirection(Room room, PlanarFace face, double baseZ, double topZ, out XYZ inwardDir, out XYZ faceCenter)
+        {
+            inwardDir = null;
+            faceCenter = null;
+
+            var pts = GetFaceSamplePoints(face).ToList();
+            if (pts.Count == 0)
+                return false;
+
+            double midZ = (baseZ + topZ) / 2.0;
+            faceCenter = new XYZ(pts.Average(p => p.X), pts.Average(p => p.Y), midZ);
+
+            var n = new XYZ(face.FaceNormal.X, face.FaceNormal.Y, 0);
+            if (n.GetLength() < 1e-9)
+                return false;
+            n = n.Normalize();
+
+            double probe = 100.0 / 304.8; // 100mm，避開柱面/牆面共面容差
+            bool plusInside = SafeIsPointInRoom(room, faceCenter + n * probe);
+            bool minusInside = SafeIsPointInRoom(room, faceCenter - n * probe);
+
+            if (plusInside == minusInside)
+                return false;
+
+            inwardDir = plusInside ? n : -n;
+            return true;
+        }
+
+        private bool SafeIsPointInRoom(Room room, XYZ p)
+        {
+            try { return room.IsPointInRoom(p); }
+            catch { return false; }
+        }
+
+        private IEnumerable<XYZ> GetFaceSamplePoints(PlanarFace face)
+        {
+            foreach (var loop in face.GetEdgesAsCurveLoops())
+            {
+                foreach (var c in loop)
+                {
+                    foreach (var p in c.Tessellate())
+                        yield return p;
+                }
+            }
+        }
+
+        private bool TryBuildColumnFaceWallLine(
+            PlanarFace face,
+            XYZ inwardDir,
+            double thickness,
+            double levelElevation,
+            double baseZ,
+            double topZ,
+            out Curve centerline,
+            out double height,
+            out double baseOffset,
+            out double areaM2)
+        {
+            centerline = null;
+            height = 0;
+            baseOffset = 0;
+            areaM2 = 0;
+
+            var pts = GetFaceSamplePoints(face).ToList();
+            if (pts.Count == 0)
+                return false;
+
+            double minZ = Math.Max(baseZ, pts.Min(p => p.Z));
+            double maxZ = Math.Min(topZ, pts.Max(p => p.Z));
+            if (maxZ - minZ <= 1e-6)
+                return false;
+
+            var normal = new XYZ(face.FaceNormal.X, face.FaceNormal.Y, 0);
+            if (normal.GetLength() < 1e-9)
+                return false;
+            normal = normal.Normalize();
+
+            var axis = XYZ.BasisZ.CrossProduct(normal);
+            if (axis.GetLength() < 1e-9)
+                axis = normal.CrossProduct(XYZ.BasisZ);
+            axis = axis.Normalize();
+
+            var origin = pts[0];
+            double minU = pts.Min(p => (p - origin).DotProduct(axis));
+            double maxU = pts.Max(p => (p - origin).DotProduct(axis));
+            if (maxU - minU <= 1e-6)
+                return false;
+
+            var p0 = new XYZ(origin.X, origin.Y, 0) + axis * minU + XYZ.BasisZ * levelElevation;
+            var p1 = new XYZ(origin.X, origin.Y, 0) + axis * maxU + XYZ.BasisZ * levelElevation;
+            var centerOffset = inwardDir.Normalize() * (thickness / 2.0);
+            centerline = Line.CreateBound(p0 + centerOffset, p1 + centerOffset);
+            height = maxZ - minZ;
+            baseOffset = minZ - levelElevation;
+
+            areaM2 = (maxU - minU) * (maxZ - minZ) * 0.09290304;
+            return true;
+        }
+
+        private ElementId GetPrimaryMaterialId(WallType wallType)
+        {
+            try
+            {
+                var cs = wallType.GetCompoundStructure();
+                if (cs != null)
+                {
+                    foreach (var layer in cs.GetLayers())
+                    {
+                        if (layer.MaterialId != ElementId.InvalidElementId)
+                            return layer.MaterialId;
+                    }
+                }
+            }
+            catch { }
+
+            return ElementId.InvalidElementId;
+        }
+
+        private void TrySetMaterial(Element elem, ElementId materialId)
+        {
+            if (materialId == ElementId.InvalidElementId)
+                return;
+
+            try
+            {
+                var p = elem.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM);
+                if (p != null && !p.IsReadOnly)
+                    p.Set(materialId);
+            }
+            catch { }
+        }
+
+        private void TrySetAreaAndMaterialParameters(Element elem, double areaM2, string materialName)
+        {
+            try
+            {
+                var areaParam = elem.LookupParameter(SharedParams.P_Area)
+                    ?? elem.LookupParameter("裝修面積")
+                    ?? elem.LookupParameter("Area");
+                if (areaParam != null && !areaParam.IsReadOnly)
+                    areaParam.Set(AreaCalculator.ConvertToSquareFeet(areaM2));
+
+                var materialParam = elem.LookupParameter(SharedParams.P_MaterialName)
+                    ?? elem.LookupParameter("裝修材質")
+                    ?? elem.LookupParameter("材料");
+                if (materialParam != null && !materialParam.IsReadOnly && !string.IsNullOrWhiteSpace(materialName))
+                    materialParam.Set(materialName);
+            }
+            catch { }
         }
 
         bool TryCreateSkirting(Room room, FinishSettings settings)
@@ -4673,6 +5161,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
             catch { }
         }
 
+        private static bool IsProtectedGeneratedFinishElement(Element element)
+        {
+            if (!FinishingElementGuard.IsSupportedFinishCategory(element))
+                return false;
+
+            if (element is DirectShape ds)
+                return string.Equals(ds.ApplicationId, FinishingElementGuard.StableMarker, StringComparison.OrdinalIgnoreCase);
+
+            return FinishingElementGuard.HasStableMarker(element);
+        }
+
         public JoinResults AutoJoinExistingWalls(IList<ElementId> targetRoomIds)
         {
             var results = new JoinResults();
@@ -4996,17 +5495,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
             if (IsRoomBoundingWall(wall))
                 return false;
 
-            if (GetTaggedRoomId(wall) > 0)
-                return true;
-
-            var typeName = wall.WallType?.Name ?? string.Empty;
-            var name = wall.Name ?? string.Empty;
-            return typeName.IndexOf("AR_", StringComparison.OrdinalIgnoreCase) >= 0
-                || typeName.IndexOf("裝修", StringComparison.OrdinalIgnoreCase) >= 0
-                || typeName.IndexOf("finish", StringComparison.OrdinalIgnoreCase) >= 0
-                || name.IndexOf("AR_", StringComparison.OrdinalIgnoreCase) >= 0
-                || name.IndexOf("裝修", StringComparison.OrdinalIgnoreCase) >= 0
-                || name.IndexOf("finish", StringComparison.OrdinalIgnoreCase) >= 0;
+            return IsProtectedGeneratedFinishElement(wall);
         }
 
         private bool TryJoinWalls(Wall wall1, Wall wall2)

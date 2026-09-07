@@ -104,7 +104,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             catch (Exception ex) { TaskDialog.Show("�������", ex.Message); }
         }
 
-        public string GetName() => "YD_BIM_Tools.Pick";
+        public string GetName() => "HB_BIM_Tools.Pick";
     }
 
     // ---------- ���� ----------
@@ -234,7 +234,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         }
 
 
-        public string GetName() => "YD_BIM_Tools.Run";
+        public string GetName() => "HB_BIM_Tools.Run";
 
         private static IList<Element> ExpandHostsForProcessing(Document doc, IList<Element> hosts)
         {

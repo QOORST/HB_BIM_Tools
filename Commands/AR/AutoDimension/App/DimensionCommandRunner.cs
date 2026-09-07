@@ -12,7 +12,7 @@ internal static class DimensionCommandRunner
 {
     public static Result Run(ExternalCommandData commandData, ref string message, DimensionMode mode, string windowTitle)
     {
-        return AutoDimensionModelessController.Show(commandData, ref message, mode, windowTitle, lockMode: true);
+        return AutoDimensionModelessController.Show(commandData, ref message, mode, windowTitle, lockMode: false);
     }
 
     internal static string BuildNoChangeMessage(DimensionMode mode, Document doc, View view)

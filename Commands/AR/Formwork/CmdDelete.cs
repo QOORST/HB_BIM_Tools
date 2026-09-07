@@ -22,12 +22,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 if (!LicenseHelper.CheckLicense("DeleteFormwork", "刪除模板", LicenseType.Standard))
                     return Result.Cancelled;
 
-                // 只收集模板工具生成的元素（ApplicationId = "YD_BIM_Formwork"）
+                // 只收集模板工具生成的元素（ApplicationId = "HB_BIM_Formwork"）
                 var formworkShapes = new FilteredElementCollector(doc)
                     .OfClass(typeof(DirectShape))
                     .OfCategory(BuiltInCategory.OST_GenericModel)
                     .Cast<DirectShape>()
-                    .Where(ds => ds.ApplicationId == "YD_BIM_Formwork")
+                    .Where(ds => ds.ApplicationId == "HB_BIM_Formwork")
                     .ToList();
 
                 if (formworkShapes.Count == 0)

@@ -60,6 +60,10 @@ internal sealed class DimensionOptions
 
     public double OffsetInternal { get; set; } = 3.0;
 
+    public double GridPrimaryOffsetInternal { get; set; } = 3.0;
+
+    public double GridOverallOffsetInternal { get; set; } = 6.0;
+
     public string? DimensionTypeName { get; set; }
 
     public IReadOnlyList<ElementId> SelectedHorizontalGridIds { get; set; } = Array.Empty<ElementId>();

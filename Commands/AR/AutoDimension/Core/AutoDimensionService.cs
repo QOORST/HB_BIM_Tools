@@ -12,6 +12,7 @@ internal sealed class AutoDimensionService
 {
     private const double VectorTolerance = 1e-6;
     private const double PositionTolerance = 1e-5;
+    private const double DimensionReferenceTolerance = 1.0 / 304.8;
     private const double DuplicateLineTolerance = 1.0 / 304.8;
     private const double NearestGridSearchTolerance = 2.0;
 
@@ -32,6 +33,37 @@ internal sealed class AutoDimensionService
         public double Position { get; }
 
         public double PlacementPosition { get; }
+    }
+
+    private sealed class BeamChainCandidate
+    {
+        public BeamChainCandidate(
+            FamilyInstance beam,
+            XYZ axisPoint,
+            XYZ axisDirection,
+            XYZ measureDirection,
+            double axisMin,
+            double axisMax)
+        {
+            Beam = beam;
+            AxisPoint = axisPoint;
+            AxisDirection = axisDirection;
+            MeasureDirection = measureDirection;
+            AxisMin = axisMin;
+            AxisMax = axisMax;
+        }
+
+        public FamilyInstance Beam { get; }
+
+        public XYZ AxisPoint { get; }
+
+        public XYZ AxisDirection { get; }
+
+        public XYZ MeasureDirection { get; }
+
+        public double AxisMin { get; }
+
+        public double AxisMax { get; }
     }
 
     public int CreateDimensions(Document doc, View view, DimensionOptions options)
@@ -64,15 +96,47 @@ internal sealed class AutoDimensionService
         int created = 0;
         if (horizontal.Count >= 2)
         {
-            created += CreateGridDimensionForGroup(doc, view, horizontal, view.RightDirection.Normalize(), options.OffsetInternal, dimensionType);
+            created += CreateGridDimensionForGroup(
+                doc,
+                view,
+                horizontal,
+                ResolveHorizontalGridPreferredVector(view, options.Direction),
+                options.GridPrimaryOffsetInternal,
+                options.GridOverallOffsetInternal,
+                dimensionType);
         }
 
         if (vertical.Count >= 2)
         {
-            created += CreateGridDimensionForGroup(doc, view, vertical, view.UpDirection.Normalize(), options.OffsetInternal, dimensionType);
+            created += CreateGridDimensionForGroup(
+                doc,
+                view,
+                vertical,
+                ResolveVerticalGridPreferredVector(view, options.Direction),
+                options.GridPrimaryOffsetInternal,
+                options.GridOverallOffsetInternal,
+                dimensionType);
         }
 
         return created;
+    }
+
+    private static XYZ ResolveHorizontalGridPreferredVector(View view, PlacementDirection direction)
+    {
+        return direction switch
+        {
+            PlacementDirection.West or PlacementDirection.NorthWest or PlacementDirection.SouthWest => view.RightDirection.Negate().Normalize(),
+            _ => view.RightDirection.Normalize()
+        };
+    }
+
+    private static XYZ ResolveVerticalGridPreferredVector(View view, PlacementDirection direction)
+    {
+        return direction switch
+        {
+            PlacementDirection.South or PlacementDirection.SouthEast or PlacementDirection.SouthWest => view.UpDirection.Negate().Normalize(),
+            _ => view.UpDirection.Normalize()
+        };
     }
 
     private static int CreateBeamWidthDimensions(Document doc, View view, double offsetInternal, DimensionType? dimensionType)
@@ -94,11 +158,6 @@ internal sealed class AutoDimensionService
             }
         }
 
-        if (created == 0)
-        {
-            return 0;
-        }
-
         created += CreateBeamToBeamChainDimensions(doc, view, visibleBeams, viewNormal, offsetInternal, dimensionType);
         return created;
     }
@@ -111,10 +170,16 @@ internal sealed class AutoDimensionService
         double offsetInternal,
         DimensionType? dimensionType)
     {
-        var groups = new Dictionary<string, List<(FamilyInstance Beam, XYZ AxisPoint, XYZ AxisDirection, XYZ MeasureDirection)>>(StringComparer.Ordinal);
+        var groups = new Dictionary<string, List<BeamChainCandidate>>(StringComparer.Ordinal);
         foreach (FamilyInstance beam in visibleBeams)
         {
             if (!TryGetBeamAxisPointAndDirection(beam, viewNormal, out XYZ axisPoint, out XYZ axisDirection))
+            {
+                continue;
+            }
+
+            BoundingBoxXYZ? bbox = beam.get_BoundingBox(view) ?? beam.get_BoundingBox(null);
+            if (bbox is null)
             {
                 continue;
             }
@@ -133,112 +198,177 @@ internal sealed class AutoDimensionService
                 canonicalAxis.X,
                 canonicalAxis.Y,
                 canonicalAxis.Z);
-            if (!groups.TryGetValue(key, out List<(FamilyInstance Beam, XYZ AxisPoint, XYZ AxisDirection, XYZ MeasureDirection)>? group))
+            if (!groups.TryGetValue(key, out List<BeamChainCandidate>? group))
             {
-                group = new List<(FamilyInstance Beam, XYZ AxisPoint, XYZ AxisDirection, XYZ MeasureDirection)>();
+                group = new List<BeamChainCandidate>();
                 groups.Add(key, group);
             }
 
-            group.Add((beam, axisPoint, canonicalAxis, measureDirection));
+            double axisMin = double.MaxValue;
+            double axisMax = double.MinValue;
+            foreach (XYZ corner in EnumerateBoundingBoxCorners(bbox))
+            {
+                double axisPosition = corner.DotProduct(canonicalAxis);
+                axisMin = Math.Min(axisMin, axisPosition);
+                axisMax = Math.Max(axisMax, axisPosition);
+            }
+
+            if (axisMax - axisMin < PositionTolerance)
+            {
+                continue;
+            }
+
+            group.Add(new BeamChainCandidate(beam, axisPoint, canonicalAxis, measureDirection, axisMin, axisMax));
         }
 
         int created = 0;
-        foreach (List<(FamilyInstance Beam, XYZ AxisPoint, XYZ AxisDirection, XYZ MeasureDirection)> group in groups.Values)
+        var createdChainKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (List<BeamChainCandidate> directionGroup in groups.Values)
         {
-            if (group.Count < 2)
+            foreach (List<BeamChainCandidate> group in SplitBeamChainGroups(directionGroup)
+                         .OrderByDescending(g => g.Max(c => c.AxisMax)))
             {
-                continue;
-            }
-
-            XYZ axisDirection = group[0].AxisDirection.Normalize();
-            XYZ measureDirection = group[0].MeasureDirection.Normalize();
-            var refs = new List<ReferencePoint>();
-            double placementAxis = double.MinValue;
-
-            foreach ((FamilyInstance Beam, XYZ AxisPoint, XYZ AxisDirection, XYZ MeasureDirection) item in group)
-            {
-                IList<(PlanarFace Face, XYZ Normal, XYZ Point)> faces = GetPlanarFaces(item.Beam, viewNormal);
-                (PlanarFace Face, XYZ Normal, XYZ Point)? positive = SelectBestFace(faces, measureDirection);
-                (PlanarFace Face, XYZ Normal, XYZ Point)? negative = SelectBestFace(faces, measureDirection.Negate());
-                if (positive is null || negative is null)
+                if (group.Count < 2)
                 {
                     continue;
                 }
 
-                refs.Add(new ReferencePoint(positive.Value.Face.Reference, positive.Value.Point, positive.Value.Point.DotProduct(measureDirection), 0.0));
-                refs.Add(new ReferencePoint(negative.Value.Face.Reference, negative.Value.Point, negative.Value.Point.DotProduct(measureDirection), 0.0));
+                XYZ axisDirection = group[0].AxisDirection.Normalize();
+                XYZ measureDirection = group[0].MeasureDirection.Normalize();
+                var refs = new List<ReferencePoint>();
+                double placementAxis = double.MinValue;
 
-                BoundingBoxXYZ? bbox = item.Beam.get_BoundingBox(view) ?? item.Beam.get_BoundingBox(null);
-                if (bbox is not null)
+                foreach (BeamChainCandidate item in group)
                 {
-                    placementAxis = Math.Max(placementAxis, ProjectBoundingBoxMax(bbox, axisDirection));
-                }
-                else
-                {
-                    placementAxis = Math.Max(placementAxis, item.AxisPoint.DotProduct(axisDirection));
-                }
-            }
-
-            refs = refs
-                .OrderBy(r => r.Position)
-                .Aggregate(new List<ReferencePoint>(), (unique, current) =>
-                {
-                    if (unique.Count == 0 || Math.Abs(unique[unique.Count - 1].Position - current.Position) > PositionTolerance)
+                    IList<(PlanarFace Face, XYZ Normal, XYZ Point)> faces = GetPlanarFaces(item.Beam, viewNormal);
+                    (PlanarFace Face, XYZ Normal, XYZ Point)? positive = SelectBestFace(faces, measureDirection);
+                    (PlanarFace Face, XYZ Normal, XYZ Point)? negative = SelectBestFace(faces, measureDirection.Negate());
+                    if (positive is null || negative is null)
                     {
-                        unique.Add(current);
+                        continue;
                     }
 
-                    return unique;
-                });
+                    refs.Add(new ReferencePoint(positive.Value.Face.Reference, positive.Value.Point, positive.Value.Point.DotProduct(measureDirection), 0.0));
+                    refs.Add(new ReferencePoint(negative.Value.Face.Reference, negative.Value.Point, negative.Value.Point.DotProduct(measureDirection), 0.0));
 
-            if (refs.Count < 2 || placementAxis == double.MinValue)
-            {
-                continue;
-            }
+                    placementAxis = Math.Max(placementAxis, item.AxisMax);
+                }
 
-            double targetAxis = placementAxis + offsetInternal;
-            double minMeasure = refs.Min(r => r.Position);
-            double maxMeasure = refs.Max(r => r.Position);
-            XYZ basePoint = group[0].AxisPoint;
-            double baseAxis = basePoint.DotProduct(axisDirection);
-            double baseMeasure = basePoint.DotProduct(measureDirection);
-            XYZ origin = basePoint + (axisDirection * (targetAxis - baseAxis));
-            XYZ start = origin + (measureDirection * (minMeasure - baseMeasure));
-            XYZ end = origin + (measureDirection * (maxMeasure - baseMeasure));
-            if (start.DistanceTo(end) < VectorTolerance)
-            {
-                continue;
-            }
+                refs = UniqueDimensionReferencesByPosition(refs).ToList();
 
-            var refArray = new ReferenceArray();
-            foreach (ReferencePoint rp in refs)
-            {
-                refArray.Append(rp.Reference);
-            }
-
-            try
-            {
-                Line dimLine = Line.CreateBound(start, end);
-                if (HasSimilarDimension(doc, view, dimLine))
+                if (refs.Count < 2 || placementAxis == double.MinValue)
                 {
                     continue;
                 }
 
-                Dimension dimension = doc.Create.NewDimension(view, dimLine, refArray);
-                if (dimensionType is not null && dimension.GetTypeId() != dimensionType.Id)
+                string chainKey = BuildBeamChainKey(axisDirection, measureDirection, refs);
+                if (createdChainKeys.Contains(chainKey))
                 {
-                    dimension.ChangeTypeId(dimensionType.Id);
+                    continue;
                 }
 
-                created++;
-            }
-            catch
-            {
-                // Some beam families expose references that cannot be mixed in one chain.
+                double targetAxis = placementAxis + offsetInternal;
+                double minMeasure = refs.Min(r => r.Position);
+                double maxMeasure = refs.Max(r => r.Position);
+                XYZ basePoint = group[0].AxisPoint;
+                double baseAxis = basePoint.DotProduct(axisDirection);
+                double baseMeasure = basePoint.DotProduct(measureDirection);
+                XYZ origin = basePoint + (axisDirection * (targetAxis - baseAxis));
+                XYZ start = origin + (measureDirection * (minMeasure - baseMeasure));
+                XYZ end = origin + (measureDirection * (maxMeasure - baseMeasure));
+                if (start.DistanceTo(end) < VectorTolerance)
+                {
+                    continue;
+                }
+
+                var refArray = new ReferenceArray();
+                foreach (ReferencePoint rp in refs)
+                {
+                    refArray.Append(rp.Reference);
+                }
+
+                try
+                {
+                    Line dimLine = Line.CreateBound(start, end);
+                    if (HasSimilarDimension(doc, view, dimLine))
+                    {
+                        continue;
+                    }
+
+                    Dimension dimension = doc.Create.NewDimension(view, dimLine, refArray);
+                    if (dimensionType is not null && dimension.GetTypeId() != dimensionType.Id)
+                    {
+                        dimension.ChangeTypeId(dimensionType.Id);
+                    }
+
+                    if (TryDiscardZeroLengthDimension(doc, dimension))
+                    {
+                        continue;
+                    }
+
+                    AdjustOverlappingDimensionText(doc, dimension, view);
+                    created++;
+                    createdChainKeys.Add(chainKey);
+                }
+                catch
+                {
+                    // Some beam families expose references that cannot be mixed in one chain.
+                }
             }
         }
 
         return created;
+    }
+
+    private static string BuildBeamChainKey(XYZ axisDirection, XYZ measureDirection, IReadOnlyList<ReferencePoint> refs)
+    {
+        IEnumerable<string> positions = refs
+            .OrderBy(r => r.Position)
+            .Select(r => r.Position.ToString("F4", System.Globalization.CultureInfo.InvariantCulture));
+
+        return string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "{0:F4}|{1:F4}|{2:F4}|{3:F4}|{4:F4}|{5:F4}|{6}",
+            axisDirection.X,
+            axisDirection.Y,
+            axisDirection.Z,
+            measureDirection.X,
+            measureDirection.Y,
+            measureDirection.Z,
+            string.Join(",", positions));
+    }
+
+    private static IEnumerable<List<BeamChainCandidate>> SplitBeamChainGroups(List<BeamChainCandidate> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            yield break;
+        }
+
+        List<BeamChainCandidate>? current = null;
+        double currentMax = double.MinValue;
+        foreach (BeamChainCandidate candidate in candidates.OrderBy(c => c.AxisMin).ThenBy(c => c.AxisMax))
+        {
+            if (current is null ||
+                candidate.AxisMin > currentMax + PositionTolerance)
+            {
+                if (current is not null)
+                {
+                    yield return current;
+                }
+
+                current = new List<BeamChainCandidate>();
+                currentMax = candidate.AxisMax;
+            }
+
+            current.Add(candidate);
+            currentMax = Math.Max(currentMax, candidate.AxisMax);
+        }
+
+        if (current is not null)
+        {
+            yield return current;
+        }
     }
 
     private static bool TryCreateBeamWidthDimension(
@@ -312,7 +442,7 @@ internal sealed class AutoDimensionService
             }
         }
 
-        return TryCreateBeamWidthWithCenterLine(
+        if (TryCreateBeamWidthWithCenterLine(
             doc,
             view,
             beam,
@@ -327,7 +457,18 @@ internal sealed class AutoDimensionService
             negativePosition,
             offsetInternal,
             dimensionType,
-            out Line? _);
+            out Line? _))
+        {
+            return true;
+        }
+
+        var faceRefs = new List<ReferencePoint>
+        {
+            new ReferencePoint(positive.Value.Face.Reference, positive.Value.Point, positivePosition, 0.0),
+            new ReferencePoint(negative.Value.Face.Reference, negative.Value.Point, negativePosition, 0.0)
+        };
+
+        return TryCreateBeamWidthDimensionElement(doc, view, axisPoint, axisDirection, measureDirection, offsetInternal, faceRefs, dimensionType, out Line? _);
     }
 
     private static bool TryCreateBeamWidthWithFamilyReferences(
@@ -534,6 +675,12 @@ internal sealed class AutoDimensionService
                 dimension.ChangeTypeId(dimensionType.Id);
             }
 
+            if (TryDiscardZeroLengthDimension(doc, dimension))
+            {
+                return false;
+            }
+
+            AdjustOverlappingDimensionText(doc, dimension, view);
             createdSpanLineKeys.Add(spanLineKey);
             return true;
         }
@@ -594,6 +741,12 @@ internal sealed class AutoDimensionService
         out Line? createdLine)
     {
         createdLine = null;
+        refs = UniqueDimensionReferencesByPosition(refs).ToList();
+        if (refs.Count < 2)
+        {
+            return false;
+        }
+
         XYZ placementOrigin = axisPoint + (axisDirection.Normalize() * offsetInternal);
         XYZ start = placementOrigin + (measureDirection * (refs.Min(r => r.Position) - placementOrigin.DotProduct(measureDirection)));
         XYZ end = placementOrigin + (measureDirection * (refs.Max(r => r.Position) - placementOrigin.DotProduct(measureDirection)));
@@ -622,6 +775,12 @@ internal sealed class AutoDimensionService
                 dimension.ChangeTypeId(dimensionType.Id);
             }
 
+            if (TryDiscardZeroLengthDimension(doc, dimension))
+            {
+                return false;
+            }
+
+            AdjustOverlappingDimensionText(doc, dimension, view);
             return true;
         }
         catch
@@ -760,7 +919,7 @@ internal sealed class AutoDimensionService
 
             XYZ direction = (line.GetEndPoint(1) - line.GetEndPoint(0)).Normalize();
             XYZ midpoint = (line.GetEndPoint(0) + line.GetEndPoint(1)) * 0.5;
-            result.Add(new DatumInfo(grid, midpoint, direction, new Reference(grid)));
+            result.Add(new DatumInfo(grid, midpoint, direction, new Reference(grid), line.GetEndPoint(0), line.GetEndPoint(1)));
         }
 
         return result;
@@ -771,7 +930,8 @@ internal sealed class AutoDimensionService
         View view,
         IReadOnlyList<DatumInfo> group,
         XYZ preferredVector,
-        double offsetInternal,
+        double primaryOffsetInternal,
+        double overallOffsetInternal,
         DimensionType? dimensionType)
     {
         XYZ viewNormal = view.ViewDirection.Normalize();
@@ -784,7 +944,7 @@ internal sealed class AutoDimensionService
 
         dimLineDir = dimLineDir.Normalize();
         int side = ResolveSideSign(preferredVector, datumDir);
-        Line? dimLine = BuildDimensionLine(group, datumDir, dimLineDir, offsetInternal, side);
+        Line? dimLine = BuildDimensionLine(group, datumDir, dimLineDir, primaryOffsetInternal, side);
         if (dimLine is null)
         {
             return 0;
@@ -810,13 +970,17 @@ internal sealed class AutoDimensionService
                     dimension.ChangeTypeId(dimensionType.Id);
                 }
 
-                created++;
+                if (!TryDiscardZeroLengthDimension(doc, dimension))
+                {
+                    AdjustOverlappingDimensionText(doc, dimension, view);
+                    created++;
+                }
             }
 
             if (sortedGroup.Count > 2)
             {
                 ReferenceArray overallReferences = BuildOverallReferences(sortedGroup);
-                Line? overallLine = BuildDimensionLine(sortedGroup, datumDir, dimLineDir, offsetInternal * 2.0, side);
+                Line? overallLine = BuildDimensionLine(sortedGroup, datumDir, dimLineDir, overallOffsetInternal, side);
                 if (overallLine is not null &&
                     overallReferences.Size == 2 &&
                     !HasSimilarDimension(doc, view, overallLine, overallReferences))
@@ -827,7 +991,11 @@ internal sealed class AutoDimensionService
                         overallDimension.ChangeTypeId(dimensionType.Id);
                     }
 
-                    created++;
+                    if (!TryDiscardZeroLengthDimension(doc, overallDimension))
+                    {
+                        AdjustOverlappingDimensionText(doc, overallDimension, view);
+                        created++;
+                    }
                 }
             }
 
@@ -1077,6 +1245,12 @@ internal sealed class AutoDimensionService
                 dimension.ChangeTypeId(dimensionType.Id);
             }
 
+            if (TryDiscardZeroLengthDimension(doc, dimension))
+            {
+                return false;
+            }
+
+            AdjustOverlappingDimensionText(doc, dimension, view);
             createdLineKeys.Add(lineKey);
             return true;
         }
@@ -1149,6 +1323,12 @@ internal sealed class AutoDimensionService
             new ReferencePoint(positiveReference, center + (measureDirection * (positivePosition - baseMeasure)), positivePosition, anchorAlongPlacement)
         };
 
+        references = UniqueDimensionReferencesByPosition(references).ToList();
+        if (references.Count < 2)
+        {
+            return false;
+        }
+
         var refArray = new ReferenceArray();
         foreach (ReferencePoint rp in references.OrderBy(r => r.Position))
         {
@@ -1170,6 +1350,12 @@ internal sealed class AutoDimensionService
                 dimension.ChangeTypeId(dimensionType.Id);
             }
 
+            if (TryDiscardZeroLengthDimension(doc, dimension))
+            {
+                return false;
+            }
+
+            AdjustOverlappingDimensionText(doc, dimension, view);
             createdLineKeys.Add(lineKey);
             return true;
         }
@@ -1238,7 +1424,7 @@ internal sealed class AutoDimensionService
         XYZ center = (bbox.Min + bbox.Max) * 0.5;
         double centerPosition = center.DotProduct(measureDirection);
         double gridPosition = grid.Midpoint.DotProduct(measureDirection);
-        if (Math.Abs(centerPosition - gridPosition) < PositionTolerance)
+        if (Math.Abs(centerPosition - gridPosition) < DimensionReferenceTolerance)
         {
             return false;
         }
@@ -1279,6 +1465,12 @@ internal sealed class AutoDimensionService
                 dimension.ChangeTypeId(dimensionType.Id);
             }
 
+            if (TryDiscardZeroLengthDimension(doc, dimension))
+            {
+                return false;
+            }
+
+            AdjustOverlappingDimensionText(doc, dimension, view);
             createdLineKeys.Add(lineKey);
             return true;
         }
@@ -1303,7 +1495,7 @@ internal sealed class AutoDimensionService
         XYZ center = (bbox.Min + bbox.Max) * 0.5;
         double centerPosition = center.DotProduct(measureDirection);
         double gridPosition = grid.Midpoint.DotProduct(measureDirection);
-        if (Math.Abs(centerPosition - gridPosition) < PositionTolerance)
+        if (Math.Abs(centerPosition - gridPosition) < DimensionReferenceTolerance)
         {
             return false;
         }
@@ -1344,6 +1536,12 @@ internal sealed class AutoDimensionService
                 dimension.ChangeTypeId(dimensionType.Id);
             }
 
+            if (TryDiscardZeroLengthDimension(doc, dimension))
+            {
+                return false;
+            }
+
+            AdjustOverlappingDimensionText(doc, dimension, view);
             createdLineKeys.Add(lineKey);
             return true;
         }
@@ -1461,7 +1659,7 @@ internal sealed class AutoDimensionService
 
             XYZ direction = (line.GetEndPoint(1) - line.GetEndPoint(0)).Normalize();
             XYZ midpoint = (line.GetEndPoint(0) + line.GetEndPoint(1)) * 0.5;
-            result.Add(new DatumInfo(grid, midpoint, direction, new Reference(grid)));
+            result.Add(new DatumInfo(grid, midpoint, direction, new Reference(grid), line.GetEndPoint(0), line.GetEndPoint(1)));
         }
 
         return result;
@@ -1666,19 +1864,20 @@ internal sealed class AutoDimensionService
         XYZ origin = group[0].Midpoint;
         double minAlongDim = double.MaxValue;
         double maxAlongDim = double.MinValue;
-        double minAlongDatum = double.MaxValue;
-        double maxAlongDatum = double.MinValue;
+        double minHeadAlongDatum = double.MaxValue;
+        double maxHeadAlongDatum = double.MinValue;
 
         foreach (DatumInfo datum in group)
         {
             XYZ delta = datum.Midpoint - origin;
             double alongDim = delta.DotProduct(dimLineDir);
-            double alongDatum = delta.DotProduct(datumDir);
+            double startAlongDatum = (datum.StartPoint - origin).DotProduct(datumDir);
+            double endAlongDatum = (datum.EndPoint - origin).DotProduct(datumDir);
 
             minAlongDim = Math.Min(minAlongDim, alongDim);
             maxAlongDim = Math.Max(maxAlongDim, alongDim);
-            minAlongDatum = Math.Min(minAlongDatum, alongDatum);
-            maxAlongDatum = Math.Max(maxAlongDatum, alongDatum);
+            minHeadAlongDatum = Math.Min(minHeadAlongDatum, Math.Min(startAlongDatum, endAlongDatum));
+            maxHeadAlongDatum = Math.Max(maxHeadAlongDatum, Math.Max(startAlongDatum, endAlongDatum));
         }
 
         if (Math.Abs(maxAlongDim - minAlongDim) < 1e-6)
@@ -1686,7 +1885,7 @@ internal sealed class AutoDimensionService
             return null;
         }
 
-        double anchorAlongDatum = sideSign > 0 ? maxAlongDatum + offsetInternal : minAlongDatum - offsetInternal;
+        double anchorAlongDatum = sideSign > 0 ? maxHeadAlongDatum - offsetInternal : minHeadAlongDatum + offsetInternal;
         XYZ start = origin + (dimLineDir * minAlongDim) + (datumDir * anchorAlongDatum);
         XYZ end = origin + (dimLineDir * maxAlongDim) + (datumDir * anchorAlongDatum);
 
@@ -1991,7 +2190,9 @@ internal sealed class AutoDimensionService
         {
             foreach (Element element in collector)
             {
-                if (element is DimensionType dimType && string.Equals(dimType.Name, typeName, StringComparison.OrdinalIgnoreCase))
+                if (element is DimensionType dimType &&
+                    IsLinearDimensionType(dimType) &&
+                    string.Equals(dimType.Name, typeName, StringComparison.OrdinalIgnoreCase))
                 {
                     return dimType;
                 }
@@ -2001,7 +2202,159 @@ internal sealed class AutoDimensionService
         return collector
             .Cast<Element>()
             .OfType<DimensionType>()
+            .Where(IsLinearDimensionType)
             .FirstOrDefault();
+    }
+
+    private static bool IsLinearDimensionType(DimensionType dimensionType)
+    {
+        try
+        {
+            return string.Equals(dimensionType.StyleType.ToString(), "Linear", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static IReadOnlyList<ReferencePoint> UniqueDimensionReferencesByPosition(IEnumerable<ReferencePoint> refs)
+    {
+        return refs
+            .OrderBy(r => r.Position)
+            .Aggregate(new List<ReferencePoint>(), (unique, current) =>
+            {
+                if (unique.Count == 0 ||
+                    Math.Abs(unique[unique.Count - 1].Position - current.Position) > DimensionReferenceTolerance)
+                {
+                    unique.Add(current);
+                }
+
+                return unique;
+            });
+    }
+
+    private static bool TryDiscardZeroLengthDimension(Document doc, Dimension dimension)
+    {
+        try
+        {
+            doc.Regenerate();
+            if (!HasZeroLengthSegment(dimension))
+            {
+                return false;
+            }
+
+            doc.Delete(dimension.Id);
+            doc.Regenerate();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool HasZeroLengthSegment(Dimension dimension)
+    {
+        if (dimension.Segments is not null && dimension.Segments.Size > 0)
+        {
+            foreach (DimensionSegment segment in dimension.Segments)
+            {
+                double? value = segment.Value;
+                if (value.HasValue && Math.Abs(value.Value) < DimensionReferenceTolerance)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        double? dimensionValue = dimension.Value;
+        return dimensionValue.HasValue && Math.Abs(dimensionValue.Value) < DimensionReferenceTolerance;
+    }
+
+    private static void AdjustOverlappingDimensionText(Document doc, Dimension dimension, View view)
+    {
+        try
+        {
+            doc.Regenerate();
+
+            if (dimension.Curve is not Line line || !line.IsBound || dimension.Segments is null || dimension.Segments.Size < 2)
+            {
+                return;
+            }
+
+            XYZ lineDirection = (line.GetEndPoint(1) - line.GetEndPoint(0)).Normalize();
+            double minSpacing = UnitUtils.ConvertToInternalUnits(Math.Max(8.0, view.Scale * 6.0), UnitTypeId.Millimeters);
+            var items = new List<(DimensionSegment Segment, XYZ TextPosition, double Along)>();
+            foreach (DimensionSegment segment in dimension.Segments)
+            {
+                XYZ textPosition;
+                try
+                {
+                    textPosition = segment.TextPosition;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                items.Add((segment, textPosition, textPosition.DotProduct(lineDirection)));
+            }
+
+            if (items.Count < 2)
+            {
+                return;
+            }
+
+            items = items.OrderBy(item => item.Along).ToList();
+            var cluster = new List<(DimensionSegment Segment, XYZ TextPosition, double Along)>();
+            foreach ((DimensionSegment Segment, XYZ TextPosition, double Along) item in items)
+            {
+                if (cluster.Count > 0 && item.Along - cluster[cluster.Count - 1].Along >= minSpacing)
+                {
+                    SpreadTextCluster(cluster, lineDirection, minSpacing);
+                    cluster.Clear();
+                }
+
+                cluster.Add(item);
+            }
+
+            SpreadTextCluster(cluster, lineDirection, minSpacing);
+            doc.Regenerate();
+        }
+        catch
+        {
+            // Text adjustment is a readability improvement; keep the created dimension if Revit rejects a segment move.
+        }
+    }
+
+    private static void SpreadTextCluster(
+        IReadOnlyList<(DimensionSegment Segment, XYZ TextPosition, double Along)> cluster,
+        XYZ lineDirection,
+        double minSpacing)
+    {
+        if (cluster.Count < 2)
+        {
+            return;
+        }
+
+        double center = cluster.Average(item => item.Along);
+        double firstTarget = center - (minSpacing * (cluster.Count - 1) * 0.5);
+        for (int i = 0; i < cluster.Count; i++)
+        {
+            double target = firstTarget + (minSpacing * i);
+            XYZ shifted = cluster[i].TextPosition + (lineDirection * (target - cluster[i].Along));
+            try
+            {
+                cluster[i].Segment.TextPosition = shifted;
+            }
+            catch
+            {
+                // Some dimension segments do not allow text repositioning.
+            }
+        }
     }
 }
 }

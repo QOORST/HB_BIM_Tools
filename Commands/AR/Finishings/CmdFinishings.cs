@@ -33,7 +33,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                 TaskDialog.Show("使用方式提醒",
                     "Revit 2026 已同步更新 AR 裝修入口。\n\n" +
                     "請直接使用「房間裝修」或「面生面」按鈕執行對應功能。\n\n" +
-                    "其中房間裝修已改為 2026 專用精簡介面。\n" +
+                    "其中房間裝修已恢復完整房間管理介面。\n" +
                     "Revit 2025 則仍維持暫不開放狀態。");
                 return Result.Cancelled;
 #else

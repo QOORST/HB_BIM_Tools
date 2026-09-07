@@ -197,7 +197,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 {
                     try
                     {
-                        if (!TrySplitWallByProfile(doc, wall, result))
+                        if (!TrySplitWall(doc, wall, cutters, result))
                             result.Skipped++;
                     }
                     catch (Exception ex)
@@ -219,6 +219,108 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         /// 依接合後外側面的 CurveLoops 分割牆（同 CreateFloorFromLoop 邏輯）。
         /// 接合使切割構件切穿牆體後，外側面會出現多個獨立封閉環，每環對應一段新牆。
         /// </summary>
+        private static bool TrySplitWall(Document doc, Wall wall, IList<Element> cutters, SplitResult result)
+        {
+            if (TrySplitWallByBeamHeights(doc, wall, cutters, result))
+                return true;
+
+            return TrySplitWallByProfile(doc, wall, result);
+        }
+
+        /// <summary>
+        /// 依梁的實際高度區間分割牆。梁需與牆的長度投影及牆厚範圍重疊，才會作為分割來源。
+        /// </summary>
+        private static bool TrySplitWallByBeamHeights(Document doc, Wall wall, IList<Element> cutters, SplitResult result)
+        {
+            var locationCurve = wall.Location as LocationCurve;
+            if (!(locationCurve?.Curve is Line wallLine)) return false;
+
+            var level = doc.GetElement(wall.LevelId) as Level;
+            if (level == null) return false;
+
+            var wallStart = wallLine.GetEndPoint(0);
+            var wallEnd = wallLine.GetEndPoint(1);
+            var wallDir = (wallEnd - wallStart).Normalize();
+            var wallLength = wallStart.DistanceTo(wallEnd);
+            if (wallLength < MinSegmentLength) return false;
+
+            var wallNormal = wallDir.CrossProduct(XYZ.BasisZ).Normalize();
+            var wallType = doc.GetElement(wall.GetTypeId()) as WallType;
+            var wallWidth = wallType?.Width ?? 0.0;
+            var horizontalTolerance = Math.Max(wallWidth * 0.5 + 0.2, 0.35);
+            var baseOffset = wall.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET)?.AsDouble() ?? 0.0;
+            var unconnectedHeight = wall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM)?.AsDouble() ?? 10.0;
+            var wallBottom = level.Elevation + baseOffset;
+            var wallTop = wallBottom + unconnectedHeight;
+            if (wallTop - wallBottom < MinSegmentLength) return false;
+
+            var blockedIntervals = new List<Tuple<double, double>>();
+            foreach (var cutter in cutters)
+            {
+                if (!IsStructuralFraming(cutter)) continue;
+
+                var box = cutter.get_BoundingBox(null);
+                if (box == null) continue;
+                if (!DoesBoxOverlapWallFootprint(box, wallStart, wallDir, wallNormal, wallLength, horizontalTolerance))
+                    continue;
+
+                var cutBottom = Math.Max(box.Min.Z, wallBottom);
+                var cutTop = Math.Min(box.Max.Z, wallTop);
+                if (cutTop - cutBottom < MinSegmentLength) continue;
+
+                blockedIntervals.Add(Tuple.Create(cutBottom, cutTop));
+            }
+
+            if (blockedIntervals.Count == 0) return false;
+
+            var merged = MergeIntervals(blockedIntervals);
+            var segments = new List<Tuple<double, double>>();
+            var cursor = wallBottom;
+            foreach (var interval in merged)
+            {
+                if (interval.Item1 - cursor >= MinSegmentLength)
+                    segments.Add(Tuple.Create(cursor, interval.Item1));
+
+                if (interval.Item2 > cursor)
+                    cursor = interval.Item2;
+            }
+
+            if (wallTop - cursor >= MinSegmentLength)
+                segments.Add(Tuple.Create(cursor, wallTop));
+
+            if (segments.Count <= 1) return false;
+
+            var wallTypeId = wall.GetTypeId();
+            var levelId = wall.LevelId;
+            var flipped = wall.Flipped;
+            var structuralParam = wall.get_Parameter(BuiltInParameter.WALL_STRUCTURAL_USAGE_PARAM);
+            var isStructural = structuralParam != null && structuralParam.AsInteger() != 0;
+
+            doc.Delete(wall.Id);
+            result.OriginalDeleted++;
+
+            foreach (var segment in segments)
+            {
+                try
+                {
+                    var segmentBaseOffset = segment.Item1 - level.Elevation;
+                    var segmentHeight = segment.Item2 - segment.Item1;
+                    if (segmentHeight < MinSegmentLength) continue;
+
+                    Wall.Create(doc, wallLine, wallTypeId, levelId, segmentHeight, segmentBaseOffset, flipped, isStructural);
+                    result.NewElementsCreated++;
+                }
+                catch (Exception ex)
+                {
+                    result.FailedOperations++;
+                    if (result.FailureSamples.Count < 5)
+                        result.FailureSamples.Add($"依梁位建立牆段失敗: {ex.Message}");
+                }
+            }
+
+            return true;
+        }
+
         private static bool TrySplitWallByProfile(Document doc, Wall wall, SplitResult result)
         {
             // 僅處理直線形基本牆
@@ -287,6 +389,79 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             }
 
             return true;
+        }
+
+        private static bool IsStructuralFraming(Element element)
+        {
+            var id = element?.Category?.Id;
+            if (id == null) return false;
+            return (BuiltInCategory)(int)id.GetIdValue() == BuiltInCategory.OST_StructuralFraming;
+        }
+
+        private static bool DoesBoxOverlapWallFootprint(
+            BoundingBoxXYZ box,
+            XYZ wallStart,
+            XYZ wallDir,
+            XYZ wallNormal,
+            double wallLength,
+            double tolerance)
+        {
+            double minAlong = double.MaxValue;
+            double maxAlong = double.MinValue;
+            double minNormal = double.MaxValue;
+            double maxNormal = double.MinValue;
+
+            foreach (var corner in GetBoxCorners(box))
+            {
+                var relative = corner - wallStart;
+                var along = wallDir.DotProduct(relative);
+                var normal = wallNormal.DotProduct(relative);
+
+                if (along < minAlong) minAlong = along;
+                if (along > maxAlong) maxAlong = along;
+                if (normal < minNormal) minNormal = normal;
+                if (normal > maxNormal) maxNormal = normal;
+            }
+
+            var overlapsLength = maxAlong >= -tolerance && minAlong <= wallLength + tolerance;
+            var overlapsThickness = maxNormal >= -tolerance && minNormal <= tolerance;
+            return overlapsLength && overlapsThickness;
+        }
+
+        private static IEnumerable<XYZ> GetBoxCorners(BoundingBoxXYZ box)
+        {
+            yield return new XYZ(box.Min.X, box.Min.Y, box.Min.Z);
+            yield return new XYZ(box.Min.X, box.Min.Y, box.Max.Z);
+            yield return new XYZ(box.Min.X, box.Max.Y, box.Min.Z);
+            yield return new XYZ(box.Min.X, box.Max.Y, box.Max.Z);
+            yield return new XYZ(box.Max.X, box.Min.Y, box.Min.Z);
+            yield return new XYZ(box.Max.X, box.Min.Y, box.Max.Z);
+            yield return new XYZ(box.Max.X, box.Max.Y, box.Min.Z);
+            yield return new XYZ(box.Max.X, box.Max.Y, box.Max.Z);
+        }
+
+        private static List<Tuple<double, double>> MergeIntervals(List<Tuple<double, double>> intervals)
+        {
+            var sorted = intervals
+                .OrderBy(i => i.Item1)
+                .ThenBy(i => i.Item2)
+                .ToList();
+
+            var merged = new List<Tuple<double, double>>();
+            foreach (var interval in sorted)
+            {
+                if (merged.Count == 0 || interval.Item1 > merged[merged.Count - 1].Item2 + 0.02)
+                {
+                    merged.Add(interval);
+                    continue;
+                }
+
+                var last = merged[merged.Count - 1];
+                if (interval.Item2 > last.Item2)
+                    merged[merged.Count - 1] = Tuple.Create(last.Item1, interval.Item2);
+            }
+
+            return merged;
         }
 
         private static Floor CreateFloorFromLoop(Document doc, CurveLoop loop, FloorType floorType, Level level)

@@ -281,10 +281,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
             // DirectShape 以 ApplicationId 為最高優先識別依據
             if (element is DirectShape ds)
             {
-                if (ds.ApplicationId == "YD_BIM_Finishings")
+                if (ds.ApplicationId == "HB_BIM_Finishings")
                     return true;
 
-                if (ds.ApplicationId == "YD_BIM_Formwork")
+                if (ds.ApplicationId == "HB_BIM_Formwork")
                     return false;
             }
 
@@ -316,7 +316,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
         {
             var comments = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
             return !string.IsNullOrWhiteSpace(comments)
-                && comments.IndexOf("YD_BIM_Finishings", StringComparison.OrdinalIgnoreCase) >= 0;
+                && comments.IndexOf("HB_BIM_Finishings", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool HasFaceToFaceFinishingData(Element element)

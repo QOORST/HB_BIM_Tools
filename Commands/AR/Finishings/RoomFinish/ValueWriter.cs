@@ -73,7 +73,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
             var rooms = GetValidRooms(settings.TargetRoomIds).ToList();
             var results = new ProcessingResults();
             var roomIds = rooms.Select(r => RevitCompat.GetElementIdValue(r.Id)).ToHashSet();
-            var overlapIssues = DetectRoomOverlapIssues(rooms);
+            var overlapIssues = RoomOverlapGuard.Detect(rooms);
             var unsafeRoomIds = new HashSet<long>(overlapIssues.SelectMany(x => x.RoomIds));
 
             foreach (var issue in overlapIssues.Take(20))
@@ -194,7 +194,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 
                     // 若元素沒有寫入 AR_RoomId（例如面生面產生的元素），
                     // 以幾何中心點進行空間回查，並同時補寫 AR_RoomId 供下次使用
-                    if ((roomId <= 0 || !roomIds.Contains(roomId)) && allRoomsForSpatial.Count > 0 && FinishingElementGuard.IsSpatialLookupCandidate(elem))
+                    if ((roomId <= 0 || !roomIds.Contains(roomId)) && allRoomsForSpatial.Count > 0 && IsSpatialRoomLookupCandidate(elem))
                     {
                         var spatialRoomId = FindRoomIdSpatially(elem, allRoomsForSpatial, out var matchedRooms);
                         if (spatialRoomId > 0 && roomIds.Contains(spatialRoomId))
@@ -204,7 +204,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
                         }
                         else if (matchedRooms.Count > 1)
                         {
-                            var labels = string.Join("、", matchedRooms.Take(4).Select(FormatRoomLabel));
+                            var labels = string.Join("、", matchedRooms.Take(4).Select(RoomOverlapGuard.FormatRoomLabel));
                             if (matchedRooms.Count > 4)
                                 labels += $"…等 {matchedRooms.Count} 間";
                             results.AddError("空間回查", $"元素 {elem.Id} 的中心點同時落在多間房間（{labels}），已略過 AR_RoomId 補寫與參數更新。");
@@ -256,7 +256,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 
                 foreach (var room in rooms)
                 {
-                    if (IsPointInRoomSafe(room, testPoint))
+                    if (RoomOverlapGuard.IsPointInRoomSafe(room, testPoint))
                         matchedRooms.Add(room);
                 }
 
@@ -660,7 +660,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
             if (element == null)
                 return false;
 
-            return FinishingElementGuard.IsManagedFinishingElement(element);
+            return IsProtectedGeneratedFinishElement(element);
         }
 
         private static bool IsSpatialRoomLookupCandidate(Element element)
@@ -668,7 +668,18 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
             if (element == null)
                 return false;
 
-            return FinishingElementGuard.IsSpatialLookupCandidate(element);
+            return IsProtectedGeneratedFinishElement(element);
+        }
+
+        private static bool IsProtectedGeneratedFinishElement(Element element)
+        {
+            if (!FinishingElementGuard.IsSupportedFinishCategory(element))
+                return false;
+
+            if (element is DirectShape ds)
+                return string.Equals(ds.ApplicationId, FinishingElementGuard.StableMarker, StringComparison.OrdinalIgnoreCase);
+
+            return FinishingElementGuard.HasStableMarker(element);
         }
 
         private static bool IsNonRoomBoundingWall(Element element)

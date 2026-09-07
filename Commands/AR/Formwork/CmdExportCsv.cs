@@ -453,7 +453,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     .OfCategory(BuiltInCategory.OST_GenericModel)
                     .WhereElementIsNotElementType()
                     .Cast<DirectShape>()
-                    .Where(ds => ds.ApplicationId == "YD_BIM_Formwork");
+                    .Where(ds => ds.ApplicationId == "HB_BIM_Formwork");
 
                 var relatedFormworks = new List<(ElementId FormworkId, double EffectiveArea)>();
 
