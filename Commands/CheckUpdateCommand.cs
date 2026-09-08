@@ -93,7 +93,7 @@ namespace YD_RevitTools.LicenseManager.Commands
                 }
 
                 TaskDialog.Show("更新已準備",
-                    "更新安裝程式已準備啟動。\n\n請關閉 Revit，安裝程式會在 Revit 關閉後繼續。");
+                    "更新等待程序已啟動。\n\n請儲存工作並關閉所有 Revit 視窗，接著依安裝精靈完成更新；若出現 Windows 權限提示，請允許執行。");
                 return Result.Succeeded;
             }
             catch (Exception ex)

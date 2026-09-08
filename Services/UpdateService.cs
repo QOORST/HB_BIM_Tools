@@ -1,7 +1,7 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
+
 using System.Net.Http;
 using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
@@ -218,7 +218,9 @@ namespace YD_RevitTools.LicenseManager.Services
         {
             try
             {
-                string tempPath = Path.Combine(Path.GetTempPath(), "HB_BIM_Tools_Update.exe");
+                string updateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HB_BIM_Tools", "Updates", Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(updateDirectory);
+                string tempPath = Path.Combine(updateDirectory, "HB_BIM_Tools_Update.exe");
 
                 using (HttpClient client = new HttpClient())
                 {
@@ -265,7 +267,7 @@ namespace YD_RevitTools.LicenseManager.Services
                     return false;
                 }
 
-                LaunchInstaller(tempPath);
+                UpdateInstallerLauncher.Launch(tempPath);
                 return true;
             }
             catch (Exception ex)
@@ -314,54 +316,6 @@ namespace YD_RevitTools.LicenseManager.Services
                 return false;
             }
         }
-        /// <summary>
-        /// 等待 Revit.exe 完全關閉後，直接以 ProcessStartInfo 啟動安裝檔。
-        /// 不使用 .cmd 腳本，避免寫入 %TEMP% 的 TOCTOU 風險。
-        /// </summary>
-        private static void LaunchInstaller(string installerPath)
-        {
-            // 在獨立背景執行緒中等待 Revit 關閉，避免阻擋 UI 執行緒
-            var thread = new System.Threading.Thread(() =>
-            {
-                try
-                {
-                    // 輪詢 Revit.exe 是否仍在運行
-                    while (IsProcessRunning("Revit"))
-                    {
-                        System.Threading.Thread.Sleep(2000);
-                    }
-
-                    // Revit 已關閉，直接啟動安裝檔（不經由腳本中轉）
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = installerPath,
-                        UseShellExecute = true
-                    };
-                    Process.Start(startInfo);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"LaunchInstaller: {ex.Message}");
-                }
-            })
-            { IsBackground = true };
-            thread.Start();
-        }
-
-        private static bool IsProcessRunning(string processName)
-        {
-            try
-            {
-                return System.Diagnostics.Process
-                    .GetProcessesByName(processName)
-                    .Any();
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         public UpdateCheckResult CheckForUpdates()
         {
             try
@@ -401,5 +355,3 @@ namespace YD_RevitTools.LicenseManager.Services
         public string MinimumVersion { get; set; }
     }
 }
-
-
