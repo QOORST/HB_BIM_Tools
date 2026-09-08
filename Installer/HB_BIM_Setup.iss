@@ -1,10 +1,10 @@
 ; HB_BIM Tools 安裝腳本 - Inno Setup
-; 版本: 2.5.13
+; 版本: 2.5.14
 ; 日期: 2026-08-31
 ; 支援: Revit 2022, 2024, 2025, 2026
 
 #define MyAppName "HB_BIM Tools"
-#define MyAppVersion "2.5.13"
+#define MyAppVersion "2.5.14"
 #define MyAppPublisher "LAN"
 #define MyAppURL "https://www.ydbim.com"
 #define LanCertificateThumbprint "5EBE6DDEEBEBE5194CBDC9E71CDE8E6BB91AB166"

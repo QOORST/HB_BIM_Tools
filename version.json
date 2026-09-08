@@ -1,7 +1,7 @@
 {
-  "version": "2.5.13",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.13/HB_BIM_Tools_v2.5.13_Setup.exe",
-  "releaseNotes": "Updated sleeve family, responsive dimension settings UI, legacy settings migration and exact signing certificate matching.",
+  "version": "2.5.14",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.14/HB_BIM_Tools_v2.5.14_Setup.exe",
+  "releaseNotes": "Fix update installer launch after Revit exits using an independent helper and file integrity verification.",
   "releaseDate": "2026-09-08T05:00:00Z",
   "isCritical": false,
   "minimumVersion": "2.0.0"
