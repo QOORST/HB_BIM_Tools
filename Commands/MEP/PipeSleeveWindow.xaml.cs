@@ -15,7 +15,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 {
     public partial class PipeSleeveWindow : Window
     {
-        private const string BuiltInSleeveFamilyVersion = "2026.08.27.01";
+        private const string BuiltInSleeveFamilyVersion = "2026.09.08.01";
         private const string FamilyVersionParameterName = "HB_族群版本";
 
         private static readonly string[] DefaultFamilyFileNames =
