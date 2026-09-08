@@ -1,8 +1,8 @@
 {
-  "version": "2.5.12",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.12/HB_BIM_Tools_v2.5.12_Setup.exe",
-  "releaseNotes": "Security maintenance: replaces the vulnerable bundled SQLite native library and removes the dedicated LAN trust certificate when HB_BIM Tools is uninstalled.",
-  "releaseDate": "2026-09-07T12:00:00Z",
+  "version": "2.5.13",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.13/HB_BIM_Tools_v2.5.13_Setup.exe",
+  "releaseNotes": "Updated sleeve family, responsive dimension settings UI, legacy settings migration and exact signing certificate matching.",
+  "releaseDate": "2026-09-08T05:00:00Z",
   "isCritical": false,
   "minimumVersion": "2.0.0"
 }

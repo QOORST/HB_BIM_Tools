@@ -10,23 +10,30 @@ $installerDir = $PSScriptRoot
 $projectRoot = Split-Path $installerDir -Parent
 $issFile = Join-Path $installerDir "HB_BIM_Setup.iss"
 $prepareScript = Join-Path $installerDir "Prepare_Files_Simple.ps1"
+$publicSigningCertificatePath = Join-Path $installerDir "LAN_CodeSigning.cer"
 $revitApiRoot = Split-Path (Split-Path $projectRoot -Parent) -Parent
 $familyLibraryProject = Join-Path $revitApiRoot "Codex\work\family-library-management\addin\CompanyFamilyLibraryMvp.csproj"
 
 function Get-LanCodeSigningCertificate {
-    $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue |
-        Where-Object { $_.Subject -eq "CN=LAN" } |
-        Sort-Object NotAfter -Descending |
-        Select-Object -First 1
-
-    if (-not $cert) {
-        $cert = Get-ChildItem Cert:\LocalMachine\My -CodeSigningCert -ErrorAction SilentlyContinue |
-            Where-Object { $_.Subject -eq "CN=LAN" } |
-            Sort-Object NotAfter -Descending |
-            Select-Object -First 1
+    if (-not (Test-Path -LiteralPath $publicSigningCertificatePath)) {
+        throw "LAN public code-signing certificate not found: $publicSigningCertificatePath"
     }
 
-    return $cert
+    $publicCertificate = Get-PfxCertificate -FilePath $publicSigningCertificatePath
+    $thumbprint = $publicCertificate.Thumbprint -replace " ", ""
+    foreach ($store in @("Cert:\CurrentUser\My", "Cert:\LocalMachine\My")) {
+        $certificate = Get-ChildItem -Path $store -CodeSigningCert -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.HasPrivateKey -and
+                (($_.Thumbprint -replace " ", "").Equals($thumbprint, [StringComparison]::OrdinalIgnoreCase))
+            } |
+            Select-Object -First 1
+        if ($certificate) {
+            return $certificate
+        }
+    }
+
+    return $null
 }
 
 function Sign-FileWithLanCertificate {
@@ -131,8 +138,8 @@ if ($signingCertificate) {
     }
     Write-Host ""
 } else {
-    Write-Host "[WARNING] LAN code signing certificate not found. Installer payload will not be signed." -ForegroundColor Yellow
-    Write-Host ""
+    Write-Host "[ERROR] The private LAN signing certificate matching LAN_CodeSigning.cer was not found." -ForegroundColor Red
+    exit 1
 }
 
 # Compile the installer

@@ -5,6 +5,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using YDBIM.AutoDimension.Core;
 using YDBIM.AutoDimension.UI;
+using WinForms = System.Windows.Forms;
 
 #nullable enable
 
@@ -82,7 +83,7 @@ internal static class AutoDimensionModelessController
 
             _handler.Attach(_form, doc, view.Id);
             _form.FormClosed += (_, _) => DisposeWindow();
-            _form.Show();
+            _form.Show(new RevitWindow(commandData.Application.MainWindowHandle));
             _form.Activate();
             return Result.Succeeded;
         }
@@ -141,6 +142,16 @@ internal static class AutoDimensionModelessController
         }
 
         externalEvent?.Dispose();
+    }
+
+    private sealed class RevitWindow : WinForms.IWin32Window
+    {
+        public RevitWindow(IntPtr handle)
+        {
+            Handle = handle;
+        }
+
+        public IntPtr Handle { get; }
     }
 
     private static SourceData CollectSources(Document doc, View view)

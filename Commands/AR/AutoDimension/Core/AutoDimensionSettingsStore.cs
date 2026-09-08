@@ -55,7 +55,8 @@ internal sealed class AutoDimensionSavedSettings
 
 internal static class AutoDimensionSettingsStore
 {
-    private const string AppFolderName = "YD_BIM_Tools";
+    private const string AppFolderName = "HB_BIM_Tools";
+    private const string LegacyAppFolderName = "YD_BIM_Tools";
     private const string FileName = "AutoDimensionSettings.json";
 
     public static AutoDimensionSavedSettings? Load(Document doc, DimensionMode mode)
@@ -114,7 +115,17 @@ internal static class AutoDimensionSettingsStore
         string path = GetSettingsPath();
         if (!File.Exists(path))
         {
-            return new AutoDimensionSettingsData();
+            string legacyPath = GetSettingsPath(LegacyAppFolderName);
+            if (!File.Exists(legacyPath))
+            {
+                return new AutoDimensionSettingsData();
+            }
+
+            string legacyJson = File.ReadAllText(legacyPath);
+            AutoDimensionSettingsData legacyData =
+                JsonConvert.DeserializeObject<AutoDimensionSettingsData>(legacyJson) ?? new AutoDimensionSettingsData();
+            TryMigrateLegacySettings(path, legacyJson);
+            return legacyData;
         }
 
         string json = File.ReadAllText(path);
@@ -154,8 +165,34 @@ internal static class AutoDimensionSettingsStore
 
     private static string GetSettingsPath()
     {
+        return GetSettingsPath(AppFolderName);
+    }
+
+    private static string GetSettingsPath(string appFolderName)
+    {
         string root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        return Path.Combine(root, AppFolderName, FileName);
+        return Path.Combine(root, appFolderName, FileName);
+    }
+
+    private static void TryMigrateLegacySettings(string targetPath, string json)
+    {
+        try
+        {
+            string? folder = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(folder))
+            {
+                Directory.CreateDirectory(folder);
+            }
+
+            if (!File.Exists(targetPath))
+            {
+                File.WriteAllText(targetPath, json);
+            }
+        }
+        catch
+        {
+            // The legacy settings remain usable even when migration is not writable.
+        }
     }
 
     private sealed class AutoDimensionSettingsData

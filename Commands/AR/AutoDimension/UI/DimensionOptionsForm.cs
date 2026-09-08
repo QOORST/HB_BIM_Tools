@@ -22,6 +22,7 @@ internal sealed class DimensionOptionsForm : Form
     private readonly IReadOnlyDictionary<DimensionMode, AutoDimensionSavedSettings> _savedSettings;
     private readonly HashSet<DimensionMode> _appliedSavedModes = new HashSet<DimensionMode>();
     private const bool UseDarkTheme = true;
+    private const string UiFontFamily = "Microsoft JhengHei UI";
 
     private TabControl _tabControl = null!;
     private TabControl _modeTabControl = null!;
@@ -98,15 +99,17 @@ internal sealed class DimensionOptionsForm : Form
         _refreshAction = refreshAction;
 
         Text = _windowTitle;
-        Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+        Font = new Font(UiFontFamily, 9F, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(39, 39, 39);
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = lockMode ? new Size(980, 560) : new Size(1120, 760);
-        MinimumSize = lockMode ? new Size(900, 520) : new Size(1040, 700);
+        MinimumSize = lockMode ? new Size(720, 500) : new Size(820, 600);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         MinimizeBox = false;
-        StartPosition = FormStartPosition.CenterScreen;
+        StartPosition = FormStartPosition.CenterParent;
+        Shown += (_, _) => FitToCurrentScreen();
+        DpiChanged += (_, _) => BeginInvoke((Action)FitToCurrentScreen);
 
         if (lockMode)
         {
@@ -116,10 +119,11 @@ internal sealed class DimensionOptionsForm : Form
                 ColumnCount = 1,
                 RowCount = 2,
                 Padding = new Padding(20, 18, 20, 14),
-                BackColor = Color.FromArgb(39, 39, 39)
+                BackColor = Color.FromArgb(39, 39, 39),
+                AutoScroll = true
             };
             lockedRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            lockedRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
+            lockedRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             lockedRoot.Controls.Add(BuildLockedSettingsContent(dimensionTypeNames, horizontalGrids, verticalGrids), 0, 0);
             lockedRoot.Controls.Add(BuildButtonPanel(), 0, 1);
             Controls.Add(lockedRoot);
@@ -134,11 +138,12 @@ internal sealed class DimensionOptionsForm : Form
             ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(18),
-            BackColor = Color.FromArgb(39, 39, 39)
+            BackColor = Color.FromArgb(39, 39, 39),
+            AutoScroll = true
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         root.Controls.Add(BuildHeader(), 0, 0);
         root.Controls.Add(BuildUnifiedSettingsContent(dimensionTypeNames, horizontalGrids, verticalGrids), 0, 1);
@@ -147,6 +152,28 @@ internal sealed class DimensionOptionsForm : Form
 
         ApplyModernTheme();
         ApplySavedSettingsForMode(_initialMode);
+    }
+
+    private void FitToCurrentScreen()
+    {
+        if (!IsHandleCreated || WindowState == FormWindowState.Maximized)
+        {
+            return;
+        }
+
+        Rectangle workingArea = Screen.FromHandle(Handle).WorkingArea;
+        int margin = Math.Max(12, (int)Math.Round(12D * DeviceDpi / 96D));
+        int maxWidth = Math.Max(640, workingArea.Width - margin * 2);
+        int maxHeight = Math.Max(480, workingArea.Height - margin * 2);
+
+        MaximumSize = new Size(maxWidth, maxHeight);
+        MinimumSize = new Size(
+            Math.Min(MinimumSize.Width, maxWidth),
+            Math.Min(MinimumSize.Height, maxHeight));
+        Size = new Size(Math.Min(Width, maxWidth), Math.Min(Height, maxHeight));
+        Location = new Point(
+            workingArea.Left + Math.Max(0, (workingArea.Width - Width) / 2),
+            workingArea.Top + Math.Max(0, (workingArea.Height - Height) / 2));
     }
 
     private Control BuildUnifiedSettingsContent(
@@ -159,7 +186,7 @@ internal sealed class DimensionOptionsForm : Form
         _tabControl.Margin = new Padding(0, 14, 0, 8);
         _tabControl.ItemSize = new Size(126, 34);
 
-        var dimensionsTab = new TabPage("Dimensions") { BackColor = Color.FromArgb(39, 39, 39) };
+        var dimensionsTab = new TabPage("標註設定") { BackColor = Color.FromArgb(39, 39, 39) };
         var dimensionsRoot = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -168,7 +195,7 @@ internal sealed class DimensionOptionsForm : Form
             Padding = new Padding(18, 18, 18, 14),
             BackColor = Color.FromArgb(39, 39, 39)
         };
-        dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
+        dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         dimensionsRoot.Controls.Add(BuildTypePanel(dimensionTypeNames), 0, 0);
@@ -176,7 +203,7 @@ internal sealed class DimensionOptionsForm : Form
         dimensionsRoot.Controls.Add(CreateModeHint(), 0, 2);
         dimensionsTab.Controls.Add(dimensionsRoot);
 
-        var offsetsTab = new TabPage("Offsets") { BackColor = Color.FromArgb(39, 39, 39) };
+        var offsetsTab = new TabPage("距離設定") { BackColor = Color.FromArgb(39, 39, 39) };
         var offsetsRoot = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -269,7 +296,7 @@ internal sealed class DimensionOptionsForm : Form
     {
         return new Label
         {
-            Text = "Dimension Placement 可依標註項目切換；Offset 設定於上方 Offsets 頁籤調整。",
+            Text = "標註放置方式可依標註項目切換；偏移距離請至「距離設定」頁籤調整。",
             Dock = DockStyle.Fill,
             ForeColor = Color.FromArgb(205, 205, 205),
             BackColor = Color.FromArgb(39, 39, 39),
@@ -305,7 +332,7 @@ internal sealed class DimensionOptionsForm : Form
             using var accentPen = new Pen(Color.FromArgb(45, 132, 247), 3f);
             using var textBrush = new SolidBrush(Color.FromArgb(225, 225, 225));
             using var dimBrush = new SolidBrush(Color.FromArgb(170, 170, 170));
-            using var font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
+            using var font = new Font(UiFontFamily, 9F, FontStyle.Bold, GraphicsUnit.Point);
 
             int gridTop = area.Top + 24;
             int gridBottom = area.Bottom - 36;
@@ -355,7 +382,7 @@ internal sealed class DimensionOptionsForm : Form
         _tabControl = CreateDarkTabControl();
         _tabControl.Dock = DockStyle.Fill;
 
-        var dimensionsTab = new TabPage("Dimensions") { BackColor = Color.FromArgb(39, 39, 39) };
+        var dimensionsTab = new TabPage("標註設定") { BackColor = Color.FromArgb(39, 39, 39) };
         var dimensionsRoot = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -365,12 +392,12 @@ internal sealed class DimensionOptionsForm : Form
             BackColor = Color.FromArgb(39, 39, 39)
         };
         dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
+        dimensionsRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         dimensionsRoot.Controls.Add(BuildLockedModePanel(horizontalGrids, verticalGrids), 0, 0);
         dimensionsRoot.Controls.Add(BuildTypePanel(dimensionTypeNames), 0, 1);
         dimensionsTab.Controls.Add(dimensionsRoot);
 
-        var offsetsTab = new TabPage("Offsets") { BackColor = Color.FromArgb(39, 39, 39) };
+        var offsetsTab = new TabPage("距離設定") { BackColor = Color.FromArgb(39, 39, 39) };
         var offsetsRoot = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -447,35 +474,43 @@ internal sealed class DimensionOptionsForm : Form
 
     private Control BuildHeader()
     {
-        var panel = new Panel
+        var panel = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 2,
             BackColor = Color.FromArgb(37, 54, 78),
             Padding = new Padding(22, 12, 22, 12)
         };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var title = new Label
         {
             Text = _windowTitle,
-            Dock = DockStyle.Top,
-            Height = 38,
+            Dock = DockStyle.Fill,
+            AutoSize = true,
             ForeColor = Color.White,
-            Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point)
+            Font = new Font(UiFontFamily, 14F, FontStyle.Bold, GraphicsUnit.Point),
+            Margin = new Padding(0, 0, 0, 4)
         };
 
         var subtitle = new Label
         {
             Text = "依可見構件建立標註，可設定偏移、標註型式與放置方向。",
             Dock = DockStyle.Fill,
+            AutoSize = true,
             ForeColor = Color.FromArgb(221, 231, 241),
-            Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point),
+            Font = new Font(UiFontFamily, 9F, FontStyle.Regular, GraphicsUnit.Point),
             TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true,
-            Padding = new Padding(0, 2, 0, 0)
+            Margin = new Padding(0)
         };
 
-        panel.Controls.Add(subtitle);
-        panel.Controls.Add(title);
+        panel.Controls.Add(title, 0, 0);
+        panel.Controls.Add(subtitle, 0, 1);
         return panel;
     }
 
@@ -490,7 +525,7 @@ internal sealed class DimensionOptionsForm : Form
             Dock = DockStyle.Top,
             Height = 500,
             ColumnCount = 2,
-            RowCount = 1,
+            RowCount = 2,
             Padding = new Padding(22),
             BackColor = UseDarkTheme ? Color.FromArgb(34, 34, 34) : Color.White,
             BorderStyle = BorderStyle.FixedSingle,
@@ -499,12 +534,37 @@ internal sealed class DimensionOptionsForm : Form
         board.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         board.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         board.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        board.Controls.Add(BuildLevelOffsetPanel(), 0, 0);
-        board.Controls.Add(BuildGridOffsetPanel(), 1, 0);
+        board.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
+
+        Control levelOffsetPanel = BuildLevelOffsetPanel();
+        Control gridOffsetPanel = BuildGridOffsetPanel();
+        board.Controls.Add(levelOffsetPanel, 0, 0);
+        board.Controls.Add(gridOffsetPanel, 1, 0);
 
         var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         host.Controls.Add(board);
-        host.Resize += (_, _) => board.Height = Math.Max(board.MinimumSize.Height, host.ClientSize.Height);
+
+        Action updateResponsiveLayout = () =>
+        {
+            int stackingThreshold = (int)Math.Round(900D * board.DeviceDpi / 96D);
+            bool stackPanels = host.ClientSize.Width > 0 && host.ClientSize.Width < stackingThreshold;
+            int minimumHeight = stackPanels ? 920 : 500;
+
+            board.SuspendLayout();
+            board.ColumnStyles[0].Width = stackPanels ? 100 : 50;
+            board.ColumnStyles[1].Width = stackPanels ? 0 : 50;
+            board.RowStyles[0].SizeType = stackPanels ? SizeType.Absolute : SizeType.Percent;
+            board.RowStyles[0].Height = stackPanels ? 460 : 100;
+            board.RowStyles[1].SizeType = SizeType.Absolute;
+            board.RowStyles[1].Height = stackPanels ? 460 : 0;
+            board.SetCellPosition(levelOffsetPanel, new TableLayoutPanelCellPosition(0, 0));
+            board.SetCellPosition(gridOffsetPanel, new TableLayoutPanelCellPosition(stackPanels ? 0 : 1, stackPanels ? 1 : 0));
+            board.MinimumSize = new Size(0, minimumHeight);
+            board.Height = Math.Max(minimumHeight, host.ClientSize.Height);
+            board.ResumeLayout(true);
+        };
+        host.Resize += (_, _) => updateResponsiveLayout();
+        updateResponsiveLayout();
         return host;
     }
 
@@ -516,7 +576,7 @@ internal sealed class DimensionOptionsForm : Form
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32),
             BackColor = UseDarkTheme ? Color.FromArgb(34, 34, 34) : Color.White,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point),
+            Font = new Font(UiFontFamily, 10F, FontStyle.Bold, GraphicsUnit.Point),
             AutoEllipsis = false
         };
     }
@@ -536,10 +596,10 @@ internal sealed class DimensionOptionsForm : Form
         using var mainPen = new Pen(Color.FromArgb(220, 220, 220), 2f);
         using var dashPen = new Pen(Color.FromArgb(170, 170, 170), 1.4f) { DashStyle = DashStyle.Dot };
         using var accentPen = new Pen(Color.FromArgb(45, 132, 247), 2.4f);
-        using var font = new Font("Segoe UI", 11F, FontStyle.Bold, GraphicsUnit.Point);
-        using var valueFont = new Font("Segoe UI", 12F, FontStyle.Regular, GraphicsUnit.Point);
+        using var font = new Font(UiFontFamily, 11F, FontStyle.Bold, GraphicsUnit.Point);
+        using var valueFont = new Font(UiFontFamily, 12F, FontStyle.Regular, GraphicsUnit.Point);
 
-        DrawText(graphics, "Offset between Levels and Dimensions", area.Left + 18, area.Top + 16, font, ContentAlignment.MiddleLeft);
+        DrawText(graphics, "樓層與標註偏移", area.Left + 18, area.Top + 16, font, ContentAlignment.MiddleLeft);
 
         int left = area.Left + 36;
         int mid = area.Left + 180;
@@ -580,10 +640,10 @@ internal sealed class DimensionOptionsForm : Form
         using var mainPen = new Pen(Color.FromArgb(220, 220, 220), 2f);
         using var dashPen = new Pen(Color.FromArgb(170, 170, 170), 1.4f) { DashStyle = DashStyle.Dot };
         using var accentPen = new Pen(Color.FromArgb(45, 132, 247), 2.4f);
-        using var font = new Font("Segoe UI", 11F, FontStyle.Bold, GraphicsUnit.Point);
-        using var valueFont = new Font("Segoe UI", 12F, FontStyle.Regular, GraphicsUnit.Point);
+        using var font = new Font(UiFontFamily, 11F, FontStyle.Bold, GraphicsUnit.Point);
+        using var valueFont = new Font(UiFontFamily, 12F, FontStyle.Regular, GraphicsUnit.Point);
 
-        DrawText(graphics, "Offset between Grids and Dimensions", area.Left + 18, area.Top + 16, font, ContentAlignment.MiddleLeft);
+        DrawText(graphics, "軸線與標註偏移", area.Left + 18, area.Top + 16, font, ContentAlignment.MiddleLeft);
 
         int x1 = area.Left + 56;
         int x2 = area.Left + 160;
@@ -617,8 +677,8 @@ internal sealed class DimensionOptionsForm : Form
         graphics.DrawLine(dashPen, x3, secondY, dashRight, secondY);
         DrawOffsetDimension(graphics, dimX, headY, firstY, accentPen);
         DrawOffsetDimension(graphics, dimX + 18, firstY, secondY, accentPen);
-        DrawText(graphics, "+ inward", area.Left + 18, area.Bottom - 34, valueFont, ContentAlignment.MiddleLeft);
-        DrawText(graphics, "- outward", area.Left + 116, area.Bottom - 34, valueFont, ContentAlignment.MiddleLeft);
+        DrawText(graphics, "+ 內縮", area.Left + 18, area.Bottom - 34, valueFont, ContentAlignment.MiddleLeft);
+        DrawText(graphics, "- 外移", area.Left + 116, area.Bottom - 34, valueFont, ContentAlignment.MiddleLeft);
     }
 
     private static void DrawDimensionLine(Graphics graphics, int x1, int y1, int x2, int y2, Pen pen)
@@ -726,7 +786,7 @@ internal sealed class DimensionOptionsForm : Form
         {
             Text = title,
             Dock = DockStyle.Fill,
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point),
+            Font = new Font(UiFontFamily, 10F, FontStyle.Bold, GraphicsUnit.Point),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32),
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true
@@ -762,7 +822,7 @@ internal sealed class DimensionOptionsForm : Form
             using var thinPen = new Pen(Color.FromArgb(160, 160, 160), 1.5f);
             using var dashPen = new Pen(Color.FromArgb(150, 150, 150), 1.4f) { DashStyle = DashStyle.Dash };
             using var accentPen = new Pen(Color.FromArgb(45, 132, 247), 3f);
-            using var font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
+            using var font = new Font(UiFontFamily, 9F, FontStyle.Bold, GraphicsUnit.Point);
 
             int left = area.Left + 24;
             int right = area.Right - 42;
@@ -809,7 +869,7 @@ internal sealed class DimensionOptionsForm : Form
             using var mainPen = new Pen(Color.FromArgb(210, 210, 210), 2f);
             using var dashPen = new Pen(Color.FromArgb(150, 150, 150), 1.4f) { DashStyle = DashStyle.Dash };
             using var accentPen = new Pen(Color.FromArgb(45, 132, 247), 3f);
-            using var font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
+            using var font = new Font(UiFontFamily, 9F, FontStyle.Bold, GraphicsUnit.Point);
 
             int baseY = area.Bottom - 58;
             int headY = area.Top + 44;
@@ -960,44 +1020,55 @@ internal sealed class DimensionOptionsForm : Form
     {
         var group = new GroupBox
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             Text = "標註型式",
-            Padding = new Padding(12, 20, 12, 8),
+            Padding = new Padding(14, 22, 14, 10),
             Margin = new Padding(0, 4, 0, 4),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(28, 48, 74),
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White,
-            MinimumSize = new Size(0, 74)
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            MinimumSize = new Size(0, 92)
         };
 
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             ColumnCount = 2,
             RowCount = 1,
-            AutoSize = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            MinimumSize = new Size(0, 42),
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Clear();
+        layout.ColumnStyles.Clear();
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.Controls.Add(new Label
+
+        var label = new Label
         {
             Text = "型式",
-            AutoSize = true,
-            Anchor = AnchorStyles.Left,
+            Font = new Font(UiFontFamily, 10F, FontStyle.Bold, GraphicsUnit.Point),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32),
-            Margin = new Padding(6, 0, 0, 0)
-        }, 0, 0);
+            BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White,
+            Margin = new Padding(6, 0, 8, 0),
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        layout.Controls.Add(label, 0, 0);
 
         _typeCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Anchor = AnchorStyles.Left | AnchorStyles.Right,
-            Height = 30,
             FlatStyle = FlatStyle.Flat,
             BackColor = UseDarkTheme ? Color.FromArgb(74, 74, 74) : Color.White,
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32),
-            Margin = new Padding(0, 6, 0, 0)
+            Margin = new Padding(0, 5, 0, 5),
+            Dock = DockStyle.Fill
         };
         _typeCombo.Items.Add("<預設>");
         foreach (string name in dimensionTypeNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
@@ -1016,9 +1087,11 @@ internal sealed class DimensionOptionsForm : Form
         var panel = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.RightToLeft,
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(0, 8, 0, 2),
-            WrapContents = false,
+            WrapContents = true,
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.Transparent
         };
 
@@ -1027,6 +1100,7 @@ internal sealed class DimensionOptionsForm : Form
             Text = _applyAction is null ? "確定" : "執行標註",
             Width = 118,
             Height = 34,
+            Font = new Font(UiFontFamily, 10F, FontStyle.Bold, GraphicsUnit.Point),
             FlatStyle = FlatStyle.Flat,
             BackColor = UseDarkTheme ? Color.FromArgb(45, 132, 247) : Color.FromArgb(36, 99, 176),
             ForeColor = Color.White
@@ -1048,6 +1122,7 @@ internal sealed class DimensionOptionsForm : Form
             Text = _applyAction is null ? "取消" : "關閉",
             Width = 108,
             Height = 34,
+            Font = new Font(UiFontFamily, 10F, FontStyle.Regular, GraphicsUnit.Point),
             FlatStyle = FlatStyle.Flat,
             BackColor = UseDarkTheme ? Color.FromArgb(64, 64, 64) : Color.White,
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(48, 60, 78)
@@ -1068,6 +1143,7 @@ internal sealed class DimensionOptionsForm : Form
             Text = "重新整理",
             Width = 108,
             Height = 34,
+            Font = new Font(UiFontFamily, 10F, FontStyle.Regular, GraphicsUnit.Point),
             FlatStyle = FlatStyle.Flat,
             BackColor = UseDarkTheme ? Color.FromArgb(64, 64, 64) : Color.White,
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(48, 60, 78),
@@ -1113,6 +1189,7 @@ internal sealed class DimensionOptionsForm : Form
     {
         _applyButton.Enabled = false;
         _refreshButton.Enabled = false;
+        _statusLabel.ForeColor = UseDarkTheme ? Color.FromArgb(205, 205, 205) : Color.FromArgb(75, 88, 105);
         _statusLabel.Text = status;
     }
 
@@ -1127,7 +1204,7 @@ internal sealed class DimensionOptionsForm : Form
         _refreshButton.Enabled = true;
         _statusLabel.ForeColor = isError
             ? Color.FromArgb(255, 130, 130)
-            : UseDarkTheme ? Color.FromArgb(205, 205, 205) : Color.FromArgb(75, 88, 105);
+            : Color.FromArgb(76, 175, 80);
         _statusLabel.Text = status ?? "完成。可繼續調整並再次執行。";
     }
 
@@ -1377,7 +1454,7 @@ internal sealed class DimensionOptionsForm : Form
         {
             Text = "選擇標註放置側",
             AutoSize = true,
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point),
+            Font = new Font(UiFontFamily, 10F, FontStyle.Bold, GraphicsUnit.Point),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32)
         }, 0, 0);
 
@@ -1505,7 +1582,7 @@ internal sealed class DimensionOptionsForm : Form
             BackColor = UseDarkTheme ? Color.FromArgb(45, 132, 247) : Color.White,
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(40, 52, 70),
             Margin = new Padding(4),
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point)
+            Font = new Font(UiFontFamily, 10F, FontStyle.Bold, GraphicsUnit.Point)
         };
         button.FlatAppearance.BorderColor = UseDarkTheme ? Color.FromArgb(75, 155, 255) : Color.FromArgb(190, 202, 218);
         button.FlatAppearance.MouseOverBackColor = UseDarkTheme ? Color.FromArgb(65, 150, 255) : Color.FromArgb(232, 242, 255);
@@ -1616,7 +1693,7 @@ internal sealed class DimensionOptionsForm : Form
             Dock = DockStyle.Fill,
             Margin = new Padding(4),
             FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", isDefault ? 8.5F : 9F, FontStyle.Bold, GraphicsUnit.Point),
+            Font = new Font(UiFontFamily, isDefault ? 8.5F : 9F, FontStyle.Bold, GraphicsUnit.Point),
             BackColor = UseDarkTheme ? Color.FromArgb(66, 66, 66) : Color.White,
             ForeColor = UseDarkTheme ? Color.FromArgb(210, 210, 210) : Color.FromArgb(32, 32, 32)
         };
@@ -1659,7 +1736,7 @@ internal sealed class DimensionOptionsForm : Form
         {
             Dock = DockStyle.Top,
             ColumnCount = 2,
-            RowCount = 4,
+            RowCount = 6,
             Padding = new Padding(14, 12, 14, 8),
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.Transparent,
             AutoSize = true,
@@ -1671,6 +1748,8 @@ internal sealed class DimensionOptionsForm : Form
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 10));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
 
         var placementPanel = BuildGridPlacementPanel();
         panel.SetColumnSpan(placementPanel, 2);
@@ -1764,6 +1843,31 @@ internal sealed class DimensionOptionsForm : Form
         checkV.CheckedChanged += (_, _) => SetAllChecked(_verticalGridList, checkV.Checked);
         panel.Controls.Add(checkV, 1, 3);
 
+        Action updateResponsiveLayout = () =>
+        {
+            int stackingThreshold = (int)Math.Round(900D * panel.DeviceDpi / 96D);
+            bool stackSelections = panel.ClientSize.Width > 0 && panel.ClientSize.Width < stackingThreshold;
+
+            panel.SuspendLayout();
+            panel.ColumnStyles[0].SizeType = SizeType.Percent;
+            panel.ColumnStyles[0].Width = stackSelections ? 100 : 50;
+            panel.ColumnStyles[1].SizeType = SizeType.Percent;
+            panel.ColumnStyles[1].Width = stackSelections ? 0 : 50;
+            panel.RowStyles[4].Height = stackSelections ? 112 : 0;
+            panel.RowStyles[5].Height = stackSelections ? 34 : 0;
+
+            panel.SetCellPosition(horizontalGroup, new TableLayoutPanelCellPosition(0, 2));
+            panel.SetCellPosition(checkH, new TableLayoutPanelCellPosition(0, 3));
+            panel.SetCellPosition(verticalGroup, new TableLayoutPanelCellPosition(stackSelections ? 0 : 1, stackSelections ? 4 : 2));
+            panel.SetCellPosition(checkV, new TableLayoutPanelCellPosition(stackSelections ? 0 : 1, stackSelections ? 5 : 3));
+            horizontalGroup.Margin = stackSelections ? new Padding(0) : new Padding(0, 0, 10, 0);
+            verticalGroup.Margin = stackSelections ? new Padding(0) : new Padding(10, 0, 0, 0);
+            checkV.Margin = stackSelections ? new Padding(4, 8, 0, 0) : new Padding(14, 8, 0, 0);
+            panel.ResumeLayout(true);
+        };
+        panel.SizeChanged += (_, _) => updateResponsiveLayout();
+        updateResponsiveLayout();
+
         var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White };
         host.Controls.Add(panel);
         tab.Controls.Add(host);
@@ -1794,7 +1898,7 @@ internal sealed class DimensionOptionsForm : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             MaximumSize = new Size(760, 0),
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point),
+            Font = new Font(UiFontFamily, 10F, FontStyle.Bold, GraphicsUnit.Point),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32),
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.Transparent
         }, 0, 0);
@@ -1812,7 +1916,7 @@ internal sealed class DimensionOptionsForm : Form
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var offsetButton = new Button
         {
-            Text = "調整標註距離（Offsets）",
+            Text = "調整標註距離（距離設定）",
             AutoSize = true,
             Padding = new Padding(12, 6, 12, 6),
             Margin = new Padding(0, 16, 0, 0),
