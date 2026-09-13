@@ -1,17 +1,20 @@
-using Autodesk.Revit.DB;
+﻿using Autodesk.Revit.DB;
+using System;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 {
     internal enum AutoTagTemplate
     {
         Structure,
-        Mep
+        Mep,
+        Architecture
     }
 
     internal enum AutoTagScope
     {
         ActiveView,
-        Selection
+        Selection,
+        LinkedView
     }
 
     internal enum AutoTagPlacement
@@ -30,13 +33,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             BuiltInCategory elementCategory,
             BuiltInCategory tagCategory,
             bool structureDefault,
-            bool mepDefault)
+            bool mepDefault,
+            bool architectureDefault = false)
         {
             Name = name;
             ElementCategory = elementCategory;
             TagCategory = tagCategory;
             StructureDefault = structureDefault;
             MepDefault = mepDefault;
+            ArchitectureDefault = architectureDefault;
         }
 
         public string Name { get; }
@@ -48,6 +53,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         public bool StructureDefault { get; }
 
         public bool MepDefault { get; }
+
+        public bool ArchitectureDefault { get; }
     }
 
     internal sealed class AutoTagRuleSelection
@@ -69,6 +76,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         public AutoTagScope Scope { get; set; } = AutoTagScope.ActiveView;
 
+        public string LinkInstanceUniqueId { get; set; } = string.Empty;
+
         public AutoTagPlacement Placement { get; set; } = AutoTagPlacement.Above;
 
         public bool AddLeader { get; set; } = true;
@@ -76,6 +85,19 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         public bool SkipExistingTags { get; set; } = true;
 
         public bool AvoidTagOverlap { get; set; } = true;
+
+        // Defaults preserve previously saved model-distance and direction behavior.
+        public bool VerticalOnly { get; set; }
+        public bool AllDirections { get; set; }
+        public bool UsePaperMillimeters { get; set; }
+
+        public double GetModelOffsetMillimeters(int viewScale)
+        {
+            return OffsetMillimeters * (UsePaperMillimeters ? Math.Max(1, viewScale) : 1);
+        }
+
+        public double MaxMovePaperMillimeters { get; set; } = 10.0;
+        public bool AllowCrossSide { get; set; }
 
         public double OffsetMillimeters { get; set; } = 250.0;
     }

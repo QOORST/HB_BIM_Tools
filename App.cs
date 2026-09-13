@@ -411,25 +411,14 @@ namespace YD_RevitTools.LicenseManager
 
                 PushButtonData autoTagHorizontalData = new PushButtonData(
                     "AutoTagHorizontal",
-                    "水平元素\n標籤",
+                    "自動\n標籤",
                     assemblyPath,
-                    "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdAutoTagHorizontal");
-                autoTagHorizontalData.ToolTip = "自動建立水平元素標籤";
+                    "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdAutoTag");
+                autoTagHorizontalData.ToolTip = "依分類批次建立構件標籤";
                 autoTagHorizontalData.LongDescription =
                     "開啟自動標籤設定，可選擇軀體圖或機電圖樣板，依不同構件分類指定標籤族型，並控制標籤放置位置、偏移距離與引線。";
                 SetButtonIcon(autoTagHorizontalData, "auto_tag_horizontal");
                 autoDimensionPulldown.AddPushButton(autoTagHorizontalData);
-
-                PushButtonData autoTagVerticalData = new PushButtonData(
-                    "AutoTagVertical",
-                    "垂直元素\n標籤",
-                    assemblyPath,
-                    "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdAutoTagVertical");
-                autoTagVerticalData.ToolTip = "自動建立垂直元素標籤";
-                autoTagVerticalData.LongDescription =
-                    "開啟自動標籤設定，可選擇軀體圖或機電圖樣板，針對垂直向構件建立可控位置的分類標籤。";
-                SetButtonIcon(autoTagVerticalData, "auto_tag_vertical");
-                autoDimensionPulldown.AddPushButton(autoTagVerticalData);
 
                 PushButtonData selectRelatedTagsData = new PushButtonData(
                     "SelectRelatedTags",

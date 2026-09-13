@@ -1,4 +1,4 @@
-using Autodesk.Revit.DB;
+﻿using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
@@ -17,16 +17,29 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         {
             new AutoTagCategoryRule("結構柱", BuiltInCategory.OST_StructuralColumns, BuiltInCategory.OST_StructuralColumnTags, true, false),
             new AutoTagCategoryRule("結構樑", BuiltInCategory.OST_StructuralFraming, BuiltInCategory.OST_StructuralFramingTags, true, false),
-            new AutoTagCategoryRule("牆", BuiltInCategory.OST_Walls, BuiltInCategory.OST_WallTags, true, false),
-            new AutoTagCategoryRule("樓板", BuiltInCategory.OST_Floors, BuiltInCategory.OST_FloorTags, true, false),
-            new AutoTagCategoryRule("管", BuiltInCategory.OST_PipeCurves, BuiltInCategory.OST_PipeTags, false, true),
+            new AutoTagCategoryRule("牆", BuiltInCategory.OST_Walls, BuiltInCategory.OST_WallTags, true, false, true),
+            new AutoTagCategoryRule("樓板", BuiltInCategory.OST_Floors, BuiltInCategory.OST_FloorTags, true, false, true),
+            new AutoTagCategoryRule("管線", BuiltInCategory.OST_PipeCurves, BuiltInCategory.OST_PipeTags, false, true),
             new AutoTagCategoryRule("風管", BuiltInCategory.OST_DuctCurves, BuiltInCategory.OST_DuctTags, false, true),
-            new AutoTagCategoryRule("電纜架", BuiltInCategory.OST_CableTray, BuiltInCategory.OST_CableTrayTags, false, true),
+            new AutoTagCategoryRule("電纜橋架", BuiltInCategory.OST_CableTray, BuiltInCategory.OST_CableTrayTags, false, true),
             new AutoTagCategoryRule("電管", BuiltInCategory.OST_Conduit, BuiltInCategory.OST_ConduitTags, false, true),
             new AutoTagCategoryRule("機械設備", BuiltInCategory.OST_MechanicalEquipment, BuiltInCategory.OST_MechanicalEquipmentTags, false, true),
             new AutoTagCategoryRule("衛生設備", BuiltInCategory.OST_PlumbingFixtures, BuiltInCategory.OST_PlumbingFixtureTags, false, true),
             new AutoTagCategoryRule("電氣設備", BuiltInCategory.OST_ElectricalEquipment, BuiltInCategory.OST_ElectricalEquipmentTags, false, true),
-            new AutoTagCategoryRule("電氣裝置", BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_ElectricalFixtureTags, false, true)
+            new AutoTagCategoryRule("電氣裝置", BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_ElectricalFixtureTags, false, true),
+            new AutoTagCategoryRule("門", BuiltInCategory.OST_Doors, BuiltInCategory.OST_DoorTags, false, false, true),
+            new AutoTagCategoryRule("窗", BuiltInCategory.OST_Windows, BuiltInCategory.OST_WindowTags, false, false, true),
+            new AutoTagCategoryRule("天花板", BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_CeilingTags, false, false, true),
+            new AutoTagCategoryRule("屋頂", BuiltInCategory.OST_Roofs, BuiltInCategory.OST_RoofTags, false, false, true),
+            new AutoTagCategoryRule("一般模型", BuiltInCategory.OST_GenericModel, BuiltInCategory.OST_GenericModelTags, false, false, true),
+            new AutoTagCategoryRule("結構基礎", BuiltInCategory.OST_StructuralFoundation, BuiltInCategory.OST_StructuralFoundationTags, true, false),
+            new AutoTagCategoryRule("管件", BuiltInCategory.OST_PipeFitting, BuiltInCategory.OST_PipeFittingTags, false, true),
+            new AutoTagCategoryRule("管附件", BuiltInCategory.OST_PipeAccessory, BuiltInCategory.OST_PipeAccessoryTags, false, true),
+            new AutoTagCategoryRule("風管配件", BuiltInCategory.OST_DuctFitting, BuiltInCategory.OST_DuctFittingTags, false, true),
+            new AutoTagCategoryRule("風管附件", BuiltInCategory.OST_DuctAccessory, BuiltInCategory.OST_DuctAccessoryTags, false, true),
+            new AutoTagCategoryRule("風口", BuiltInCategory.OST_DuctTerminal, BuiltInCategory.OST_DuctTerminalTags, false, true),
+            new AutoTagCategoryRule("照明設備", BuiltInCategory.OST_LightingFixtures, BuiltInCategory.OST_LightingFixtureTags, false, true),
+            new AutoTagCategoryRule("灑水頭", BuiltInCategory.OST_Sprinklers, BuiltInCategory.OST_SprinklerTags, false, true)
         };
 
         public AutoTagResult TagElements(
@@ -40,7 +53,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             if (options == null)
                 throw new ArgumentNullException(nameof(options));
             if (selectedRules == null || selectedRules.Count == 0)
-                return AutoTagResult.Failed("請至少選擇一個構件分類與標籤族型。");
+                return AutoTagResult.Failed("請至少選擇一個元素分類與標籤族型。");
 
             Document doc = uiDoc.Document;
             View view = doc.ActiveView;
@@ -48,17 +61,19 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             if (!CanCreateTagInView(view))
                 return AutoTagResult.Failed("目前視圖不可建立標籤，請切換到平面、立面、剖面或詳圖視圖。");
 
-            IList<Element> candidates = GetCandidateElements(uiDoc, view, options, selectedRules);
+            IList<TagCandidate> candidates = GetCandidateElements(uiDoc, view, options, selectedRules);
             if (candidates.Count == 0)
-                return AutoTagResult.Failed("沒有可處理的元素。請確認目前視圖或目前選取中含有所選分類的可標註構件。");
+                return AutoTagResult.Failed("沒有可處理的元素。請確認目前視圖或目前選取中含有所選分類的可標註元素。");
 
-            HashSet<ElementId> taggedElementIds = options.SkipExistingTags
-                ? CollectTaggedElementIds(doc, view)
-                : new HashSet<ElementId>();
-            List<TagViewRect> occupiedTagRects = options.AvoidTagOverlap
-                ? CollectTagRects(doc, view)
-                : new List<TagViewRect>();
+            var existingTags = options.SkipExistingTags
+                ? CollectExistingTags(doc, view)
+                : new Dictionary<string, List<ElementId>>();
+            var taggedElementIds = new HashSet<string>(existingTags.Keys);
+            var skippedTagIds = new HashSet<ElementId>();
+            var occupiedTagRects = new List<TagViewRect>();
 
+            var issues = new List<string>();
+            var reviewIds = new List<ElementId>();
             int matched = 0;
             int created = 0;
             int skipped = 0;
@@ -67,48 +82,64 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             using (var tx = new Transaction(doc, GetTransactionName(mode)))
             {
                 tx.Start();
+                if (options.AvoidTagOverlap)
+                    occupiedTagRects = CollectTagRects(doc, view, options.UsePaperMillimeters);
 
-                foreach (Element element in candidates)
+                foreach (TagCandidate candidate in candidates)
                 {
-                    if (!MatchesMode(element, view, mode))
+                    Element element = candidate.Element;
+                    if (!options.AllDirections && (mode != AutoTagMode.Unified || IsDirectionalCategory(element)) &&
+                        !MatchesMode(candidate, view, options.VerticalOnly ? AutoTagMode.Vertical : AutoTagMode.Horizontal))
                         continue;
 
                     matched++;
 
-                    if (taggedElementIds.Contains(element.Id))
+                    if (taggedElementIds.Contains(candidate.Key))
                     {
                         skipped++;
+                        if (existingTags.TryGetValue(candidate.Key, out var evidence))
+                        {
+                            foreach (var id in evidence) skippedTagIds.Add(id);
+                            issues.Add($"{candidate.Description}：略過，既有標籤 ID {string.Join(", ", evidence.Select(GetElementIdValue))}。");
+                        }
                         continue;
                     }
 
                     AutoTagRuleSelection rule = selectedRules.First(item => item.Rule.ElementCategory == (BuiltInCategory)GetElementIdValue(element.Category.Id));
-                    if (TryCreateTag(doc, view, element, rule.TagTypeId, options, occupiedTagRects, out TagViewRect placedRect))
+                    using (var itemTransaction = new SubTransaction(doc))
                     {
-                        taggedElementIds.Add(element.Id);
-                        if (placedRect != null)
-                            occupiedTagRects.Add(placedRect);
-
+                        itemTransaction.Start();
+                        bool ok = TryCreateTag(doc, view, candidate, rule.TagTypeId, options, occupiedTagRects,
+                            out TagViewRect placedRect, out ElementId tagId, out string error);
+                        if (!ok)
+                        {
+                            itemTransaction.RollBack();
+                            failed++;
+                            issues.Add($"{rule.Rule.Name} / {candidate.Description}：{error}");
+                            continue;
+                        }
+                        if (itemTransaction.Commit() != TransactionStatus.Committed)
+                            throw new InvalidOperationException("單筆標籤交易未完成，已停止本次作業。");
+                        taggedElementIds.Add(candidate.Key);
+                        if (options.AvoidTagOverlap && (placedRect == null || IntersectsAny(placedRect, occupiedTagRects)))
+                        {
+                            reviewIds.Add(tagId);
+                            issues.Add($"{rule.Rule.Name} / {candidate.Description} / 標籤 {GetElementIdValue(tagId)}：" +
+                                (placedRect == null ? "無法確認重疊，需複核。" : "避讓後仍重疊，需複核。"));
+                        }
+                        if (placedRect != null) occupiedTagRects.Add(placedRect);
                         created++;
-                    }
-                    else
-                    {
-                        failed++;
                     }
                 }
 
                 if (created == 0)
-                {
                     tx.RollBack();
-                    return AutoTagResult.Failed(
-                        matched == 0
-                            ? $"沒有符合「{GetModeName(mode)}」方向的元素。"
-                            : $"找到 {matched} 個符合方向的元素，但未能建立標籤。請確認所選分類已有可用標籤族，且此視圖允許該構件標籤。");
-                }
-
-                tx.Commit();
+                else if (tx.Commit() != TransactionStatus.Committed)
+                    return AutoTagResult.Failed("標籤交易未提交，請處理 Revit 的失敗訊息後重試。");
             }
 
-            return AutoTagResult.Succeeded(candidates.Count, matched, created, skipped, failed);
+            issues.Insert(0, $"視圖：{view.Name} [{GetElementIdValue(view.Id)}]；位置：{options.Placement}；既有標籤依據由本次執行重新讀取。");
+            return AutoTagResult.Completed(candidates.Count, matched, created, skipped, failed, issues, reviewIds, skippedTagIds.ToList());
         }
 
         public static IReadOnlyList<AutoTagTypeOption> GetTagTypeOptions(Document doc, BuiltInCategory tagCategory)
@@ -135,7 +166,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 && view.ViewType != ViewType.Internal;
         }
 
-        private static IList<Element> GetCandidateElements(
+        private static IList<TagCandidate> GetCandidateElements(
             UIDocument uiDoc,
             View view,
             AutoTagOptions options,
@@ -143,6 +174,25 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         {
             Document doc = uiDoc.Document;
             var selectedCategoryIds = new HashSet<long>(selectedRules.Select(item => (long)item.Rule.ElementCategory));
+
+            if (options.Scope == AutoTagScope.LinkedView)
+            {
+#if REVIT2024 || REVIT2025 || REVIT2026
+                var link = string.IsNullOrWhiteSpace(options.LinkInstanceUniqueId) ? null :
+                    doc.GetElement(options.LinkInstanceUniqueId) as RevitLinkInstance;
+                if (link == null || link.GetLinkDocument() == null)
+                    throw new InvalidOperationException("指定連結已卸載或不存在，請重新整理後選擇連結。");
+                if (link.IsHidden(view) || view.GetCategoryHidden(new ElementId(BuiltInCategory.OST_RvtLinks)))
+                    return new List<TagCandidate>();
+                var filter = new ElementMulticategoryFilter(selectedRules.Select(r => r.Rule.ElementCategory).ToList());
+                return new FilteredElementCollector(doc, view.Id, link.Id)
+                    .WhereElementIsNotElementType().WherePasses(filter).ToElements()
+                    .Where(e => IsCandidateElement(e, selectedCategoryIds))
+                    .Select(e => new TagCandidate(e, link)).ToList();
+#else
+                throw new InvalidOperationException("指定連結的視圖篩選需要 Revit 2024 或更新版本。");
+#endif
+            }
 
             IEnumerable<Element> elements;
             if (options.Scope == AutoTagScope.Selection)
@@ -164,7 +214,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
             return elements
                 .Where(element => IsCandidateElement(element, selectedCategoryIds))
-                .ToList();
+                .Select(element => new TagCandidate(element, null)).ToList();
         }
 
         private static bool IsCandidateElement(Element element, HashSet<long> selectedCategoryIds)
@@ -185,58 +235,84 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 #endif
         }
 
-        private static HashSet<ElementId> CollectTaggedElementIds(Document doc, View view)
+        private sealed class TagCandidate
         {
-            var result = new HashSet<ElementId>();
-            var tags = new FilteredElementCollector(doc, view.Id)
-                .OfClass(typeof(IndependentTag))
-                .Cast<IndependentTag>();
-
-            foreach (IndependentTag tag in tags)
+            public TagCandidate(Element element, RevitLinkInstance link)
             {
-                foreach (ElementId id in GetTaggedElementIds(tag))
-                    result.Add(id);
+                Element = element;
+                Link = link;
+                ToHost = link?.GetTotalTransform() ?? Transform.Identity;
             }
+            public Element Element { get; }
+            public RevitLinkInstance Link { get; }
+            public Transform ToHost { get; }
+            public string Key => MakeKey(Link?.Id, Element.Id);
+            public string Description => Link == null ? $"元素 {GetElementIdValue(Element.Id)}" :
+                $"連結 {Link.Name} [{GetElementIdValue(Link.Id)}] / 元素 {GetElementIdValue(Element.Id)}";
+            public Reference Reference => Link == null ? new Reference(Element) : new Reference(Element).CreateLinkReference(Link);
+        }
 
+        private static string MakeKey(ElementId linkId, ElementId elementId)
+        {
+            return $"{(linkId == null ? -1 : GetElementIdValue(linkId))}:{GetElementIdValue(elementId)}";
+        }
+
+        private static HashSet<string> CollectTaggedElementIds(Document doc, View view)
+        {
+            return new HashSet<string>(CollectExistingTags(doc, view).Keys);
+        }
+
+        private static Dictionary<string, List<ElementId>> CollectExistingTags(Document doc, View view)
+        {
+            var result = new Dictionary<string, List<ElementId>>();
+            var ids = new FilteredElementCollector(doc, view.Id)
+                .OfClass(typeof(IndependentTag)).ToElementIds();
+            foreach (var tagId in ids)
+            {
+                // Resolve against the current document, including after Undo/Redo.
+                var tag = doc.GetElement(tagId) as IndependentTag;
+                if (tag == null || !tag.IsValidObject || tag.IsOrphaned) continue;
+                foreach (LinkElementId id in tag.GetTaggedElementIds())
+                {
+                    string key = null;
+                    if (id.LinkInstanceId != ElementId.InvalidElementId && id.LinkedElementId != ElementId.InvalidElementId)
+                        key = MakeKey(id.LinkInstanceId, id.LinkedElementId);
+                    else if (id.HostElementId != ElementId.InvalidElementId)
+                        key = MakeKey(null, id.HostElementId);
+                    if (key == null) continue;
+                    if (!result.TryGetValue(key, out var tags))
+                        result[key] = tags = new List<ElementId>();
+                    if (!tags.Contains(tag.Id)) tags.Add(tag.Id);
+                }
+            }
             return result;
         }
 
-        private static IEnumerable<ElementId> GetTaggedElementIds(IndependentTag tag)
+        private static bool IsDirectionalCategory(Element element)
         {
-            MethodInfo method = typeof(IndependentTag).GetMethod("GetTaggedLocalElementIds", Type.EmptyTypes);
-            if (method != null)
-            {
-                object value = method.Invoke(tag, null);
-                if (value is IEnumerable<ElementId> ids)
-                    return ids.Where(id => id != ElementId.InvalidElementId);
-            }
-
-            PropertyInfo property = typeof(IndependentTag).GetProperty("TaggedLocalElementId");
-            if (property != null)
-            {
-                object value = property.GetValue(tag);
-                if (value is ElementId id && id != ElementId.InvalidElementId)
-                    return new[] { id };
-            }
-
-            return Enumerable.Empty<ElementId>();
+            return IsCategory(element, BuiltInCategory.OST_StructuralFraming) ||
+                IsCategory(element, BuiltInCategory.OST_PipeCurves) || IsCategory(element, BuiltInCategory.OST_DuctCurves) ||
+                IsCategory(element, BuiltInCategory.OST_Conduit) || IsCategory(element, BuiltInCategory.OST_CableTray);
         }
 
-        private static bool MatchesMode(Element element, View view, AutoTagMode mode)
+        private static bool MatchesMode(TagCandidate candidate, View view, AutoTagMode mode)
         {
+            Element element = candidate.Element;
             if (TryGetPrimaryDirection(element, out XYZ direction))
             {
-                double z = Math.Abs(direction.Normalize().Z);
+                double z = Math.Abs(candidate.ToHost.OfVector(direction).Normalize().Z);
                 return mode == AutoTagMode.Vertical
                     ? z >= VerticalDirectionThreshold
                     : z <= HorizontalDirectionThreshold;
             }
 
-            BoundingBoxXYZ box = element.get_BoundingBox(view) ?? element.get_BoundingBox(null);
+            BoundingBoxXYZ box = element.get_BoundingBox(candidate.Link == null ? view : null) ?? element.get_BoundingBox(null);
             if (box == null)
                 return false;
 
-            XYZ size = box.Max - box.Min;
+            var corners = BoxCorners(box).Select(p => candidate.ToHost.OfPoint(p)).ToList();
+            XYZ size = new XYZ(corners.Max(p => p.X) - corners.Min(p => p.X),
+                corners.Max(p => p.Y) - corners.Min(p => p.Y), corners.Max(p => p.Z) - corners.Min(p => p.Z));
             double xy = Math.Max(Math.Abs(size.X), Math.Abs(size.Y));
             double zSize = Math.Abs(size.Z);
 
@@ -268,18 +344,22 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private static bool TryCreateTag(
             Document doc,
             View view,
-            Element element,
+            TagCandidate candidate,
             ElementId tagTypeId,
             AutoTagOptions options,
             IList<TagViewRect> occupiedTagRects,
-            out TagViewRect placedRect)
+            out TagViewRect placedRect, out ElementId tagId, out string error)
         {
             placedRect = null;
-            if (!TryGetTagPoint(element, view, options, out XYZ tagPoint))
-                return false;
-
+            tagId = ElementId.InvalidElementId;
+            error = "未能建立標籤。";
             try
             {
+                if (!TryGetTagPoint(candidate, view, options, out XYZ tagPoint))
+                {
+                    error = "無法取得放置點，或放置點位於目前視圖裁切範圍外。";
+                    return false;
+                }
                 FamilySymbol tagSymbol = doc.GetElement(tagTypeId) as FamilySymbol;
                 if (tagSymbol != null && !tagSymbol.IsActive)
                     tagSymbol.Activate();
@@ -287,7 +367,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 IndependentTag tag = IndependentTag.Create(
                     doc,
                     view.Id,
-                    new Reference(element),
+                    candidate.Reference,
                     options.AddLeader,
                     TagMode.TM_ADDBY_CATEGORY,
                     TagOrientation.Horizontal,
@@ -295,31 +375,33 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
                 if (tag != null)
                 {
+                    tagId = tag.Id;
                     if (tag.GetTypeId() != tagTypeId)
                         tag.ChangeTypeId(tagTypeId);
 
                     tag.TagHeadPosition = tagPoint;
                     AlignTagBoxCenter(doc, view, tag, tagPoint);
 
-                    if (options.AvoidTagOverlap)
+                    if (options.AvoidTagOverlap && options.Placement != AutoTagPlacement.Center)
                     {
-                        placedRect = MoveTagToAvailablePosition(doc, view, tag, tagPoint, options.OffsetMillimeters, occupiedTagRects);
+                        placedRect = MoveTagToAvailablePosition(doc, view, tag, tagPoint, options, occupiedTagRects, candidate.Link != null);
                     }
                     else
                     {
-                        placedRect = GetTagRect(doc, view, tag);
+                        placedRect = GetTagRect(doc, view, tag, options.UsePaperMillimeters);
                     }
                 }
 
                 return tag != null;
             }
-            catch
+            catch (Exception ex)
             {
+                error = ex.Message;
                 return false;
             }
         }
 
-        private static List<TagViewRect> CollectTagRects(Document doc, View view)
+        private static List<TagViewRect> CollectTagRects(Document doc, View view, bool paperUnits)
         {
             var result = new List<TagViewRect>();
             var tags = new FilteredElementCollector(doc, view.Id)
@@ -328,80 +410,60 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
             foreach (IndependentTag tag in tags)
             {
-                TagViewRect rect = GetTagRect(doc, view, tag);
-                if (rect != null)
-                    result.Add(rect);
+                TagViewRect rect = GetTagRect(doc, view, tag, paperUnits);
+                if (rect == null)
+                    throw new InvalidOperationException($"無法量測既有標籤 {GetElementIdValue(tag.Id)}，為避免誤判已停止避讓；可關閉避讓後重試。");
+                result.Add(rect);
             }
 
             return result;
         }
 
         private static TagViewRect MoveTagToAvailablePosition(
-            Document doc,
-            View view,
-            IndependentTag tag,
-            XYZ preferredPoint,
-            double offsetMillimeters,
-            IList<TagViewRect> occupiedRects)
+            Document doc, View view, IndependentTag tag, XYZ preferredPoint,
+            AutoTagOptions options, IList<TagViewRect> occupiedRects, bool constrainToCrop)
         {
-            TagViewRect current = GetTagRect(doc, view, tag);
-            if (current == null || !IntersectsAny(current, occupiedRects))
-                return current;
-
-            double step = Math.Max(offsetMillimeters / 304.8, 150.0 / 304.8);
-            XYZ right = view.RightDirection.Normalize();
-            XYZ up = view.UpDirection.Normalize();
-            XYZ[] directions =
+            TagViewRect original = GetTagRect(doc, view, tag, options.UsePaperMillimeters);
+            if (original == null || !IntersectsAny(original, occupiedRects)) return original;
+            XYZ originalHead = tag.TagHeadPosition;
+            foreach (var offset in AutoTagAvoidanceSearch.GetOffsets(options.Placement,
+                options.MaxMovePaperMillimeters, options.AllowCrossSide, options.AddLeader))
             {
-                up,
-                right,
-                up * -1.0,
-                right * -1.0,
-                up + right,
-                up + right * -1.0,
-                up * -1.0 + right,
-                (up + right) * -1.0
-            };
-
-            XYZ bestPoint = preferredPoint;
-            TagViewRect bestRect = current;
-            int bestOverlapCount = CountIntersections(current, occupiedRects);
-
-            for (int ring = 1; ring <= 4; ring++)
-            {
-                foreach (XYZ direction in directions)
-                {
-                    XYZ candidatePoint = preferredPoint + direction.Normalize() * step * ring;
-                    AlignTagBoxCenter(doc, view, tag, candidatePoint);
-
-                    TagViewRect candidateRect = GetTagRect(doc, view, tag);
-                    if (candidateRect == null)
-                        continue;
-
-                    int overlapCount = CountIntersections(candidateRect, occupiedRects);
-                    if (overlapCount == 0)
-                        return candidateRect;
-
-                    if (overlapCount < bestOverlapCount)
-                    {
-                        bestOverlapCount = overlapCount;
-                        bestPoint = candidatePoint;
-                        bestRect = candidateRect;
-                    }
-                }
+                double scale = Math.Max(1, view.Scale) / 304.8;
+                XYZ point = preferredPoint + view.RightDirection * (offset.X * scale) + view.UpDirection * (offset.Y * scale);
+                if (constrainToCrop && !IsInsideCrop(view, point)) continue;
+                AlignTagBoxCenter(doc, view, tag, point);
+                TagViewRect rect = GetTagRect(doc, view, tag, options.UsePaperMillimeters);
+                if (rect != null && !IntersectsAny(rect, occupiedRects)) return rect;
             }
-
-            AlignTagBoxCenter(doc, view, tag, bestPoint);
-            return bestRect;
+            // No acceptable position: restore the exact original head, not a best-effort overlap.
+            tag.TagHeadPosition = originalHead;
+            return original;
         }
 
-        private static TagViewRect GetTagRect(Document doc, View view, IndependentTag tag)
+        private static BoundingBoxXYZ GetTagHeadBox(Document doc, View view, IndependentTag tag)
+        {
+            using (var probe = new SubTransaction(doc))
+            {
+                probe.Start();
+                if (tag.HasLeader) tag.HasLeader = false;
+                doc.Regenerate();
+                var measured = tag.get_BoundingBox(view);
+                var copy = measured == null ? null : new BoundingBoxXYZ
+                {
+                    Min = measured.Min, Max = measured.Max, Transform = measured.Transform
+                };
+                probe.RollBack();
+                return copy;
+            }
+        }
+
+        private static TagViewRect GetTagRect(Document doc, View view, IndependentTag tag, bool paperUnits = false)
         {
             try
             {
-                doc.Regenerate();
-                BoundingBoxXYZ box = tag.get_BoundingBox(view);
-                return box == null ? null : TagViewRect.FromBoundingBox(box, view);
+                BoundingBoxXYZ box = GetTagHeadBox(doc, view, tag);
+                return box == null ? null : TagViewRect.FromBoundingBox(box, view, paperUnits ? 0.4 * Math.Max(1, view.Scale) : 20.0);
             }
             catch
             {
@@ -431,36 +493,72 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private static void AlignTagBoxCenter(Document doc, View view, IndependentTag tag, XYZ targetPoint)
         {
-            if (doc == null || view == null || tag == null || targetPoint == null)
-                return;
-
-            try
+            double tolerance = 0.05 * Math.Max(1, view.Scale) / 304.8;
+            for (int attempt = 0; attempt < 6; attempt++)
             {
-                doc.Regenerate();
-                BoundingBoxXYZ box = tag.get_BoundingBox(view);
-                if (box == null)
-                    return;
-
-                XYZ currentCenter = (box.Min + box.Max) * 0.5;
-                XYZ correction = targetPoint - currentCenter;
-                if (correction.GetLength() <= MinimumLength)
-                    return;
-
-                tag.TagHeadPosition = tag.TagHeadPosition + correction;
-            }
-            catch
-            {
+                var box = GetTagHeadBox(doc, view, tag);
+                if (box == null) throw new InvalidOperationException("無法量測標籤本體。");
+                XYZ currentCenter = box.Transform.OfPoint((box.Min + box.Max) * 0.5);
+                XYZ delta = targetPoint - currentCenter;
+                XYZ correction = view.RightDirection * delta.DotProduct(view.RightDirection) +
+                    view.UpDirection * delta.DotProduct(view.UpDirection);
+                if (correction.GetLength() <= tolerance) return;
+                if (attempt == 5)
+                    throw new InvalidOperationException("標籤本體置中未收斂，請檢查標籤族的圖形或原點；此筆已回復。");
+                tag.TagHeadPosition += correction;
             }
         }
 
-        private static bool TryGetTagPoint(Element element, View view, AutoTagOptions options, out XYZ point)
+        private static IEnumerable<XYZ> BoxCorners(BoundingBoxXYZ box)
+        {
+            foreach (double x in new[] { box.Min.X, box.Max.X })
+                foreach (double y in new[] { box.Min.Y, box.Max.Y })
+                    foreach (double z in new[] { box.Min.Z, box.Max.Z })
+                        yield return box.Transform.OfPoint(new XYZ(x, y, z));
+        }
+
+        // The view collector may include elements outside the crop. Only use anchors inside it.
+        private static bool IsInsideCrop(View view, XYZ point)
+        {
+            if (!view.CropBoxActive) return true;
+            var local = view.CropBox.Transform.Inverse.OfPoint(point);
+            if (local.X < view.CropBox.Min.X || local.X > view.CropBox.Max.X ||
+                local.Y < view.CropBox.Min.Y || local.Y > view.CropBox.Max.Y) return false;
+            using (var manager = view.GetCropRegionShapeManager())
+            {
+                var loops = manager.GetCropShape();
+                if (loops.Count == 0) return false;
+                XYZ right = view.RightDirection;
+                XYZ up = view.UpDirection;
+                double px = point.DotProduct(right), py = point.DotProduct(up);
+                foreach (var loop in loops)
+                {
+                    var vertices = loop.SelectMany(c => c.Tessellate()).ToList();
+                    bool inside = false;
+                    for (int i = 0, j = vertices.Count - 1; i < vertices.Count; j = i++)
+                    {
+                        double ax = vertices[i].DotProduct(right), ay = vertices[i].DotProduct(up);
+                        double bx = vertices[j].DotProduct(right), by = vertices[j].DotProduct(up);
+                        if ((ay > py) != (by > py) && px < (bx - ax) * (py - ay) / (by - ay) + ax)
+                            inside = !inside;
+                    }
+                    if (inside) return true;
+                }
+                return false;
+            }
+        }
+
+        private static bool TryGetTagPoint(TagCandidate candidate, View view, AutoTagOptions options, out XYZ point)
         {
             point = null;
 
-            if (!TryGetElementCenter(element, view, out XYZ center))
+            if (!TryGetElementCenter(candidate.Element, candidate.Link == null ? view : null, out XYZ center))
                 return false;
 
-            double offset = options.OffsetMillimeters / 304.8;
+            center = candidate.ToHost.OfPoint(center);
+            if (candidate.Link != null && !IsInsideCrop(view, center)) return false;
+
+            double offset = options.GetModelOffsetMillimeters(view.Scale) / 304.8;
             XYZ right = view.RightDirection.Normalize();
             XYZ up = view.UpDirection.Normalize();
 
@@ -483,12 +581,18 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     break;
             }
 
-            return true;
+            return candidate.Link == null || IsInsideCrop(view, point);
         }
 
         private static bool TryGetElementCenter(Element element, View view, out XYZ point)
         {
             point = null;
+
+            // Structural location curves/origins may differ from the physical member due to justification/offsets.
+            if ((IsCategory(element, BuiltInCategory.OST_StructuralFraming) ||
+                 IsCategory(element, BuiltInCategory.OST_StructuralColumns)) &&
+                TryGetStructuralSolidCenter(element, view, out point))
+                return true;
 
             if (IsCategory(element, BuiltInCategory.OST_Floors) &&
                 TryGetLargestHorizontalFaceCentroid(element, out point))
@@ -502,18 +606,54 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 return true;
             }
 
+            // Family insertion points may be on an edge or at the base. Prefer the visible bounds.
+            BoundingBoxXYZ box = element.get_BoundingBox(view) ?? element.get_BoundingBox(null);
+            if (box != null)
+            {
+                point = box.Transform.OfPoint((box.Min + box.Max) * 0.5);
+                return true;
+            }
             if (element.Location is LocationPoint locationPoint)
             {
                 point = locationPoint.Point;
                 return true;
             }
+            return false;
+        }
 
-            BoundingBoxXYZ box = element.get_BoundingBox(view) ?? element.get_BoundingBox(null);
-            if (box == null)
-                return false;
-
-            point = (box.Min + box.Max) * 0.5;
+        private static bool TryGetStructuralSolidCenter(Element element, View view, out XYZ center)
+        {
+            center = null;
+            var options = new Options { IncludeNonVisibleObjects = false, ComputeReferences = false };
+            if (view != null) options.View = view;
+            var geometry = element.get_Geometry(options);
+            if (geometry == null) return false;
+            XYZ weighted = XYZ.Zero;
+            double totalVolume = 0;
+            foreach (GeometryObject item in geometry)
+                AccumulateSolidCenter(item, Transform.Identity, ref weighted, ref totalVolume);
+            if (totalVolume <= MinimumLength) return false;
+            center = weighted / totalVolume;
             return true;
+        }
+
+        private static void AccumulateSolidCenter(GeometryObject item, Transform transform,
+            ref XYZ weighted, ref double totalVolume)
+        {
+            if (item is Solid solid && solid.Faces.Size > 0 && solid.Volume > MinimumLength)
+            {
+                double volume = solid.Volume * Math.Abs(transform.Determinant);
+                weighted += transform.OfPoint(solid.ComputeCentroid()) * volume;
+                totalVolume += volume;
+            }
+            else if (item is GeometryInstance instance)
+            {
+                var symbolGeometry = instance.GetSymbolGeometry();
+                if (symbolGeometry == null) return;
+                var nested = transform.Multiply(instance.Transform);
+                foreach (GeometryObject child in symbolGeometry)
+                    AccumulateSolidCenter(child, nested, ref weighted, ref totalVolume);
+            }
         }
 
         private static bool TryGetLargestHorizontalFaceCentroid(Element element, out XYZ centroid)
@@ -572,7 +712,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             else if (geometryObject is GeometryInstance instance)
             {
                 Transform nestedTransform = transform.Multiply(instance.Transform);
-                GeometryElement nestedGeometry = instance.GetInstanceGeometry();
+                GeometryElement nestedGeometry = instance.GetSymbolGeometry();
                 if (nestedGeometry == null)
                     return;
 
@@ -628,7 +768,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private static string GetTransactionName(AutoTagMode mode)
         {
-            return mode == AutoTagMode.Vertical ? "自動標籤 - 垂直元素" : "自動標籤 - 水平元素";
+            return mode == AutoTagMode.Unified ? "自動標籤" : mode == AutoTagMode.Vertical ? "自動標籤 - 垂直元素" : "自動標籤 - 水平元素";
         }
 
         private static string GetModeName(AutoTagMode mode)
@@ -638,10 +778,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private sealed class TagViewRect
         {
-            private const double PaddingFeet = 20.0 / 304.8;
 
-            private TagViewRect(double minX, double minY, double maxX, double maxY)
+
+            private TagViewRect(double minX, double minY, double maxX, double maxY, double paddingMm)
             {
+                double PaddingFeet = paddingMm / 304.8;
                 MinX = minX - PaddingFeet;
                 MinY = minY - PaddingFeet;
                 MaxX = maxX + PaddingFeet;
@@ -656,7 +797,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
             private double MaxY { get; }
 
-            public static TagViewRect FromBoundingBox(BoundingBoxXYZ box, View view)
+            public static TagViewRect FromBoundingBox(BoundingBoxXYZ box, View view, double paddingMm)
             {
                 XYZ right = view.RightDirection.Normalize();
                 XYZ up = view.UpDirection.Normalize();
@@ -687,7 +828,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     maxY = Math.Max(maxY, y);
                 }
 
-                return new TagViewRect(minX, minY, maxX, maxY);
+                return new TagViewRect(minX, minY, maxX, maxY, paddingMm);
             }
 
             public bool Intersects(TagViewRect other)

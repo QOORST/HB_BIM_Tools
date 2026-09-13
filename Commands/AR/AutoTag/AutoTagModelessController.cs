@@ -1,4 +1,4 @@
-using Autodesk.Revit.DB;
+﻿using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
@@ -174,6 +174,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     var service = new AutoTagService();
                     AutoTagResult result = service.TagElements(uiDoc, _mode, _options, _rules);
                     Complete(result.Message, !result.Success);
+                    var report = new TaskDialog("自動標籤結果")
+                    {
+                        MainInstruction = result.Message,
+                        ExpandedContent = result.Details,
+                        CommonButtons = TaskDialogCommonButtons.Close
+                    };
+                    if (result.ReviewTagIds.Count > 0)
+                        report.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "選取需複核標籤");
+                    if (result.SkippedTagIds.Count > 0)
+                        report.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "選取造成略過的既有標籤");
+                    var response = report.Show();
+                    if (response == TaskDialogResult.CommandLink1)
+                        uiDoc.Selection.SetElementIds(new List<ElementId>(result.ReviewTagIds));
+                    else if (response == TaskDialogResult.CommandLink2)
+                        uiDoc.Selection.SetElementIds(new List<ElementId>(result.SkippedTagIds));
                 }
                 catch (Autodesk.Revit.Exceptions.OperationCanceledException)
                 {
