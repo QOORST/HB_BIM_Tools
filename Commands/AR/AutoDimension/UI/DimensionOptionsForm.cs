@@ -14,6 +14,7 @@ namespace YDBIM.AutoDimension.UI
 
 internal sealed class DimensionOptionsForm : Form
 {
+    private int _viewScale;
     private readonly bool _isModeLocked;
     private readonly DimensionMode _initialMode;
     private readonly string _windowTitle;
@@ -89,8 +90,10 @@ internal sealed class DimensionOptionsForm : Form
         string? windowTitle = null,
         IReadOnlyDictionary<DimensionMode, AutoDimensionSavedSettings>? savedSettings = null,
         Action<DimensionOptions>? applyAction = null,
-        Action? refreshAction = null)
+        Action? refreshAction = null,
+        int viewScale = 100)
     {
+        _viewScale = Math.Max(1, viewScale);
         _isModeLocked = lockMode;
         _initialMode = initialMode;
         _windowTitle = windowTitle ?? "HB_BIM 自動標註";
@@ -517,8 +520,13 @@ internal sealed class DimensionOptionsForm : Form
     private Control BuildOffsetPanel()
     {
         _offsetNumeric = CreateOffsetNumeric(1000);
-        _gridPrimaryOffsetNumeric = CreateOffsetNumeric(1000);
-        _gridOverallOffsetNumeric = CreateOffsetNumeric(1000);
+        _gridPrimaryOffsetNumeric = CreateOffsetNumeric(10);
+        _gridOverallOffsetNumeric = CreateOffsetNumeric(10);
+        foreach (NumericUpDown numeric in new[] { _gridPrimaryOffsetNumeric, _gridOverallOffsetNumeric })
+        {
+            numeric.DecimalPlaces = 2;
+            numeric.Increment = 1;
+        }
 
         var board = new TableLayoutPanel
         {
@@ -744,8 +752,8 @@ internal sealed class DimensionOptionsForm : Form
         inputStack.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         inputStack.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         inputStack.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        inputStack.Controls.Add(CreateOffsetInputRow("第一道", _gridPrimaryOffsetNumeric), 0, 0);
-        inputStack.Controls.Add(CreateOffsetInputRow("第二道間距", _gridOverallOffsetNumeric), 0, 1);
+        inputStack.Controls.Add(CreateOffsetInputRow("第一道 (紙面)", _gridPrimaryOffsetNumeric), 0, 0);
+        inputStack.Controls.Add(CreateOffsetInputRow("間距 (紙面)", _gridOverallOffsetNumeric), 0, 1);
         inputStack.Controls.Add(new Label
         {
             Text = "+ 內縮 / - 外移",
@@ -1211,8 +1219,10 @@ internal sealed class DimensionOptionsForm : Form
     public void UpdateSources(
         IEnumerable<string> dimensionTypeNames,
         IEnumerable<GridSelectionItem> horizontalGrids,
-        IEnumerable<GridSelectionItem> verticalGrids)
+        IEnumerable<GridSelectionItem> verticalGrids,
+        int viewScale)
     {
+        _viewScale = Math.Max(1, viewScale);
         string? selectedType = _typeCombo.SelectedIndex > 0 ? _typeCombo.SelectedItem?.ToString() : null;
         HashSet<int> selectedHorizontalIds = GetCheckedGridIds(_horizontalGridList);
         HashSet<int> selectedVerticalIds = GetCheckedGridIds(_verticalGridList);
@@ -1284,8 +1294,9 @@ internal sealed class DimensionOptionsForm : Form
     private void ApplySavedSettings(AutoDimensionSavedSettings settings)
     {
         SetNumericValue(_offsetNumeric, settings.OffsetMm);
-        SetNumericValue(_gridPrimaryOffsetNumeric, settings.GridPrimaryOffsetMm);
-        SetNumericValue(_gridOverallOffsetNumeric, settings.GridOverallOffsetMm - settings.GridPrimaryOffsetMm);
+        double scale = settings.GridOffsetsInPaperSpace ? 1 : _viewScale;
+        SetNumericValue(_gridPrimaryOffsetNumeric, settings.GridPrimaryOffsetMm / scale);
+        SetNumericValue(_gridOverallOffsetNumeric, (settings.GridOverallOffsetMm - settings.GridPrimaryOffsetMm) / scale);
 
         SelectDimensionType(settings.DimensionTypeName);
         SelectPlacementMode(settings.Mode);
@@ -1395,7 +1406,7 @@ internal sealed class DimensionOptionsForm : Form
             return;
         }
 
-        decimal decimalValue = (decimal)Math.Round(value, 0);
+        decimal decimalValue = (decimal)Math.Round(value, numeric.DecimalPlaces);
         if (decimalValue < numeric.Minimum)
         {
             decimalValue = numeric.Minimum;
@@ -1843,6 +1854,31 @@ internal sealed class DimensionOptionsForm : Form
         checkV.CheckedChanged += (_, _) => SetAllChecked(_verticalGridList, checkV.Checked);
         panel.Controls.Add(checkV, 1, 3);
 
+        var bubbles = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true, Margin = new Padding(0, 12, 0, 0) };
+        var horizontalBubble = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
+        horizontalBubble.Items.AddRange(new object[] { "右側", "左側" }); horizontalBubble.SelectedIndex = 0;
+        var verticalBubble = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
+        verticalBubble.Items.AddRange(new object[] { "上側", "下側" }); verticalBubble.SelectedIndex = 0;
+        var bothBubbles = new CheckBox { Text = "兩端顯示", AutoSize = true };
+        bothBubbles.CheckedChanged += (_, _) => horizontalBubble.Enabled = verticalBubble.Enabled = !bothBubbles.Checked;
+        var applyBubbles = new Button { Text = "套用標頭", AutoSize = true, FlatStyle = FlatStyle.Flat };
+        applyBubbles.Enabled = _applyAction != null;
+        applyBubbles.Click += (_, _) => {
+            var horizontalIds = _horizontalGridList.CheckedItems.OfType<GridItem>().Select(i => i.Item.Id).ToList();
+            var verticalIds = _verticalGridList.CheckedItems.OfType<GridItem>().Select(i => i.Item.Id).ToList();
+            if (horizontalIds.Count + verticalIds.Count == 0) { MessageBox.Show("請勾選至少一條軸線。", "軸線標頭"); return; }
+            _applyAction?.Invoke(new DimensionOptions { ModeType = DimensionMode.BeamGrid,
+                GridBubblesOnly = true, GridBubblesBothEnds = bothBubbles.Checked,
+                HorizontalBubbleRight = horizontalBubble.SelectedIndex == 0, VerticalBubbleTop = verticalBubble.SelectedIndex == 0,
+                SelectedHorizontalGridIds = horizontalIds, SelectedVerticalGridIds = verticalIds });
+        };
+        bubbles.Controls.Add(new Label { Text = "水平標頭", AutoSize = true, Margin = new Padding(0, 7, 4, 0) });
+        bubbles.Controls.Add(horizontalBubble);
+        bubbles.Controls.Add(new Label { Text = "垂直標頭", AutoSize = true, Margin = new Padding(8, 7, 4, 0) });
+        bubbles.Controls.Add(verticalBubble); bubbles.Controls.Add(bothBubbles); bubbles.Controls.Add(applyBubbles);
+        panel.RowCount = 7; panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.Controls.Add(bubbles, 0, 6); panel.SetColumnSpan(bubbles, 2);
+
         Action updateResponsiveLayout = () =>
         {
             int stackingThreshold = (int)Math.Round(900D * panel.DeviceDpi / 96D);
@@ -2029,6 +2065,7 @@ internal sealed class DimensionOptionsForm : Form
         options = new DimensionOptions
         {
             OffsetInternal = RevitDB.UnitUtils.ConvertToInternalUnits((double)_offsetNumeric.Value, RevitDB.UnitTypeId.Millimeters),
+            GridOffsetsInPaperSpace = true,
             GridPrimaryOffsetInternal = RevitDB.UnitUtils.ConvertToInternalUnits(gridPrimaryOffsetMm, RevitDB.UnitTypeId.Millimeters),
             GridOverallOffsetInternal = RevitDB.UnitUtils.ConvertToInternalUnits(gridOverallOffsetMm, RevitDB.UnitTypeId.Millimeters),
             DimensionTypeName = _typeCombo.SelectedIndex <= 0 ? null : _typeCombo.SelectedItem?.ToString()

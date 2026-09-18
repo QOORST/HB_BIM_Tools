@@ -690,6 +690,26 @@ namespace YD_RevitTools.LicenseManager
                 panel.AddItem(endDownOffsetData);
             }
 
+            if (!HasButton(panel, "MepQuickRise"))
+            {
+                var quick = panel.AddItem(new PulldownButtonData("MepQuickRise", "快速\n上下行")) as PulldownButton;
+                if (quick != null)
+                {
+                    foreach (var entry in new[] {
+                        new[] {"MepQuickUp", "快速上行", "CmdMepQuickUp"},
+                        new[] {"MepQuickDown", "快速下行", "CmdMepQuickDown"},
+                        new[] {"MepQuickSettings", "上下行設定", "CmdMepQuickSettings"} })
+                    {
+                        var button = new PushButtonData(entry[0], entry[1], assemblyPath,
+                            "YD_RevitTools.LicenseManager.Commands.MEP." + entry[2]);
+                        button.ToolTip = "管、電管、風管、電纜線架：由水平直線段的未連接端建立上下行。";
+                        button.LongDescription = "首次使用設定高度、角度及末端長度，後續沿用本次 Revit 工作階段設定。選取端點附近決定延伸端；接頭不足會回復，成功不跳通知。";
+                        SetButtonIcon(button, "auto_avoid");
+                        quick.AddPushButton(button);
+                    }
+                }
+            }
+
             // === MEP 多點接入主管 ===
             if (!HasButton(panel, "MepMultiConnectInto"))
             {
@@ -796,32 +816,34 @@ namespace YD_RevitTools.LicenseManager
         private void AddOptimizedMEPToolButtons(RibbonPanel panel, string assemblyPath)
         {
             // MEP 正式功能：保留常用接管、管線避讓、手動翻彎與自動套管；其餘 MEP 工具仍保留程式碼但暫不顯示。
-            if (!HasButton(panel, "PipeCenterAlign"))
+            if (!HasButton(panel, "PipeAlignTools"))
             {
+                var alignData = new SplitButtonData("PipeAlignTools", "支管\n對齊");
+                alignData.ToolTip = "支管對齊與批次對齊";
+                SetButtonIcon(alignData, "pipe_center_align");
+                var alignMenu = panel.AddItem(alignData) as SplitButton;
+
                 PushButtonData pipeCenterAlignData = new PushButtonData(
                     "PipeCenterAlign",
-                    "支管\n對齊",
+                    "支管對齊",
                     assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.MEP.CmdPipeCenterAlign");
 
                 pipeCenterAlignData.ToolTip = "支管中心對齊工具";
                 pipeCenterAlignData.LongDescription = "將支管端點中心對齊到幹管中心線，可選擇只對齊端點、建立 Tee / Takeoff，或使用 45° 垂直對齊。";
                 SetButtonIcon(pipeCenterAlignData, "pipe_center_align");
-                panel.AddItem(pipeCenterAlignData);
-            }
+                alignMenu?.AddPushButton(pipeCenterAlignData);
 
-            if (!HasButton(panel, "PipeBatchCenterAlign"))
-            {
                 PushButtonData pipeBatchCenterAlignData = new PushButtonData(
                     "PipeBatchCenterAlign",
-                    "批次\n對齊",
+                    "批次對齊",
                     assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.MEP.CmdPipeBatchCenterAlign");
 
                 pipeBatchCenterAlignData.ToolTip = "批次支管中心對齊";
                 pipeBatchCenterAlignData.LongDescription = "先選取幹管，再框選或複選多支支管，批次延伸/修剪支管端點到幹管中心線，並可依設定建立 Tee / Takeoff。";
                 SetButtonIcon(pipeBatchCenterAlignData, "pipe_center_align_settings");
-                panel.AddItem(pipeBatchCenterAlignData);
+                alignMenu?.AddPushButton(pipeBatchCenterAlignData);
             }
 
             if (!HasButton(panel, "MepAvoidOffsetTools"))
@@ -868,6 +890,26 @@ namespace YD_RevitTools.LicenseManager
                 avoidOffsetPulldown?.AddPushButton(upDownOffsetData);
             }
 
+            if (!HasButton(panel, "MepQuickRise"))
+            {
+                var quickMenuData = new PulldownButtonData("MepQuickRise", "快速\n上下行");
+                quickMenuData.ToolTip = "從既有管線末端繪製上下行管段";
+                SetButtonIcon(quickMenuData, "auto_pipe_routing");
+                var quickMenu = panel.AddItem(quickMenuData) as PulldownButton;
+                foreach (var entry in new[] {
+                    new[] {"MepQuickUp", "快速上行", "CmdMepQuickUp"},
+                    new[] {"MepQuickDown", "快速下行", "CmdMepQuickDown"},
+                    new[] {"MepQuickSettings", "上下行設定", "CmdMepQuickSettings"} })
+                {
+                    var quickData = new PushButtonData(entry[0], entry[1], assemblyPath,
+                        "YD_RevitTools.LicenseManager.Commands.MEP." + entry[2]);
+                    quickData.ToolTip = "管、電管、風管、電纜線架：水平直線段的未連接端上下行。";
+                    quickData.LongDescription = "選取未連接端附近，沿用類型與尺寸延伸新管段並建立彎頭。首次預設 90°、末端水平段 0 mm；不切改原管中段。";
+                    SetButtonIcon(quickData, "auto_pipe_routing");
+                    quickMenu?.AddPushButton(quickData);
+                }
+            }
+
             if (!HasButton(panel, "PipeSleeve"))
             {
                 PushButtonData pipeSleeveData = new PushButtonData(
@@ -895,6 +937,30 @@ namespace YD_RevitTools.LicenseManager
                 SetButtonIcon(pipeSleeveManagerData, "pipe_sleeve");
                 panel.AddItem(pipeSleeveManagerData);
             }
+            foreach (var entry in new[] {
+                new[] { "MepFromConnector", "接點\n生成管", "CmdMepFromConnector", "auto_pipe_routing", "從配件或設備的未連接接點建立管段。" },
+                new[] { "MepPositionDimension", "管線\n定位尺寸", "CmdMepPositionDimension", "auto_pipe_routing", "框選管排，依設定自動配對本機或指定連結模型的梁側面。可切換手選基準；沿用本次工作階段設定。" },
+                new[] { "MepPositionDimensionSettings", "定位\n尺寸設定", "CmdMepPositionDimensionSettings", "auto_pipe_routing", "設定基準模式、參考模型、搜尋範圍、尺寸樣式及分組間距；不建立尺寸。" },
+                new[] { "MepLevelRebase", "MEP\n樓層歸位", "CmdMepLevelRebase", "auto_avoid", "預覽並調整選取直線管段的參考樓層，驗證位置與連接不變。" } })
+            {
+                if (HasButton(panel, entry[0])) continue;
+                var button = new PushButtonData(entry[0], entry[1], assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP." + entry[2]);
+                button.ToolTip = entry[4];
+                SetButtonIcon(button, entry[3]);
+                if (entry[0] == "MepFromConnector")
+                {
+                    var menu = panel.AddItem(new SplitButtonData("MepFromConnectorMenu", "接點生成管")) as SplitButton;
+                    menu?.AddPushButton(button);
+                    var settings = new PushButtonData("MepFromConnectorSettings", "生成管設定", assemblyPath,
+                        "YD_RevitTools.LicenseManager.Commands.MEP.CmdMepFromConnectorSettings");
+                    settings.ToolTip = "選取配件或設備，修改該類接點的管長與類型；只儲存設定，不生成。";
+                    SetButtonIcon(settings, "auto_pipe_routing");
+                    menu?.AddPushButton(settings);
+                    if (menu != null) menu.IsSynchronizedWithCurrentItem = false;
+                }
+                else panel.AddItem(button);
+            }
             if (!HasButton(panel, "ArchitecturalOpeningFromSleeves"))
             {
                 PushButtonData architecturalOpeningData = new PushButtonData(
@@ -912,12 +978,13 @@ namespace YD_RevitTools.LicenseManager
         private void AddFamilyToolButtons(RibbonPanel panel)
         {
             string assemblyPath = Assembly.GetExecutingAssembly().Location;
-            string familyLibraryAssemblyPath = Path.Combine(
-                Path.GetDirectoryName(assemblyPath) ?? string.Empty,
-                "CompanyFamilyLibraryMvp.dll");
+            string assemblyDir = Path.GetDirectoryName(assemblyPath) ?? string.Empty;
+            string familyLibraryAssemblyPath = Path.Combine(assemblyDir, "CompanyFamilyLibraryMvp.dll");
+            string familyLibraryDbPath = Path.Combine(assemblyDir, "database", "family_library.sqlite");
 
             // === 族群資料庫 ===
-            if (File.Exists(familyLibraryAssemblyPath) && !HasButton(panel, "CompanyFamilyLibrary"))
+            // 需要同時檢查 DLL 和資料庫檔案是否存在
+            if (File.Exists(familyLibraryAssemblyPath) && File.Exists(familyLibraryDbPath) && !HasButton(panel, "CompanyFamilyLibrary"))
             {
                 PushButtonData familyLibraryData = new PushButtonData(
                     "CompanyFamilyLibrary",

@@ -22,6 +22,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         public static List<ElementId> CreateFormworkFromElement(Document doc, Element element, double thicknessMm = FORMWORK_THICKNESS_MM)
         {
             var formworkIds = new List<ElementId>();
+            var audit = element is Floor ? new List<string> { "Host: " + element.Id, "Time: " + DateTime.Now.ToString("o") } : null;
 
             try
             {
@@ -29,46 +30,98 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 System.Diagnostics.Debug.WriteLine($"目標元素 {element.Id}：{element.Category?.Name}");
 
                 // Step 1: 取得目標元素的面（模仿 Dynamo 的 PolySurface.Surfaces）
-                var elementSurfaces = GetElementSurfaces(element);
+                bool isStair = ElementCategorizer.IsStairs(element);
+                var stairHostSolids = isStair ? GeometryExtractor.GetElementSolids(element) : null;
+                var elementSurfaces = GetElementSurfaces(element, stairHostSolids);
                 System.Diagnostics.Debug.WriteLine($"目標元素有 {elementSurfaces.Count} 個面（含曲面）");
 
                 // Step 2: 按方向篩選面（模仿 Dynamo 的 Surface.FilterByOrientation）
-                var filteredSurfaces = FilterSurfacesByOrientation(elementSurfaces);
+                var stairPanels = isStair ? new List<StairPanelMerger.Panel>() : null;
+                var bottomReferences = new HashSet<string>();
+                var topReferences = new HashSet<string>();
+                if (element is Floor floor)
+                {
+                    try
+                    {
+                        foreach (var reference in HostObjectUtils.GetBottomFaces(floor))
+                            bottomReferences.Add(reference.ConvertToStableRepresentation(doc));
+                        foreach (var reference in HostObjectUtils.GetTopFaces(floor))
+                            topReferences.Add(reference.ConvertToStableRepresentation(doc));
+                        audit.Add($"Native bottom references: {bottomReferences.Count}; top: {topReferences.Count}");
+                    }
+                    catch (Exception ex) { audit.Add("Native face references unavailable: " + ex); }
+                }
+                var filteredSurfaces = FilterSurfacesByOrientation(elementSurfaces, isStair, doc, bottomReferences, topReferences, audit);
                 System.Diagnostics.Debug.WriteLine($"篩選後有 {filteredSurfaces.Count} 個需要模板的面");
 
                 // Step 3: 為每個面生成模板（使用智能接觸扣除）
                 int successCount = 0;
                 for (int i = 0; i < filteredSurfaces.Count; i++)
                 {
+                    CurvedMeshBudget.Checkpoint($"元素 {element.Id}：模板面 {i + 1}/{filteredSurfaces.Count}");
                     var surface = filteredSurfaces[i];
                     System.Diagnostics.Debug.WriteLine($"--- 處理第 {i + 1}/{filteredSurfaces.Count} 個面 ---");
                     
                     try
                     {
-                        var formworkId = CreateFormworkForSurface(doc, element, surface, thicknessMm);
+                        var formworkId = surface is PlanarFace planar && stairPanels != null
+                            ? CreateFormworkForPlanarFace(doc, element, planar, thicknessMm, stairPanels, stairHostSolids)
+                            : CreateFormworkForSurface(doc, element, surface, thicknessMm);
                         if (formworkId != ElementId.InvalidElementId)
                         {
                             formworkIds.Add(formworkId);
+                            audit?.Add($"Generated face {elementSurfaces.IndexOf(surface)}: {formworkId}");
                             successCount++;
                             System.Diagnostics.Debug.WriteLine($"✅ 面 {i + 1} 模板生成成功，ID: {formworkId}");
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"❌ 面 {i + 1} 模板生成失敗");
+                            audit?.Add($"No output for face {elementSurfaces.IndexOf(surface)}: generation returned invalid ID; not proof of full deduction.");
+                            System.Diagnostics.Debug.WriteLine(stairPanels != null && surface is PlanarFace
+                                ? $"樓梯面 {i + 1} 已交由合併階段處理或已完全扣除"
+                                : $"❌ 面 {i + 1} 模板生成失敗");
                         }
                     }
                     catch (Exception ex)
                     {
+                        audit?.Add($"Generation failed face {elementSurfaces.IndexOf(surface)} ({surface.GetType().Name}): {ex}");
                         System.Diagnostics.Debug.WriteLine($"❌ 面 {i + 1} 處理異常: {ex.Message}");
                     }
                 }
 
+                if (stairPanels != null)
+                {
+                    foreach (var panel in StairPanelMerger.Merge(stairPanels))
+                    {
+                        CurvedMeshBudget.Checkpoint($"元素 {element.Id}：建立合併樓梯模板");
+                        var shape = CreateDirectShape(doc, panel.Solid, element);
+                        if (shape == null) continue;
+                        SetFormworkParameters(shape, element, panel.Solid, thicknessMm);
+                        formworkIds.Add(shape.Id);
+                    }
+                }
+                CurvedMeshBudget.Checkpoint($"元素 {element.Id}：模板面處理完成");
                 System.Diagnostics.Debug.WriteLine($"========== 處理完成 ==========");
-                System.Diagnostics.Debug.WriteLine($"總計生成 {successCount}/{filteredSurfaces.Count} 個模板");
+                System.Diagnostics.Debug.WriteLine($"總計生成 {formworkIds.Count} 個模板，來源面 {filteredSurfaces.Count}");
             }
             catch (Exception ex)
             {
+                audit?.Add("Host failure: " + ex);
                 System.Diagnostics.Debug.WriteLine($"❌ CreateFormworkFromElement 完全失敗: {ex.Message}");
+            }
+            finally
+            {
+                if (audit != null)
+                {
+                    try
+                    {
+                        audit.Add($"Returned template IDs (transaction not yet committed): {string.Join(",", formworkIds)}");
+                        string folder = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HB_BIM_Tools", "Logs", "FloorFormwork");
+                        System.IO.Directory.CreateDirectory(folder);
+                        System.IO.File.WriteAllLines(System.IO.Path.Combine(folder, "floor-" + element.Id + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".txt"), audit);
+                    }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Floor audit write failed: " + ex); }
+                }
             }
 
             return formworkIds;
@@ -78,12 +131,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// Step 1: 取得元素表面（PolySurface.Surfaces）
         /// 包含所有 Face 類型（PlanarFace 和曲面）
         /// </summary>
-        private static List<Face> GetElementSurfaces(Element element)
+        private static List<Face> GetElementSurfaces(Element element, IList<Solid> sourceSolids = null)
         {
             var surfaces = new List<Face>();
 
             // 🚀 重構: 使用 GeometryExtractor 統一工具
-            var solids = GeometryExtractor.GetElementSolids(element);
+            var solids = sourceSolids ?? GeometryExtractor.GetElementSolids(element);
             foreach (var solid in solids)
             {
                 foreach (Face face in solid.Faces)
@@ -99,27 +152,50 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// Step 2: 按方向篩選面（Surface.FilterByOrientation）
         /// 遵循模板實務原則: 只生成垂直面和底面模板
         /// </summary>
-        private static List<Face> FilterSurfacesByOrientation(List<Face> surfaces)
+        private static List<Face> FilterSurfacesByOrientation(List<Face> surfaces, bool isStair,
+            Document doc, HashSet<string> bottomReferences, HashSet<string> topReferences, List<string> audit)
         {
             var filteredSurfaces = new List<Face>();
 
             foreach (var surface in surfaces)
             {
+                CurvedMeshBudget.Checkpoint("篩選模板面方向");
                 try
                 {
+                    int index = surfaces.IndexOf(surface);
+                    string referenceKey = null;
+                    try { referenceKey = surface.Reference?.ConvertToStableRepresentation(doc); }
+                    catch (Exception ex) { audit?.Add($"Face {index} reference unavailable: {ex.Message}"); }
+                    audit?.Add($"Face {index}: {surface.GetType().Name}; areaFt2={surface.Area}; reference={referenceKey}");
+                    if (referenceKey != null && bottomReferences.Contains(referenceKey))
+                    {
+                        filteredSurfaces.Add(surface);
+                        audit?.Add($"Face {index}: INCLUDED native bottom");
+                        continue;
+                    }
+                    if (referenceKey != null && topReferences.Contains(referenceKey))
+                    {
+                        audit?.Add($"Face {index}: EXCLUDED native top");
+                        continue;
+                    }
                     // 使用 FormworkEngine 的主要法向量計算（支援曲面）
                     var normal = FormworkEngine.GetFaceDominantNormal(surface);
+                    audit?.Add($"Face {index}: sampled normal={normal}");
                     var area = surface.Area * 0.092903; // 轉換為平方米
 
                     // 面積過濾
-                    if (area < MIN_FACE_AREA_M2) continue;
+                    if (area < (isStair ? GEOMETRY_TOLERANCE : MIN_FACE_AREA_M2))
+                    {
+                        audit?.Add($"Face {index}: EXCLUDED small area");
+                        continue;
+                    }
 
                     // 方向過濾（模板實務原則）
                     // ✅ 垂直面：Z分量接近0 (柱側面、梁側面、牆面)
                     // ✅ 底面：Z分量 < -0.7 (梁底、板底)
                     // ❌ 頂面：不生成 (頂面通常無需模板或被上層結構覆蓋)
-                    bool isVertical = Math.Abs(normal.Z) < 0.3;
-                    bool isHorizontalBottom = normal.Z < -0.7;
+                    bool isVertical = Math.Abs(normal.Z) < (isStair ? GEOMETRY_TOLERANCE : 0.3);
+                    bool isHorizontalBottom = isStair ? normal.Z < -GEOMETRY_TOLERANCE : normal.Z < -0.7;
 
                     if (isVertical || isHorizontalBottom)
                     {
@@ -127,15 +203,18 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         string faceKind = surface is PlanarFace ? "平面" : "曲面";
                         System.Diagnostics.Debug.WriteLine($"✅ 面通過篩選 - 類型:{faceType}({faceKind}), Normal:({normal.X:F2},{normal.Y:F2},{normal.Z:F2}), Area:{area:F3}m²");
                         filteredSurfaces.Add(surface);
+                        audit?.Add($"Face {index}: INCLUDED orientation");
                     }
                     else
                     {
                         string reason = normal.Z > 0.7 ? "頂面(不需要模板)" : "非標準方向";
+                        audit?.Add($"Face {index}: EXCLUDED orientation: {reason}");
                         System.Diagnostics.Debug.WriteLine($"⏭️ 面被過濾 - Normal:({normal.X:F2},{normal.Y:F2},{normal.Z:F2}), Area:{area:F3}m², 原因:{reason}");
                     }
                 }
                 catch (Exception ex)
                 {
+                    audit?.Add($"Face {surfaces.IndexOf(surface)}: FILTER ERROR {ex}");
                     System.Diagnostics.Debug.WriteLine($"❌ 篩選面失敗: {ex.Message}");
                 }
             }
@@ -164,19 +243,28 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// 為平面面生成模板（原始邏輯）
         /// </summary>
         private static ElementId CreateFormworkForPlanarFace(Document doc, Element hostElement,
-            PlanarFace surface, double thicknessMm)
+            PlanarFace surface, double thicknessMm, List<StairPanelMerger.Panel> stairPanels = null,
+            IList<Solid> stairHostSolids = null)
         {
             try
             {
                 // 從面建立基本模板實體
                 var formworkSolid = ExtrudeFormworkFromFace(surface, thicknessMm);
-                if (formworkSolid?.Volume <= GEOMETRY_TOLERANCE)
+                if (formworkSolid == null || formworkSolid.Volume <= GEOMETRY_TOLERANCE)
                 {
                     System.Diagnostics.Debug.WriteLine("無法建立基本模板實體");
                     return ElementId.InvalidElementId;
                 }
 
                 System.Diagnostics.Debug.WriteLine($"基本模板體積: {formworkSolid.Volume:F6}");
+
+                if (stairHostSolids != null && Math.Abs(surface.FaceNormal.Z) < GEOMETRY_TOLERANCE)
+                {
+                    // The host is excluded from the neighbor query. Trim intrusions into its
+                    // own nosing/other solids before the existing external-contact deduction.
+                    formworkSolid = StairRiserGeometry.TrimHostIntrusions(formworkSolid, stairHostSolids);
+                    if (formworkSolid == null) return ElementId.InvalidElementId;
+                }
 
                 // ✅ 新方法: 獲取鄰近元素並進行智能接觸扣除
                 // 🔧 修正: 使用與面生面工具相同的搜尋邏輯,但擴大範圍確保能找到上方結構
@@ -211,7 +299,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 // 使用智能接觸扣除邏輯（傳入宿主元素）
                 var finalFormwork = GeometryExtractor.ApplySmartContactDeduction(formworkSolid, nearbyElements, intersectionThreshold, hostElement);
-                if (finalFormwork?.Volume <= GEOMETRY_TOLERANCE)
+                if (finalFormwork == null || finalFormwork.Volume <= GEOMETRY_TOLERANCE)
                 {
                     System.Diagnostics.Debug.WriteLine("扣除後模板體積過小或完全被覆蓋");
                     return ElementId.InvalidElementId;
@@ -219,12 +307,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 System.Diagnostics.Debug.WriteLine($"最終模板體積: {finalFormwork.Volume:F6}");
 
+                if (stairPanels != null)
+                {
+                    // Split disconnected remnants before merging; never bridge a deducted opening.
+                    foreach (var solid in SolidUtils.SplitVolumes(finalFormwork))
+                        stairPanels.Add(new StairPanelMerger.Panel(solid, surface.Origin, surface.FaceNormal));
+                    return ElementId.InvalidElementId;
+                }
+
                 // 建立 DirectShape
                 var directShape = CreateDirectShape(doc, finalFormwork, hostElement);
                 if (directShape != null)
                 {
                     // 計算並設定面積參數（模仿 Dynamo 的 Surface.Area + Convert By Units）
-                    SetFormworkParameters(directShape, hostElement, finalFormwork);
+                    SetFormworkParameters(directShape, hostElement, finalFormwork, thicknessMm);
                     return directShape.Id;
                 }
             }
@@ -304,7 +400,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <summary>
         /// 設定模板參數（改進版 - 基於體積計算面積）
         /// </summary>
-        private static void SetFormworkParameters(DirectShape formwork, Element hostElement, Solid formworkSolid)
+        private static void SetFormworkParameters(DirectShape formwork, Element hostElement, Solid formworkSolid, double thicknessMm)
         {
             try
             {
@@ -329,8 +425,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // 模板體積 (立方英尺) → 立方米
                 double volumeM3 = formworkSolid.Volume * 0.0283168; // ft³ → m³
                 
-                // 模板厚度 (使用 FORMWORK_THICKNESS_MM)
-                double thicknessMm = FORMWORK_THICKNESS_MM;
+                // Use the run's thickness, including non-default values.
                 double thicknessM = thicknessMm / 1000.0; // mm → m
                 
                 // 面積 = 體積 / 厚度

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -30,11 +30,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         private HashSet<string> _selectedFaces = new HashSet<string>(); // 已選取的面
         private List<ElementId> _previewElements = new List<ElementId>(); // 預覽元素
         private List<FormworkItem> _createdFormworkItems = new List<FormworkItem>(); // 已建立的模板項目
+        private readonly List<string> _generationFailures = new List<string>();
         private Material _currentMaterial;
         private double _currentThickness;
 
         public Result Execute(ExternalCommandData data, ref string msg, ElementSet set)
         {
+            _generationFailures.Clear();
+            _selectedFaces.Clear();
             var uiapp = data.Application;
             var uidoc = uiapp.ActiveUIDocument;
             var doc = uidoc.Document;
@@ -215,7 +218,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 }
                 else
                 {
-                    TaskDialog.Show("面選模板", "未建立任何模板（可能選錯面或全部被裁切）。");
+                    var report = new TaskDialog("面選模板")
+                    {
+                        MainInstruction = "未建立任何模板",
+                        MainContent = _generationFailures.Count > 0
+                            ? "處理期間發生幾何錯誤，不能判定為選錯面或全部被裁切。請展開詳細資料。"
+                            : "本次沒有可生成成果：可能未選取有效面、面積過小或已被完全裁切。",
+                        ExpandedContent = string.Join("\n\n", _generationFailures.Take(10)),
+                        CommonButtons = TaskDialogCommonButtons.Close
+                    };
+                    report.Show();
                 }
 
                 return Result.Succeeded;
@@ -224,6 +236,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             {
                 msg = ex.Message;
                 return Result.Failed;
+            }
+            finally
+            {
+                GeometryExtractor.ClearGeometryCache();
             }
         }
 
@@ -479,6 +495,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             }
             catch (Exception ex)
             {
+                _generationFailures.Add(ex.Message);
                 Debug.WriteLine($"單面模板生成失敗: {ex.Message}");
                 return ElementId.InvalidElementId;
             }
@@ -1126,6 +1143,27 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             catch (Exception ex)
             {
                 Debug.WriteLine($"單面模板生成失敗: {ex.Message}");
+                string report = $"Host: {hostElement?.Id}\nFace: {face?.GetType().Name}\nThicknessMm: {thicknessMm}\n";
+                try
+                {
+                    var bounds = face.GetBoundingBox();
+                    var uv = new UV((bounds.Min.U + bounds.Max.U) / 2, (bounds.Min.V + bounds.Max.V) / 2);
+                    report += $"AreaFt2: {face.Area}\nUV center: {uv}\nNormal at UV center: {face.ComputeNormal(uv)}\n";
+                }
+                catch (Exception detailsError) { report += "Face details unavailable: " + detailsError.Message + "\n"; }
+                report += ex.ToString();
+                string logNote;
+                try
+                {
+                    string folder = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "HB_BIM_Tools", "Logs", "FaceFormwork");
+                    System.IO.Directory.CreateDirectory(folder);
+                    string path = System.IO.Path.Combine(folder, "face-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".txt");
+                    System.IO.File.WriteAllText(path, report, System.Text.Encoding.UTF8);
+                    logNote = "\n診斷檔：" + path;
+                }
+                catch (Exception logError) { logNote = "\n診斷檔寫入失敗：" + logError.Message; }
+                _generationFailures.Add($"宿主 {hostElement?.Id}，面類型 {face?.GetType().Name}：{ex.Message}" + logNote);
                 return ElementId.InvalidElementId;
             }
         }
@@ -1909,3 +1947,4 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         }
     }
 }
+

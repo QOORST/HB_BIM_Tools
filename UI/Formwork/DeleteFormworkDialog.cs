@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using Autodesk.Revit.DB;
 using YD_RevitTools.LicenseManager.Helpers;
+using YD_RevitTools.LicenseManager.Commands.AR.Formwork;
 using MediaColor = System.Windows.Media.Color;
 using WpfVisibility = System.Windows.Visibility;
 
@@ -18,6 +19,13 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
         public ElementId Id       { get; set; }
         public string Category    { get; set; }  // 模板_類別 參數值（牆/柱/梁/板 等）
         public string LevelName   { get; set; }  // 對應樓層名稱
+        public long? HostIdValue { get; set; }
+        public long IdValue => Id.GetIdValue();
+        public string Name { get; set; }
+        public string Source { get; set; }
+        public string LevelBasis { get; set; }
+        public string Warning { get; set; }
+        public bool CanDelete { get; set; }
     }
 
     /// <summary>
@@ -48,6 +56,7 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
 
         private TextBlock _previewText;
         private Button    _btnConfirm;
+        private DataGrid _candidateGrid;
 
         // ── 建構子 ──
         public DeleteFormworkDialog(IList<FormworkItemInfo> items, ICollection<ElementId> currentSelection)
@@ -66,7 +75,9 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
         private void BuildWindow()
         {
             Title                 = "選擇性刪除模板元素";
-            Width                 = 420;
+            Width                 = 960;
+            MaxWidth              = SystemParameters.WorkArea.Width - 40;
+            MaxHeight             = SystemParameters.WorkArea.Height - 40;
             SizeToContent         = SizeToContent.Height;
             MinHeight             = 200;
             ResizeMode            = ResizeMode.NoResize;
@@ -74,7 +85,7 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
             Background            = new SolidColorBrush(MediaColor.FromRgb(245, 245, 245));
 
             var root = new StackPanel { Margin = new Thickness(16) };
-            Content = root;
+            Content = new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
 
             // ─── 標題 ───
             root.Children.Add(new TextBlock
@@ -89,13 +100,13 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
             var totalCount = _allItems.Count;
             root.Children.Add(new TextBlock
             {
-                Text       = $"專案中共有 {totalCount} 個模板元素",
+                Text       = $"模板候選 {totalCount} 個；可刪除 {_allItems.Count(i => i.CanDelete)} 個；識別不足 {_allItems.Count(i => !i.CanDelete)} 個",
                 Foreground = Brushes.Gray,
                 Margin     = new Thickness(0, 0, 0, 10)
             });
 
             // ─── 四個模式 RadioButton（每個 radio 與其標籤放在同一個 StackPanel row 裡）──
-            var selectionCount = _allItems.Count(i => _selectionIdValues.Contains(i.Id.GetIdValue()));
+            var selectionCount = _allItems.Count(i => i.CanDelete && MatchesSelection(i));
 
             _rbAll       = AddRadioRow(root, "全部刪除",      $"（共 {totalCount} 個）");
             _rbCategory  = AddRadioRow(root, "依類別刪除",    "");
@@ -108,15 +119,15 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
             _panelLevel  = BuildLevelPanel();
             root.Children.Add(_panelLevel);
 
-            _rbSelection = AddRadioRow(root, "依目前選取集",  $"（選取集中有 {selectionCount} 個模板）");
+            _rbSelection = AddRadioRow(root, "依選取模板／宿主",  $"（可刪除 {selectionCount} 個模板）");
             // 選取集提示面板
             _panelSelection = BuildSelectionPanel(selectionCount);
             root.Children.Add(_panelSelection);
 
             // 設定預設選取 & GroupName
-            _rbAll.IsChecked = true;
             foreach (var rb in new[] { _rbAll, _rbCategory, _rbLevel, _rbSelection })
                 rb.GroupName = "mode";
+            _rbSelection.IsChecked = true;
 
             // ─── 預覽行 ───
             var previewBorder = new Border
@@ -128,9 +139,24 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
                 Margin          = new Thickness(0, 12, 0, 12),
                 Padding         = new Thickness(10, 6, 10, 6)
             };
-            _previewText = new TextBlock { FontWeight = FontWeights.SemiBold };
+            _previewText = new TextBlock { FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
             previewBorder.Child = _previewText;
             root.Children.Add(previewBorder);
+
+            _candidateGrid = new DataGrid
+            {
+                Height = 240, IsReadOnly = true, AutoGenerateColumns = false,
+                CanUserAddRows = false, CanUserDeleteRows = false,
+                EnableRowVirtualization = true, Margin = new Thickness(0, 0, 0, 12)
+            };
+            foreach (var column in new[]
+            {
+                new[] { "模板ID", "IdValue" }, new[] { "宿主ID", "HostIdValue" },
+                new[] { "來源", "Source" }, new[] { "名稱", "Name" }, new[] { "類別", "Category" },
+                new[] { "樓層", "LevelName" }, new[] { "樓層依據", "LevelBasis" }, new[] { "警示", "Warning" }
+            })
+                _candidateGrid.Columns.Add(new DataGridTextColumn { Header = column[0], Binding = new System.Windows.Data.Binding(column[1]), MaxWidth = 240 });
+            root.Children.Add(_candidateGrid);
 
             // ─── 按鈕列 ───
             var buttonRow = new StackPanel
@@ -161,7 +187,7 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
             btnCancel.Click   += (s, e) => { SelectedIds = null; DialogResult = false; Close(); };
             _btnConfirm.Click += (s, e) => Confirm();
 
-            ShowPanel(null);
+            ShowPanel(_panelSelection);
         }
 
         /// <summary>
@@ -224,7 +250,7 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
                     var cb = new CheckBox
                     {
                         Content   = $"{g.Key}  （{g.Count()} 個）",
-                        IsChecked = true,
+                        IsChecked = false,
                         Margin    = new Thickness(0, 3, 0, 3)
                     };
                     cb.Checked   += (s, e) => UpdatePreview();
@@ -259,7 +285,7 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
                     var cb = new CheckBox
                     {
                         Content   = $"{g.Key}  （{g.Count()} 個）",
-                        IsChecked = true,
+                        IsChecked = false,
                         Margin    = new Thickness(0, 3, 0, 3)
                     };
                     cb.Checked   += (s, e) => UpdatePreview();
@@ -278,8 +304,8 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
             panel.Children.Add(new TextBlock
             {
                 Text       = count > 0
-                    ? $"選取集中共有 {count} 個模板元素，將全數刪除。"
-                    : "目前選取集中沒有模板元素。請先在 Revit 中框選目標再執行此命令。",
+                    ? $"所選模板與宿主對應 {count} 個可刪除模板。"
+                    : "目前選取沒有對應的可刪除模板。",
                 Foreground = color,
                 TextWrapping = TextWrapping.Wrap
             });
@@ -303,12 +329,19 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
             _previewText.Text = $"將刪除：{count} 個模板元素";
             _previewText.Foreground = count > 0 ? Brushes.DarkRed : Brushes.Gray;
             _btnConfirm.IsEnabled = count > 0;
+            _candidateGrid.ItemsSource = ComputeCandidates();
         }
 
+        private bool MatchesSelection(FormworkItemInfo item)
+            => ExportTemplateRules.MatchesSelection(item.IdValue, item.HostIdValue, _selectionIdValues);
+
         private IList<ElementId> ComputeSelectedIds()
+            => ComputeCandidates().Where(i => i.CanDelete).Select(i => i.Id).Distinct().ToList();
+
+        private IList<FormworkItemInfo> ComputeCandidates()
         {
             if (_rbAll.IsChecked == true)
-                return _allItems.Select(i => i.Id).ToList();
+                return _allItems.ToList();
 
             if (_rbCategory.IsChecked == true)
             {
@@ -318,7 +351,6 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
                     .ToHashSet();
                 return _allItems
                     .Where(i => selectedCats.Contains(NormalizeCategory(i.Category)))
-                    .Select(i => i.Id)
                     .ToList();
             }
 
@@ -334,17 +366,15 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
                         var name = string.IsNullOrWhiteSpace(i.LevelName) ? "（未知樓層）" : i.LevelName;
                         return selectedLevels.Contains(name);
                     })
-                    .Select(i => i.Id)
                     .ToList();
             }
 
             if (_rbSelection.IsChecked == true)
                 return _allItems
-                    .Where(i => _selectionIdValues.Contains(i.Id.GetIdValue()))
-                    .Select(i => i.Id)
+                    .Where(MatchesSelection)
                     .ToList();
 
-            return new List<ElementId>();
+            return new List<FormworkItemInfo>();
         }
 
         private void Confirm()
@@ -355,6 +385,13 @@ namespace YD_RevitTools.LicenseManager.UI.Formwork
                 MessageBox.Show("未選擇任何模板元素。", "刪除模板", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
+            var sources = ComputeCandidates().Where(i => i.CanDelete).GroupBy(i => i.Source)
+                .Select(g => $"{g.Key}：{g.Count()} 個");
+            var answer = MessageBox.Show(this,
+                $"確定刪除清單中的 {ids.Count} 個模板？\n" + string.Join("\n", sources) +
+                "\n宿主不在刪除清單中；若偵測到額外相依元素，整次刪除會取消。",
+                "最後確認", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (answer != MessageBoxResult.Yes) return;
             SelectedIds   = ids;
             DialogResult  = true;
             Close();

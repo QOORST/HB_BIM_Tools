@@ -27,6 +27,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private readonly Forms.ComboBox _scopeCombo = new Forms.ComboBox();
         private readonly Forms.ComboBox _placementCombo = new Forms.ComboBox();
         private readonly Forms.ComboBox _directionCombo = new Forms.ComboBox();
+        private readonly Forms.ComboBox _textDirectionCombo = new Forms.ComboBox();
+        private readonly Forms.ComboBox _layoutCombo = new Forms.ComboBox();
+        private readonly Forms.NumericUpDown _bankGap = new Forms.NumericUpDown();
+        private readonly Forms.NumericUpDown _bankLeader = new Forms.NumericUpDown();
         private readonly Forms.ComboBox _unitsCombo = new Forms.ComboBox();
         private readonly Forms.TextBox _offsetText = new Forms.TextBox();
         private readonly Forms.CheckBox _leaderCheck = new Forms.CheckBox();
@@ -54,11 +58,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _windowTitle = mode == AutoTagMode.Unified ? "HB_BIM 自動標籤" : mode == AutoTagMode.Vertical ? "自動標籤 - 垂直元素" : "自動標籤 - 水平元素";
 
             Text = _windowTitle;
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = Forms.AutoScaleMode.Dpi;
             Width = 780;
             Height = 800;
             MinimizeBox = false;
             MaximizeBox = true;
-            MinimumSize = new Size(760, 660);
+            MinimumSize = new Size(640, 420);
             FormBorderStyle = Forms.FormBorderStyle.Sizable;
             StartPosition = Forms.FormStartPosition.CenterScreen;
             Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
@@ -73,6 +79,23 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             }
 
             UpdateSummary();
+            Shown += (_, __) => FitWorkingArea();
+            ResizeEnd += (_, __) => FitWorkingArea();
+            DpiChanged += (_, __) => BeginInvoke(new Action(FitWorkingArea));
+        }
+
+        private void FitWorkingArea()
+        {
+            if (IsDisposed || WindowState != Forms.FormWindowState.Normal) return;
+            Rectangle work = Forms.Screen.FromHandle(Handle).WorkingArea;
+            int margin = Math.Max(4, (int)(8 * DeviceDpi / 96.0));
+            int width = Math.Max(1, work.Width - margin * 2);
+            int height = Math.Max(1, work.Height - margin * 2);
+            MinimumSize = new Size(Math.Min(width, (int)(640 * DeviceDpi / 96.0)),
+                Math.Min(height, (int)(420 * DeviceDpi / 96.0)));
+            Size = new Size(Math.Min(Width, width), Math.Min(Height, height));
+            Location = new Point(Math.Max(work.Left + margin, Math.Min(Left, work.Right - margin - Width)),
+                Math.Max(work.Top + margin, Math.Min(Top, work.Bottom - margin - Height)));
         }
 
         public void UpdateTagTypes(RevitDB.Document doc)
@@ -132,15 +155,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private void BuildLayout(RevitDB.Document doc)
         {
             BackColor = Color.FromArgb(245, 247, 250);
-            var root = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Fill, Padding = new Forms.Padding(16),
-                ColumnCount = 1, RowCount = 6 };
+            var shell = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Fill, Padding = new Forms.Padding(8), ColumnCount = 1, RowCount = 3 };
+            shell.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 100));
+            shell.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
+            shell.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
+            Controls.Add(shell);
+            var scroll = new Forms.Panel { Dock = Forms.DockStyle.Fill, AutoScroll = true };
+            shell.Controls.Add(scroll, 0, 0);
+            var root = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, Padding = new Forms.Padding(8),
+                ColumnCount = 1, RowCount = 4 };
+            root.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 98));
-            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 100));
+            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 280));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 102));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
-            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 42));
-            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 46));
-            Controls.Add(root);
+            scroll.Controls.Add(root);
 
             // Initialize existing settings and handlers before arranging the controls into sections.
             var oldTop = BuildTopPanel();
@@ -193,6 +222,34 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             detail.Controls.Add(new Forms.Label { Text = "梁／管線方向", AutoSize = true, Margin = new Forms.Padding(0, 7, 6, 0) });
             detail.Controls.Add(_directionCombo); detail.Controls.Add(_skipExistingCheck); detail.Controls.Add(_avoidOverlapCheck);
             detail.SetFlowBreak(_avoidOverlapCheck, true);
+            detail.Controls.Add(new Forms.Label { Text = "文字方向", AutoSize = true, Margin = new Forms.Padding(0, 7, 6, 0) });
+            ConfigureCombo(_textDirectionCombo, new[] { "水平", "垂直", "跟隨管線方向" });
+            _textDirectionCombo.Dock = Forms.DockStyle.None;
+            _textDirectionCombo.Width = 180;
+            _textDirectionCombo.SelectedIndex = 0;
+            detail.Controls.Add(_textDirectionCombo);
+            detail.SetFlowBreak(_textDirectionCombo, true);
+            detail.Controls.Add(new Forms.Label { Text = "配置模式", AutoSize = true });
+            ConfigureCombo(_layoutCombo, new[] { "單管", "管排（目前選取）" });
+            _layoutCombo.Dock = Forms.DockStyle.None;
+            _layoutCombo.Width = 180;
+            _layoutCombo.SelectedIndex = 0;
+            detail.Controls.Add(_layoutCombo);
+            detail.Controls.Add(new Forms.Label { Text = "淨距（紙面 mm）", AutoSize = true });
+            _bankGap.Minimum = 0.5m; _bankGap.Maximum = 50; _bankGap.DecimalPlaces = 1; _bankGap.Value = 2; _bankGap.Width = 65;
+            detail.Controls.Add(_bankGap);
+            detail.Controls.Add(new Forms.Label { Text = "引線退距（紙面 mm）", AutoSize = true });
+            _bankLeader.Minimum = 2; _bankLeader.Maximum = 100; _bankLeader.DecimalPlaces = 1; _bankLeader.Value = 5; _bankLeader.Width = 65;
+            detail.Controls.Add(_bankLeader);
+            detail.SetFlowBreak(_bankLeader, true);
+            _layoutCombo.SelectedIndexChanged += (_, __) =>
+            {
+                bool bank = _layoutCombo.SelectedIndex == 1;
+                _bankGap.Enabled = _bankLeader.Enabled = bank;
+                if (bank) { _scopeCombo.SelectedIndex = 1; _leaderCheck.Checked = true; _textDirectionCombo.SelectedIndex = 0; }
+                _textDirectionCombo.Enabled = !bank;
+            };
+            _bankGap.Enabled = _bankLeader.Enabled = false;
             detail.Controls.Add(new Forms.Label { Text = "最大移動（紙面 mm）", AutoSize = true, Margin = new Forms.Padding(0, 7, 6, 0) });
             _maxMove.Minimum = 0; _maxMove.Maximum = 100; _maxMove.DecimalPlaces = 1; _maxMove.Value = 10; _maxMove.Width = 70;
             detail.Controls.Add(_maxMove);
@@ -202,10 +259,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             toggle.Click += (_, __) => { detail.Visible = !detail.Visible; toggle.Text = detail.Visible ? "▾ 進階設定" : "▸ 進階設定"; };
             advanced.Controls.Add(toggle, 0, 0); advanced.Controls.Add(detail, 0, 1);
             root.Controls.Add(advanced, 0, 3);
-            root.Controls.Add(_statusLabel, 0, 4);
-            root.Controls.Add(BuildButtons(), 0, 5);
+            shell.Controls.Add(_statusLabel, 0, 1);
+            shell.Controls.Add(BuildButtons(), 0, 2);
             _statusLabel.Dock = Forms.DockStyle.Fill;
             _statusLabel.AutoSize = false;
+            _statusLabel.Height = 42;
             oldTop.Dispose(); oldFlags.Dispose();
         }
 
@@ -442,7 +500,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             {
                 Dock = Forms.DockStyle.Fill,
                 FlowDirection = Forms.FlowDirection.RightToLeft,
-                WrapContents = false,
+                WrapContents = true,
+                AutoSize = true,
                 Padding = new Forms.Padding(0, 8, 0, 0)
             };
 
@@ -559,6 +618,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 LinkInstanceUniqueId = (_linkCombo.SelectedItem as LinkChoice)?.UniqueId ?? string.Empty,
                 Placement = IndexToPlacement(_placementCombo.SelectedIndex),
                 AddLeader = _leaderCheck.Checked,
+                TextDirection = (AutoTagTextDirection)Math.Max(0, _textDirectionCombo.SelectedIndex),
+                PipeBank = _layoutCombo.SelectedIndex == 1,
+                BankGapPaperMm = (double)_bankGap.Value,
+                BankLeaderPaperMm = (double)_bankLeader.Value,
                 SkipExistingTags = _skipExistingCheck.Checked,
                 AvoidTagOverlap = _avoidOverlapCheck.Checked,
                 VerticalOnly = _directionCombo.SelectedIndex == 2,
@@ -568,6 +631,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 AllowCrossSide = _crossSide.Checked,
                 OffsetMillimeters = offset
             };
+            if (options.PipeBank && (options.Scope != AutoTagScope.Selection || options.Placement == AutoTagPlacement.Center || !options.AddLeader))
+            {
+                Forms.MessageBox.Show("管排需使用目前選取、指定上／下／左／右側，並開啟引線。", _windowTitle);
+                return false;
+            }
             return true;
         }
 
@@ -659,6 +727,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _crossSide.Checked = options.AllowCrossSide;
             _offsetText.Text = options.OffsetMillimeters.ToString("0.###", CultureInfo.InvariantCulture);
             _leaderCheck.Checked = options.AddLeader;
+            _textDirectionCombo.SelectedIndex = Math.Max(0, Math.Min(2, (int)options.TextDirection));
+            _layoutCombo.SelectedIndex = options.PipeBank ? 1 : 0;
+            _bankGap.Value = double.IsNaN(options.BankGapPaperMm) ? 2 : (decimal)Math.Max(0.5, Math.Min(50, options.BankGapPaperMm));
+            _bankLeader.Value = double.IsNaN(options.BankLeaderPaperMm) ? 5 : (decimal)Math.Max(2, Math.Min(100, options.BankLeaderPaperMm));
             _skipExistingCheck.Checked = options.SkipExistingTags;
             _avoidOverlapCheck.Checked = options.AvoidTagOverlap;
         }

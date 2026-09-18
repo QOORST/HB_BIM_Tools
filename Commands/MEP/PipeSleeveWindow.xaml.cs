@@ -57,6 +57,23 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             UpdatePreview();
         }
 
+        private bool? _compactLayout;
+
+        private void BodyLayout_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            bool compact = e.NewSize.Width < 880;
+            if (_compactLayout == compact) return;
+            _compactLayout = compact;
+            settingsColumn.Width = new GridLength(compact ? 1 : 3, GridUnitType.Star);
+            separatorColumn.Width = new GridLength(compact ? 0 : 25);
+            referenceColumn.Width = compact ? new GridLength(0) : new GridLength(2, GridUnitType.Star);
+            bodySeparator.Visibility = compact ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
+            System.Windows.Controls.Grid.SetRow(settingsPanel, compact ? 1 : 0);
+            System.Windows.Controls.Grid.SetRow(advancedPanel, compact ? 2 : 1);
+            System.Windows.Controls.Grid.SetColumn(referencePanel, compact ? 0 : 2);
+            System.Windows.Controls.Grid.SetRowSpan(referencePanel, compact ? 1 : 3);
+        }
+
         /// <summary>
         /// 載入套管類型
         /// </summary>

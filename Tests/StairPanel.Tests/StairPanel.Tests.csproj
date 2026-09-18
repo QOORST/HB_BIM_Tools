@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <FormworkSourceDir Condition="'$(FormworkSourceDir)' == ''">../../Commands/AR/Formwork</FormworkSourceDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(FormworkSourceDir)/StairPanelMerger.cs" Link="StairPanelMerger.cs" />
+  </ItemGroup>
+</Project>

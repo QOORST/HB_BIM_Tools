@@ -161,10 +161,11 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
 
         private void InitializeComponent()
         {
-            Text = "套管管理";
+            Text = "HB_BIM｜套管管理";
             Width = 1120;
             Height = 720;
-            MinimumSize = new Size(980, 620);
+            MinimumSize = new Size(720, 480);
+            AutoScaleMode = WinForms.AutoScaleMode.Dpi;
             StartPosition = WinForms.FormStartPosition.CenterParent;
             Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
             BackColor = System.Drawing.Color.White;
@@ -174,18 +175,18 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 Dock = WinForms.DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 4,
-                Padding = new WinForms.Padding(18)
+                Padding = new WinForms.Padding(16)
             };
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Percent, 100));
-            root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
+            root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Absolute, 120));
             Controls.Add(root);
 
             var title = new WinForms.Label
             {
                 Text = "套管管理",
-                Font = new Font(Font.FontFamily, 20F, FontStyle.Bold),
+                Font = new Font(Font.FontFamily, 12F, FontStyle.Bold),
                 AutoSize = true,
                 Margin = new WinForms.Padding(0, 0, 0, 2)
             };
@@ -204,7 +205,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 Dock = WinForms.DockStyle.Fill
             };
             titleStack.Controls.Add(title);
-            titleStack.Controls.Add(hint);
+            hint.Dispose();
             _scopeNote.AutoSize = true;
             _scopeNote.ForeColor = System.Drawing.Color.DimGray;
             _scopeNote.Margin = new WinForms.Padding(0, 0, 0, 8);
@@ -214,31 +215,31 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             var filters = new WinForms.TableLayoutPanel
             {
                 Dock = WinForms.DockStyle.Fill,
-                ColumnCount = 10,
+                ColumnCount = 8,
                 AutoSize = true,
                 Margin = new WinForms.Padding(0, 0, 0, 10)
             };
             filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.AutoSize));
-            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Absolute, 120));
+            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 25));
             filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.AutoSize));
-            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Absolute, 160));
+            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 25));
             filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.AutoSize));
-            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Absolute, 110));
+            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 25));
             filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.AutoSize));
-            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Absolute, 120));
-            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.AutoSize));
-            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 100));
+            filters.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 25));
             root.Controls.Add(filters, 0, 1);
 
             AddFilter(filters, "樓層", _levelFilter, 0);
             AddFilter(filters, "系統", _systemFilter, 2);
             AddFilter(filters, "穿越", _hostFilter, 4);
             AddFilter(filters, "狀態", _statusFilter, 6);
-            filters.Controls.Add(new WinForms.Label { Text = "搜尋", AutoSize = true, Anchor = WinForms.AnchorStyles.Left, Margin = new WinForms.Padding(10, 4, 4, 4) }, 8, 0);
+            filters.Controls.Add(new WinForms.Label { Text = "搜尋", AutoSize = true, Anchor = WinForms.AnchorStyles.Left, Margin = new WinForms.Padding(0, 8, 4, 4) }, 0, 1);
             _searchBox.Dock = WinForms.DockStyle.Fill;
-            _searchBox.Margin = new WinForms.Padding(4, 2, 0, 2);
+            _searchBox.Margin = new WinForms.Padding(4, 8, 0, 2);
+            _searchBox.BorderStyle = WinForms.BorderStyle.FixedSingle;
             _searchBox.TextChanged += (s, e) => ApplyFilters();
-            filters.Controls.Add(_searchBox, 9, 0);
+            filters.Controls.Add(_searchBox, 1, 1);
+            filters.SetColumnSpan(_searchBox, 7);
 
             ConfigureGrid();
             root.Controls.Add(_grid, 0, 2);
@@ -246,12 +247,14 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             var bottom = new WinForms.TableLayoutPanel
             {
                 Dock = WinForms.DockStyle.Fill,
-                ColumnCount = 2,
-                AutoSize = true,
+                ColumnCount = 1,
+                AutoSize = false,
                 Margin = new WinForms.Padding(0, 10, 0, 0)
             };
             bottom.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 100));
-            bottom.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.AutoSize));
+            bottom.RowCount = 2;
+            bottom.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Percent, 100));
+            bottom.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Absolute, 52));
             root.Controls.Add(bottom, 0, 3);
 
             var infoStack = new WinForms.FlowLayoutPanel
@@ -275,15 +278,23 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             {
                 AutoSize = true,
                 FlowDirection = WinForms.FlowDirection.RightToLeft,
-                WrapContents = false
+                WrapContents = true,
+                Dock = WinForms.DockStyle.Fill,
+                Padding = new WinForms.Padding(0)
             };
-            bottom.Controls.Add(buttons, 1, 0);
+            bottom.Controls.Add(buttons, 0, 1);
 
             buttons.Controls.Add(MakeButton("關閉", 92, (s, e) => Close()));
             buttons.Controls.Add(MakeButton("刪除", 92, (s, e) => Raise(PipeSleeveManagerAction.Delete)));
             buttons.Controls.Add(MakeButton("更新", 92, (s, e) => Raise(PipeSleeveManagerAction.Update), true));
             buttons.Controls.Add(MakeButton("定位", 92, (s, e) => Raise(PipeSleeveManagerAction.Focus)));
             buttons.Controls.Add(MakeButton("整理", 92, (s, e) => Raise(PipeSleeveManagerAction.Reload)));
+            root.SizeChanged += (s, e) => {
+                _scopeNote.MaximumSize = new Size(Math.Max(100, root.ClientSize.Width - 40), 0);
+                _detail.MaximumSize = new Size(Math.Max(100, root.ClientSize.Width - 40), 0);
+            };
+            var area = WinForms.Screen.FromControl(this).WorkingArea;
+            Size = new Size(Math.Min(Width, area.Width - 24), Math.Min(Height, area.Height - 24));
         }
         private static void AddFilter(WinForms.TableLayoutPanel panel, string label, WinForms.ComboBox combo, int column)
         {
@@ -313,8 +324,11 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 Width = width,
                 Height = 38,
                 Margin = new WinForms.Padding(8, 0, 0, 0),
-                FlatStyle = WinForms.FlatStyle.System
+                FlatStyle = WinForms.FlatStyle.Flat,
+                BackColor = primary ? System.Drawing.Color.FromArgb(0, 135, 145) : System.Drawing.Color.White,
+                ForeColor = primary ? System.Drawing.Color.White : System.Drawing.Color.FromArgb(40, 48, 54)
             };
+            button.FlatAppearance.BorderColor = primary ? System.Drawing.Color.FromArgb(0, 135, 145) : System.Drawing.Color.FromArgb(200, 205, 210);
             if (primary)
             {
                 button.Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
@@ -333,7 +347,9 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _grid.SelectionMode = WinForms.DataGridViewSelectionMode.FullRowSelect;
             _grid.AutoGenerateColumns = false;
             _grid.RowHeadersVisible = false;
-            _grid.BorderStyle = WinForms.BorderStyle.FixedSingle;
+            _grid.BorderStyle = WinForms.BorderStyle.None;
+            _grid.CellBorderStyle = WinForms.DataGridViewCellBorderStyle.SingleHorizontal;
+            _grid.ColumnHeadersBorderStyle = WinForms.DataGridViewHeaderBorderStyle.Single;
             _grid.BackgroundColor = System.Drawing.Color.White;
             _grid.GridColor = System.Drawing.Color.Gainsboro;
             _grid.EnableHeadersVisualStyles = false;
@@ -342,10 +358,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _grid.AutoSizeRowsMode = WinForms.DataGridViewAutoSizeRowsMode.DisplayedCellsExceptHeaders;
             _grid.DefaultCellStyle.WrapMode = WinForms.DataGridViewTriState.False;
             _grid.DefaultCellStyle.Padding = new WinForms.Padding(4, 3, 4, 3);
-            _grid.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(0, 120, 215);
-            _grid.DefaultCellStyle.SelectionForeColor = System.Drawing.Color.White;
-            _grid.AlternatingRowsDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(248, 250, 252);
-            _grid.ColumnHeadersDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(235, 239, 243);
+            _grid.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(218, 239, 238);
+            _grid.DefaultCellStyle.SelectionForeColor = System.Drawing.Color.FromArgb(25, 49, 51);
+            _grid.AlternatingRowsDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(248, 249, 250);
+            _grid.ColumnHeadersDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(240, 242, 244);
             _grid.ColumnHeadersDefaultCellStyle.ForeColor = System.Drawing.Color.Black;
             _grid.ColumnHeadersDefaultCellStyle.Font = new Font(_grid.Font, FontStyle.Bold);
             _grid.ColumnHeadersDefaultCellStyle.Padding = new WinForms.Padding(4, 4, 4, 4);

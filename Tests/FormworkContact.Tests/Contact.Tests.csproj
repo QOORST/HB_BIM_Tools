@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <FormworkSourceDir Condition="'$(FormworkSourceDir)' == ''">../../Commands/AR/Formwork</FormworkSourceDir>
+  </PropertyGroup>
+  <Target Name="GenerateContactSource" BeforeTargets="BeforeCompile">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/Generate-Source.ps1&quot; -Source &quot;$(MSBuildProjectDirectory)/$(FormworkSourceDir)/GeometryExtractor.cs&quot; -Output &quot;$(MSBuildProjectDirectory)/obj/Contact.generated.cs&quot;" />
+    <ItemGroup><Compile Include="$(MSBuildProjectDirectory)/obj/Contact.generated.cs" /></ItemGroup>
+  </Target>
+</Project>

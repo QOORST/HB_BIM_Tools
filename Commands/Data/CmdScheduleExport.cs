@@ -48,7 +48,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 return Result.Cancelled;
             }
 
-            // 收集所有明細表並預計算預覽資訊
+            // Do not evaluate schedule tables before the selection window opens.
             var scheduleInfos = new FilteredElementCollector(doc)
                 .OfClass(typeof(ViewSchedule))
                 .Cast<ViewSchedule>()
@@ -922,22 +922,14 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
     internal class ScheduleInfo
     {
         public ViewSchedule Schedule { get; }
-        public string Name => Schedule.Name;
-        public int BodyRows { get; }
-        public int ColCount { get; }
+        public string Name { get; }
         public string Category { get; }
 
         public ScheduleInfo(ViewSchedule vs)
         {
             Schedule = vs;
-            try
-            {
-                var body = vs.GetTableData().GetSectionData(SectionType.Body);
-                BodyRows = body != null ? body.NumberOfRows : 0;
-                ColCount  = body != null ? body.NumberOfColumns : 0;
-            }
-            catch { BodyRows = 0; ColCount = 0; }
-            Category = DetectCategory(vs.Name);
+            Name = vs.Name;
+            Category = DetectCategory(Name);
         }
 
         private static string DetectCategory(string name)
@@ -1223,7 +1215,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
         private readonly List<ScheduleInfo> _allInfos;
         private readonly Action<bool> _requestAction;
         private bool _requestPending;
-        private const int FixedColsWidth = 80 + 70 + 90 + 28; // 資料列 + 欄數 + 分類 + 預留
+        private const int FixedColsWidth = 90 + 28;
+        private bool _populatingList;
 
         private static readonly string[] _categories = { "全部", "材料", "房間", "門窗", "面積", "機電", "一般" };
 
@@ -1293,8 +1286,6 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom
             };
             _listView.Columns.Add("明細表名稱", 460);
-            _listView.Columns.Add("資料列", 80, HorizontalAlignment.Right);
-            _listView.Columns.Add("欄數", 70, HorizontalAlignment.Right);
             _listView.Columns.Add("分類", 90);
             _listView.ItemChecked += (o, e) => UpdateStatus();
             _listView.Resize += (o, e) => AdjustListColumns();
@@ -1436,23 +1427,32 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
         private void AdjustListColumns()
         {
-            if (_listView.Columns.Count < 4) return;
+            if (_listView.Columns.Count < 2) return;
             int w = Math.Max(260, _listView.ClientSize.Width - FixedColsWidth);
             _listView.Columns[0].Width = w;
         }
 
         private void PopulateListView(IEnumerable<ScheduleInfo> items)
         {
-            _listView.Items.Clear();
-            foreach (var info in items)
+            _populatingList = true;
+            _listView.BeginUpdate();
+            try
             {
-                var item = new ListViewItem(info.Name);
-                item.SubItems.Add(info.BodyRows.ToString());
-                item.SubItems.Add(info.ColCount.ToString());
-                item.SubItems.Add(info.Category);
-                item.Tag = info;
-                item.Checked = true;
-                _listView.Items.Add(item);
+                _listView.Items.Clear();
+                var rows = items.Select(info =>
+                {
+                    var item = new ListViewItem(info.Name);
+                    item.SubItems.Add(info.Category);
+                    item.Tag = info;
+                    item.Checked = true;
+                    return item;
+                }).ToArray();
+                _listView.Items.AddRange(rows);
+            }
+            finally
+            {
+                _listView.EndUpdate();
+                _populatingList = false;
             }
             UpdateStatus();
         }
@@ -1471,6 +1471,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
         private void UpdateStatus()
         {
+            if (_populatingList) return;
             if (_lblStatus == null) return; // 建構式尚未完成時的保護
             int total = _listView.Items.Count;
             int checkedCount = _listView.CheckedItems.Count;

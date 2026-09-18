@@ -29,8 +29,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// <summary>
         /// 🚀 性能優化: 幾何快取機制 - 避免重複計算相同元素的幾何
         /// </summary>
-        private static readonly Dictionary<ElementId, List<Solid>> _geometryCache = new Dictionary<ElementId, List<Solid>>();
-        private static readonly Dictionary<ElementId, double> _volumeCache = new Dictionary<ElementId, double>();
+        private static readonly Dictionary<Tuple<Document, ElementId, double, bool>, List<Solid>> _geometryCache =
+            new Dictionary<Tuple<Document, ElementId, double, bool>, List<Solid>>();
+        private static bool _geometryCacheEnabled;
+
+        internal static void BeginGeometryCache()
+        {
+            ClearGeometryCache();
+            _geometryCacheEnabled = true;
+        }
         
         /// <summary>
         /// 取得元素的所有實體幾何
@@ -42,11 +49,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         public static List<Solid> GetElementSolids(Element element, double tolerance = DEFAULT_TOLERANCE, bool computeReferences = true)
         {
             if (element == null) return new List<Solid>();
+            CurvedMeshBudget.Checkpoint($"讀取元素 {element.Id} 幾何與快取");
             
             // 🚀 性能優化: 檢查快取，避免重複計算
-            if (_geometryCache.ContainsKey(element.Id))
+            var cacheKey = Tuple.Create(element.Document, element.Id, tolerance, computeReferences);
+            if (_geometryCacheEnabled && _geometryCache.TryGetValue(cacheKey, out var cachedSolids))
             {
-                return new List<Solid>(_geometryCache[element.Id]); // 返回副本避免修改快取
+                return new List<Solid>(cachedSolids); // 返回副本避免修改快取
             }
             
             var solids = new List<Solid>();
@@ -60,15 +69,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 };
                 
                 var geometry = element.get_Geometry(options);
+                CurvedMeshBudget.Checkpoint($"元素 {element.Id} 幾何擷取完成");
                 if (geometry != null)
                 {
                     ExtractSolidsFromGeometry(geometry, solids, tolerance);
                 }
                 
                 // 🚀 性能優化: 將結果加入快取 (最多快取 1000 個元素避免記憶體溢出)
-                if (_geometryCache.Count < 1000)
+                if (_geometryCacheEnabled && _geometryCache.Count < 1000)
                 {
-                    _geometryCache[element.Id] = new List<Solid>(solids);
+                    _geometryCache[cacheKey] = new List<Solid>(solids);
                 }
             }
             catch (Exception ex)
@@ -245,8 +255,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// </summary>
         public static void ClearGeometryCache()
         {
+            _geometryCacheEnabled = false;
             _geometryCache.Clear();
-            _volumeCache.Clear();
             System.Diagnostics.Debug.WriteLine("✅ 幾何快取已清理");
         }
         
@@ -255,7 +265,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// </summary>
         public static string GetCacheStatistics()
         {
-            return $"幾何快取: {_geometryCache.Count} 個元素, 體積快取: {_volumeCache.Count} 個元素";
+            return $"幾何快取: {_geometryCache.Count} 筆, 執行中: {_geometryCacheEnabled}";
         }
         
         /// <summary>
@@ -295,7 +305,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         int count = 0;
                         foreach (var element in collector)
                         {
-                            if (element.Id != hostElement.Id) // 排除自身
+                            if (element.Id != hostElement.Id && ElementCategorizer.CanDeductFormwork(element))
                             {
                                 nearbyElements.Add(element);
                                 count++;
@@ -412,6 +422,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 bool isWallHost   = hostElement?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_Walls;
                 bool isFloorHost  = hostElement?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_Floors;
                 bool isBeamHost   = hostElement?.Category?.Id?.GetIdValue() == (long)BuiltInCategory.OST_StructuralFraming;
+                bool isStairHost = ElementCategorizer.IsStairs(hostElement);
                 if (isColumnHost) System.Diagnostics.Debug.WriteLine($"  🏛️ 宿主為柱子，使用特殊扣除邏輯");
                 if (isWallHost)   System.Diagnostics.Debug.WriteLine($"  🧱 宿主為牆，牆對牆/牆對板接合使用低閾值扣除邏輯");
                 if (isFloorHost)  System.Diagnostics.Debug.WriteLine($"  🪟 宿主為樓板，板對牆接合使用低閾值扣除邏輯");
@@ -426,9 +437,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 Solid result = formworkSolid;
                 double originalVolume = formworkSolid.Volume;
                 int deductionCount = 0;
+                bool wallStairContactDeducted = false;
 
                 foreach (var element in nearbyElements)
                 {
+                    CurvedMeshBudget.Checkpoint("模板接觸扣除");
+                    if (!ElementCategorizer.CanDeductFormwork(element)) continue;
                     try
                     {
                         var elementSolids = GetElementSolids(element);
@@ -436,6 +450,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         bool isSlabOrBeam  = elementCategory == (long)BuiltInCategory.OST_Floors ||
                                             elementCategory == (long)BuiltInCategory.OST_StructuralFraming;
                         bool isNearbyWall  = elementCategory == (long)BuiltInCategory.OST_Walls;
+                        bool isWallStairJunction = isWallHost && ElementCategorizer.IsStairs(element);
                         // 需要低閾值（0.1%）的接合類型：
                         //   牆對牆: 交集比率 = 牆A厚/牆B長，大型樓層可能 < 5%
                         //   樓板對牆: 交集比率 = 牆厚×牆長 / 樓板面積，大型樓板遠低於 5%
@@ -468,7 +483,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                                 // 🔧 直接扣除（不考慮比率閾值）：柱子/牆/梁穿過樓板
                                 // 結構構件側面模板在穿越水平板處必定需要去除，與板厚/構件高度比率無關
-                                bool shouldDeductDirectly = (isColumnHost || isWallHost || isBeamHost) && isSlabOrBeam;
+                                bool shouldDeductDirectly = ((isColumnHost || isWallHost || isBeamHost) && isSlabOrBeam)
+                                    || (isStairHost && isNearbyWall) || isWallStairJunction;
                                 // 低閾值接合扣除：牆對牆、樓板對牆、牆對半板（已含於 shouldDeductDirectly）
                                 bool isLowThresholdDeduction = needsLowThreshold && intersectionRatio > effectiveThreshold;
                                 
@@ -485,6 +501,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                         double remainingRatio = difference.Volume / result.Volume;
                                         result = difference;
                                         deductionCount++;
+                                        wallStairContactDeducted |= isWallStairJunction;
                                         System.Diagnostics.Debug.WriteLine($"    ✅ 執行扣除 #{deductionCount} - 剩餘體積: {result.Volume:F6}, 剩餘比例: {remainingRatio:F3} ({remainingRatio * 100:F1}%)");
                                     }
                                     else
@@ -537,7 +554,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 // 如果最終體積太小，表示大部分都是接觸面，不應生成模板
                 double finalRatio = result.Volume / originalVolume;
-                if (finalRatio < 0.1)
+                if (!isStairHost && !wallStairContactDeducted && finalRatio < 0.1)
                 {
                     System.Diagnostics.Debug.WriteLine($"⚠️ 最終體積比例 {finalRatio:F3} ({finalRatio * 100:F1}%) 過小，大部分為接觸面，不生成模板");
                     return null;

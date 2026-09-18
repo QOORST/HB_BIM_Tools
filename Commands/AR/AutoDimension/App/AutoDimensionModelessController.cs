@@ -79,7 +79,8 @@ internal static class AutoDimensionModelessController
                 windowTitle,
                 savedSettings,
                 RequestApply,
-                RequestRefresh);
+                RequestRefresh,
+                view.Scale);
 
             _handler.Attach(_form, doc, view.Id);
             _form.FormClosed += (_, _) => DisposeWindow();
@@ -277,6 +278,16 @@ internal static class AutoDimensionModelessController
                 }
 
                 DimensionOptions options = _options;
+                if (options.GridBubblesOnly)
+                {
+                    using var bubbleTx = new Transaction(doc, "軸線標頭顯示");
+                    bubbleTx.Start();
+                    string summary = GridBubbleService.Apply(doc, view, options);
+                    if (bubbleTx.Commit() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("標頭設定未成功提交。");
+                    Complete(summary);
+                    return;
+                }
                 if (options.ModeType == DimensionMode.ColumnSetout && options.Mode == PlacementMode.Manual)
                 {
                     if (!TryResolveManualPlacement(uiDoc, view, options))
@@ -325,7 +336,7 @@ internal static class AutoDimensionModelessController
             SourceData source = CollectSources(doc, view);
             _sourceDocument = doc;
             _sourceViewId = view.Id;
-            _form?.UpdateSources(source.DimensionTypeNames, source.HorizontalGrids, source.VerticalGrids);
+            _form?.UpdateSources(source.DimensionTypeNames, source.HorizontalGrids, source.VerticalGrids, view.Scale);
             Complete(status);
         }
 

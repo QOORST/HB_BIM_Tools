@@ -39,7 +39,7 @@ internal static class VisibleGridCollector
 
         foreach (Element element in collector)
         {
-            if (element is not Grid grid)
+            if (element is not Grid grid || grid.IsHidden(view))
             {
                 continue;
             }
@@ -76,9 +76,9 @@ internal static class VisibleGridCollector
             vertical.OrderBy(i => i.AxisValue).ToList());
     }
 
-    private static Curve? TryGetVisibleCurve(Grid grid, View view)
+    internal static Curve? TryGetVisibleCurve(Grid grid, View view)
     {
-        foreach (DatumExtentType extentType in Enum.GetValues(typeof(DatumExtentType)))
+        foreach (DatumExtentType extentType in new[] { DatumExtentType.ViewSpecific, DatumExtentType.Model })
         {
             try
             {

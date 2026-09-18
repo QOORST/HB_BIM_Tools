@@ -93,32 +93,57 @@ internal sealed class AutoDimensionService
         IReadOnlyList<DatumInfo> horizontal = CollectSelectedGridDatums(allGrids, options.SelectedHorizontalGridIds, view);
         IReadOnlyList<DatumInfo> vertical = CollectSelectedGridDatums(allGrids, options.SelectedVerticalGridIds, view);
 
+        double scale = options.GridOffsetsInPaperSpace ? Math.Max(1, view.Scale) : 1;
         int created = 0;
-        if (horizontal.Count >= 2)
+        foreach (IReadOnlyList<DatumInfo> group in GroupParallelGrids(horizontal, view))
         {
             created += CreateGridDimensionForGroup(
                 doc,
                 view,
-                horizontal,
+                group,
                 ResolveHorizontalGridPreferredVector(view, options.Direction),
-                options.GridPrimaryOffsetInternal,
-                options.GridOverallOffsetInternal,
+                options.GridPrimaryOffsetInternal * scale,
+                options.GridOverallOffsetInternal * scale,
                 dimensionType);
         }
 
-        if (vertical.Count >= 2)
+        foreach (IReadOnlyList<DatumInfo> group in GroupParallelGrids(vertical, view))
         {
             created += CreateGridDimensionForGroup(
                 doc,
                 view,
-                vertical,
+                group,
                 ResolveVerticalGridPreferredVector(view, options.Direction),
-                options.GridPrimaryOffsetInternal,
-                options.GridOverallOffsetInternal,
+                options.GridPrimaryOffsetInternal * scale,
+                options.GridOverallOffsetInternal * scale,
                 dimensionType);
         }
 
         return created;
+    }
+
+    private static IEnumerable<IReadOnlyList<DatumInfo>> GroupParallelGrids(IReadOnlyList<DatumInfo> datums, View view)
+    {
+        XYZ normal = view.ViewDirection.Normalize();
+        var groups = new List<List<DatumInfo>>();
+        foreach (DatumInfo datum in datums)
+        {
+            XYZ projected = datum.Direction - normal * datum.Direction.DotProduct(normal);
+            if (projected.GetLength() < VectorTolerance)
+                continue;
+
+            XYZ direction = projected.Normalize();
+            var group = groups.FirstOrDefault(items =>
+                items[0].Direction.CrossProduct(direction).GetLength() < VectorTolerance);
+            var projectedDatum = new DatumInfo(datum.Element, datum.Midpoint, direction,
+                datum.Reference, datum.StartPoint, datum.EndPoint);
+            if (group is null)
+                groups.Add(new List<DatumInfo> { projectedDatum });
+            else
+                group.Add(projectedDatum);
+        }
+
+        return groups.Where(group => group.Count >= 2);
     }
 
     private static XYZ ResolveHorizontalGridPreferredVector(View view, PlacementDirection direction)
@@ -904,14 +929,16 @@ internal sealed class AutoDimensionService
     {
         var result = new List<DatumInfo>();
 
-        foreach (ElementId id in selectedIds)
+        foreach (ElementId id in selectedIds.Distinct())
         {
             if (!allGrids.TryGetValue(ElementIdCompat.ToInt32(id), out Grid? grid))
             {
                 continue;
             }
 
-            Curve? curve = TryGetVisibleCurve(grid, view);
+            if (grid.IsHidden(view))
+                continue;
+            Curve? curve = VisibleGridCollector.TryGetVisibleCurve(grid, view);
             if (curve is not Line line)
             {
                 continue;

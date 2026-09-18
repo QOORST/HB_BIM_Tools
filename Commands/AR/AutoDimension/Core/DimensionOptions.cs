@@ -48,6 +48,10 @@ internal enum FrontBackSide
 
 internal sealed class DimensionOptions
 {
+    public bool GridBubblesOnly { get; set; }
+    public bool GridBubblesBothEnds { get; set; }
+    public bool HorizontalBubbleRight { get; set; } = true;
+    public bool VerticalBubbleTop { get; set; } = true;
     public DimensionMode ModeType { get; set; } = DimensionMode.ColumnSetout;
 
     public PlacementMode Mode { get; set; } = PlacementMode.Auto;
@@ -59,6 +63,8 @@ internal sealed class DimensionOptions
     public FrontBackSide ColumnFrontBackSide { get; set; } = FrontBackSide.Front;
 
     public double OffsetInternal { get; set; } = 3.0;
+
+    public bool GridOffsetsInPaperSpace { get; set; }
 
     public double GridPrimaryOffsetInternal { get; set; } = 3.0;
 

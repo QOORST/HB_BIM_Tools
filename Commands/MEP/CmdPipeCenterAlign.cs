@@ -131,7 +131,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                 if (!shouldCreateTee && moveDistance < oneMillimeter)
                 {
-                    TaskDialog.Show("支管中心對齊", "支管端點已在幹管中心線上，不需要調整。");
                     return Result.Succeeded;
                 }
 
@@ -209,34 +208,21 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         connectionMode != PipeCenterAlignConnectionMode.Vertical45 &&
                         !TryCreateFittingAtIntersection(doc, mainPipe, branchPipe, targetPoint, connectionMode, out splitPipeId, out fittingId, out string teeFailReason))
                     {
-                        tx.Commit();
+                        if (tx.Commit() != TransactionStatus.Committed)
+                            throw new InvalidOperationException("支管對齊交易未完成，請檢查模型錯誤。");
                         TaskDialog.Show(
                             "支管中心對齊",
                             teeFailReason + "\n\n已完成支管端點對齊，但接頭建立失敗；未保留半完成的切管或接頭。");
                         return Result.Succeeded;
                     }
 
-                    tx.Commit();
+                    if (tx.Commit() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("支管對齊交易未完成，請檢查模型錯誤。");
                 }
 
-                double movedMm = UnitUtils.ConvertFromInternalUnits(moveDistance, UnitTypeId.Millimeters);
-                string teeSummary = vertical45Created
-                    ? fittingId == ElementId.InvalidElementId
-                        ? $"\n45°斜管 ID：{vertical45PipeId.GetIdValue()}\n未建立接頭：請檢查幹管 Routing Preferences 是否支援 Takeoff/Wye"
-                        : $"\n45°斜管 ID：{vertical45PipeId.GetIdValue()}\n接頭 ID：{fittingId.GetIdValue()}"
-                    : shouldCreateTee
-                    ? splitPipeId == ElementId.InvalidElementId
-                        ? $"\n接頭 ID：{fittingId.GetIdValue()}"
-                        : $"\n新幹管段 ID：{splitPipeId.GetIdValue()}\n三通 ID：{fittingId.GetIdValue()}"
-                    : "\n未建立三通：使用者選擇只對齊端點";
-
-                TaskDialog.Show(
-                    "支管中心對齊",
-                    $"完成支管端點中心對齊。\n\n" +
-                    $"幹管：Pipe / ID {mainPipe.Id.GetIdValue()}\n" +
-                    $"支管：Pipe / ID {branchPipe.Id.GetIdValue()}\n" +
-                    $"端點位移：約 {movedMm:F1} mm" +
-                    teeSummary);
+                if (vertical45Created && fittingId == ElementId.InvalidElementId)
+                    TaskDialog.Show("支管中心對齊 - 接頭未完成",
+                        $"45°斜管 ID：{vertical45PipeId.GetIdValue()}\n未建立接頭，請檢查幹管路由偏好是否支援 Takeoff/Wye。");
 
                 return Result.Succeeded;
             }
@@ -1856,10 +1842,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         }
                     }
 
-                    tx.Commit();
+                    if (tx.Commit() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("批次支管對齊交易未完成，請檢查模型錯誤。");
                 }
 
                 bool hasError = errorReportLines.Count > 0;
+                if (!hasError) return Result.Succeeded;
                 string title = hasError ? "批次支管對齊 - 有錯誤" : "批次支管對齊";
                 List<string> displayLines = hasError ? errorReportLines : reportLines;
                 string detail = displayLines.Any()

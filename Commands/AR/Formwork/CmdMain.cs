@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -24,6 +24,7 @@ using WpfStackPanel = System.Windows.Controls.StackPanel;
 using WpfComboBox = System.Windows.Controls.ComboBox;
 using WpfTextBox = System.Windows.Controls.TextBox;
 using WpfLabel = System.Windows.Controls.Label;
+using WpfTextBlock = System.Windows.Controls.TextBlock;
 using WpfGroupBox = System.Windows.Controls.GroupBox;
 using WpfProgressBar = System.Windows.Controls.ProgressBar;
 using WpfOrientation = System.Windows.Controls.Orientation;
@@ -35,6 +36,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
     public class CmdMain : IExternalCommand
     {
         private static UiVm.UiMain _win;
+        private static bool _sessionCleanupRegistered;
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
@@ -49,12 +51,24 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 FormworkEngine.Debug.Enable(true);
 
                 var doc = commandData.Application.ActiveUIDocument.Document;
+                if (!_sessionCleanupRegistered)
+                {
+                    commandData.Application.Application.DocumentClosed += OnDocumentClosed;
+                    _sessionCleanupRegistered = true;
+                }
                 
                 // 避免重複開啟視窗
-                if (_win != null && _win.IsVisible)
+                if (_win != null)
                 {
-                    _win.Activate();
-                    return Result.Succeeded;
+                    if (_win.IsRunPending)
+                        return Result.Cancelled;
+                    if (_win.SourceDocument.Equals(doc))
+                    {
+                        _win.Show();
+                        _win.Activate();
+                        return Result.Succeeded;
+                    }
+                    _win.Close();
                 }
 
                 var uiapp = commandData.Application;
@@ -81,6 +95,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 return Result.Failed;
             }
         }
+
+        private static void OnDocumentClosed(object sender, Autodesk.Revit.DB.Events.DocumentClosedEventArgs e)
+        {
+            UiVm.ClearClosedSessions();
+            if (_win != null && !_win.SourceDocument.IsValidObject && !_win.IsRunPending)
+                _win.Close();
+        }
     }
 
     // ---------- ��� ----------
@@ -94,6 +115,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
+                if (!_vm.IsActiveDocument(app))
+                {
+                    TaskDialog.Show("模板生成", "請切回開啟此視窗的專案，或在目前專案重新開啟模板生成。");
+                    return;
+                }
                 var filter = new HostFilter(_vm.IncludeWall, _vm.IncludeColumn, _vm.IncludeBeam, _vm.IncludeSlab, _vm.IncludeStairs);
                 var refs = _uidoc.Selection.PickObjects(
                     ObjectType.Element, filter, "�Цb�ҫ������ �� / �W / �� / �O");
@@ -112,129 +138,301 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
     {
         private readonly UIDocument _uidoc;
         private readonly UiVm _vm;
+        private long? _currentHostId;
         public RunHandler(UIDocument uidoc, UiVm vm) { _uidoc = uidoc; _vm = vm; }
 
         public void Execute(UIApplication app)
         {
+            if (!_vm.IsActiveDocument(app))
+            {
+                _vm.CancelQueuedRun();
+                _vm.RaiseRunFinished(UiVm.FormworkRunOutcome.Failed,
+                    "專案已切換或關閉，未執行模板生成。請在目前專案重新開啟模板生成。");
+                return;
+            }
+            if (!_vm.TryStartRun()) return;
+
             var doc = _uidoc.Document;
+            var totalTimer = Stopwatch.StartNew();
+            var outcome = UiVm.FormworkRunOutcome.Failed;
+            string outcomeDetail = "模板生成未完成。";
+            string errorDialog = null;
+            bool budgetRunStarted = false;
+            bool engineRunStarted = false;
+            bool rollbackUncertain = false;
+
             try
             {
+                _currentHostId = null;
+                FormworkEngine.Debug.Enable(true);
+                CurvedMeshBudget.StartRun(stage => RunCheckpoint(stage, totalTimer.Elapsed));
+                budgetRunStarted = true;
+
                 _vm.RaiseRunStarted(0);
-                SharedParams.Ensure(doc);
-
+                var stageTimer = Stopwatch.StartNew();
+                CurvedMeshBudget.Checkpoint("準備：解析宿主清單");
                 var hosts = ExpandHostsForProcessing(doc, _vm.GetHostElements());
+                LogPerformanceStage("解析宿主", stageTimer, $"宿主 {hosts.Count}");
                 _vm.RaiseRunStarted(hosts.Count);
-
-                var sw = Stopwatch.StartNew();
+                CurvedMeshBudget.Checkpoint($"準備完成：{hosts.Count} 個宿主");
 
                 // 使用結構分析的正確邏輯作為主要方法
-                FormworkEngine.Debug.Enable(true);
                 FormworkEngine.BeginRun();
+                engineRunStarted = true;
 
                 using (var tg = new TransactionGroup(doc, "模板計算"))
                 {
-                    tg.Start();
-                    using (var t = new Transaction(doc, "生成/更新模板"))
+                    if (tg.Start() != TransactionStatus.Started)
+                        throw new InvalidOperationException("無法啟動模板計算交易群組。");
+
+                    try
                     {
-                        t.Start();
+                        stageTimer.Restart();
+                        CurvedMeshBudget.Checkpoint("準備：設定共用參數");
+                        SharedParams.Ensure(doc);
+                        CurvedMeshBudget.Checkpoint("準備：共用參數已確認");
+                        LogPerformanceStage("共用參數", stageTimer);
 
-                        // 執行完整的結構分析（與結構分析傳統模式相同的邏輯）
-                        var analysisOptions = new StructuralFormworkAnalyzer.AnalysisOptions
+                        using (var t = new Transaction(doc, "生成/更新模板"))
                         {
-                            IncludeStructuralBottom = _vm.IncludeStructuralBottom,
-                            IncludeFoundationBottom = _vm.IncludeFoundationBottom,
-                            ActiveViewOnly = _vm.ActiveViewOnly,
-                            ViewId = _vm.ActiveViewOnly ? doc.ActiveView.Id : ElementId.InvalidElementId
-                        };
-
-                        var analysisResult = StructuralFormworkAnalyzer.AnalyzeProject(doc, analysisOptions);
-                        
-                        // 過濾只處理用戶選取的元素
-                        var selectedIds = new HashSet<ElementId>(hosts.Select(h => h.Id));
-                        var relevantAnalyses = analysisResult.ElementAnalyses
-                            .Where(kvp => selectedIds.Contains(kvp.Key.Id))
-                            .ToList();
-
-                        _vm.RaiseRunStarted(relevantAnalyses.Count);
-
-                        var all = new List<ElementId>();
-                        int i = 0;
-
-                        // 使用結構分析的生成邏輯
-                        int totalFormworkCount = 0;
-                        foreach (var elementAnalysis in relevantAnalyses)
-                        {
-                            var element = elementAnalysis.Key;
-                            var analysis = elementAnalysis.Value;
-
+                            if (t.Start() != TransactionStatus.Started)
+                                throw new InvalidOperationException("無法啟動模板生成交易。");
                             try
                             {
-                                System.Diagnostics.Debug.WriteLine($"\n========== 處理元素: {element.Id} ({element.Name}) ==========");
-
-                                var formworkIds = GenerateFormworkWithStructuralAnalysis(doc, element, analysis, _vm);
-
-                                System.Diagnostics.Debug.WriteLine($"✅ 生成了 {formworkIds.Count} 個模板");
-
-                                if (_vm.DrawFormwork && formworkIds.Count > 0)
+                                // 執行完整的結構分析（與結構分析傳統模式相同的邏輯）
+                                var analysisOptions = new StructuralFormworkAnalyzer.AnalysisOptions
                                 {
-                                    all.AddRange(formworkIds);
-                                    totalFormworkCount += formworkIds.Count;
+                                    IncludeStructuralBottom = _vm.IncludeStructuralBottom,
+                                    IncludeFoundationBottom = _vm.IncludeFoundationBottom,
+                                    ActiveViewOnly = _vm.ActiveViewOnly,
+                                    ViewId = _vm.ActiveViewOnly ? doc.ActiveView.Id : ElementId.InvalidElementId,
+                                    TargetElementIds = hosts.Select(h => h.Id).ToList(),
+                                    CurrentElementIdChanged = id => _currentHostId = id?.GetIdValue()
+                                };
 
-                                    // 設定模板參數和材質
-                                    System.Diagnostics.Debug.WriteLine($"📝 開始設定參數和材質...");
-                                    SetFormworkParametersAndMaterials(doc, formworkIds, element, analysis, _vm);
-                                    System.Diagnostics.Debug.WriteLine($"✅ 參數和材質設定完成");
-                                }
-                                else if (!_vm.DrawFormwork)
+                                stageTimer.Restart();
+                                CurvedMeshBudget.Checkpoint("分析：收集並分析結構元素");
+                                var analysisResult = StructuralFormworkAnalyzer.AnalyzeProject(doc, analysisOptions);
+                                CurvedMeshBudget.ThrowIfExceeded();
+                                LogPerformanceStage(
+                                    "結構分析",
+                                    stageTimer,
+                                    $"要求 {analysisResult.Metrics.RequestedTargetCount} / 候選 {analysisResult.Metrics.CandidateElementCount} / 實際 {analysisResult.Metrics.AnalyzedElementCount}");
+
+                                // 過濾只處理用戶選取的元素
+                                var selectedIds = new HashSet<ElementId>(hosts.Select(h => h.Id));
+                                var relevantAnalyses = analysisResult.ElementAnalyses
+                                    .Where(kvp => selectedIds.Contains(kvp.Key.Id))
+                                    .ToList();
+
+                                _vm.RaiseRunStarted(relevantAnalyses.Count);
+
+                                var all = new List<ElementId>();
+                                int i = 0;
+
+                                // 使用結構分析的生成邏輯
+                                int totalFormworkCount = 0;
+                                stageTimer.Restart();
+                                foreach (var elementAnalysis in relevantAnalyses)
                                 {
-                                    System.Diagnostics.Debug.WriteLine($"⚠️ DrawFormwork 為 false，跳過模板生成");
+                                    var element = elementAnalysis.Key;
+                                    var analysis = elementAnalysis.Value;
+                                    _currentHostId = element.Id.GetIdValue();
+                                    CurvedMeshBudget.Checkpoint($"生成：宿主 {i + 1}/{relevantAnalyses.Count}（ID {element.Id.GetIdValue()}）");
+
+                                    try
+                                    {
+                                        System.Diagnostics.Debug.WriteLine($"\n========== 處理元素: {element.Id} ({element.Name}) ==========");
+
+                                        var formworkIds = GenerateFormworkWithStructuralAnalysis(doc, element, analysis, _vm);
+
+                                        System.Diagnostics.Debug.WriteLine($"✅ 生成了 {formworkIds.Count} 個模板");
+
+                                        if (_vm.DrawFormwork && formworkIds.Count > 0)
+                                        {
+                                            all.AddRange(formworkIds);
+                                            totalFormworkCount += formworkIds.Count;
+
+                                            // 設定模板參數和材質
+                                            System.Diagnostics.Debug.WriteLine($"📝 開始設定參數和材質...");
+                                            SetFormworkParametersAndMaterials(doc, formworkIds, element, analysis, _vm);
+                                            System.Diagnostics.Debug.WriteLine($"✅ 參數和材質設定完成");
+                                        }
+                                        else if (!_vm.DrawFormwork)
+                                        {
+                                            System.Diagnostics.Debug.WriteLine($"⚠️ DrawFormwork 為 false，跳過模板生成");
+                                        }
+                                        else
+                                        {
+                                            System.Diagnostics.Debug.WriteLine($"⚠️ 未生成任何模板");
+                                        }
+                                    }
+                                    catch (System.OperationCanceledException)
+                                    {
+                                        throw;
+                                    }
+                                    catch (CurvedMeshLimitException)
+                                    {
+                                        throw;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine($"❌ 生成元素 {element.Id} 模板失敗: {ex.Message}");
+                                        System.Diagnostics.Debug.WriteLine($"❌ 堆疊: {ex.StackTrace}");
+                                    }
+
+                                    CurvedMeshBudget.ThrowIfExceeded();
+                                    i++;
+                                    _vm.RaiseProgress(i, relevantAnalyses.Count, totalTimer.Elapsed);
+                                    CurvedMeshBudget.Checkpoint($"生成：已完成 {i}/{relevantAnalyses.Count} 個宿主");
                                 }
-                                else
-                                {
-                                    System.Diagnostics.Debug.WriteLine($"⚠️ 未生成任何模板");
-                                }
+
+                                LogPerformanceStage("模板生成與參數", stageTimer, $"宿主 {relevantAnalyses.Count}、模板 {totalFormworkCount}");
+                                System.Diagnostics.Debug.WriteLine($"\n========== 總計生成 {totalFormworkCount} 個模板 ==========");
+
+                                if (_vm.Isolate && _vm.DrawFormwork && all.Count > 0)
+                                    doc.ActiveView.IsolateElementsTemporary(all);
+
+                                _currentHostId = null;
+                                CurvedMeshBudget.ThrowIfExceeded();
+                                CurvedMeshBudget.Checkpoint("提交：確認模板生成交易");
+                                if (t.Commit() != TransactionStatus.Committed)
+                                    throw new InvalidOperationException("模板生成交易未成功提交。");
                             }
-                            catch (Exception ex)
+                            catch
                             {
-                                System.Diagnostics.Debug.WriteLine($"❌ 生成元素 {element.Id} 模板失敗: {ex.Message}");
-                                System.Diagnostics.Debug.WriteLine($"❌ 堆疊: {ex.StackTrace}");
+                                if (!RollBackTransactionIfNeeded(t))
+                                    rollbackUncertain = true;
+                                throw;
                             }
-
-                            i++;
-                            _vm.RaiseProgress(i, relevantAnalyses.Count, sw.Elapsed);
-                            
-                            // 強制處理 UI 事件，讓進度視窗能更新
-                            System.Windows.Forms.Application.DoEvents();
                         }
-                        
-                        System.Diagnostics.Debug.WriteLine($"\n========== 總計生成 {totalFormworkCount} 個模板 ==========");
 
-                        if (_vm.Isolate && _vm.DrawFormwork && all.Count > 0)
-                            doc.ActiveView.IsolateElementsTemporary(all);
-
-                        t.Commit();
+                        CurvedMeshBudget.ThrowIfExceeded();
+                        CurvedMeshBudget.Checkpoint("提交：確認整輪模板計算");
+                        if (tg.Assimilate() != TransactionStatus.Committed)
+                            throw new InvalidOperationException("模板計算交易群組未成功提交。");
                     }
-                    tg.Assimilate();
+                    catch
+                    {
+                        if (!RollBackGroupIfNeeded(tg))
+                            rollbackUncertain = true;
+                        throw;
+                    }
                 }
 
-                // �� �����@��
-                FormworkEngine.EndRun();                       // �� �[�o��
-
-                sw.Stop();
-                _vm.RaiseRunFinished();
-                // 移除完成對話框 - 有效面積已正確產出在參數中
+                outcome = UiVm.FormworkRunOutcome.Completed;
+                outcomeDetail = "模板生成完成。";
                 System.Diagnostics.Debug.WriteLine("模板生成完成");
                 System.Diagnostics.Debug.WriteLine(FormworkEngine.GetSummary());
             }
+            catch (System.OperationCanceledException ex)
+            {
+                outcome = UiVm.FormworkRunOutcome.Cancelled;
+                outcomeDetail = string.IsNullOrWhiteSpace(ex.Message)
+                    ? "已取消。" + RollbackMessage(rollbackUncertain)
+                    : ex.Message + "。" + RollbackMessage(rollbackUncertain);
+                FormworkEngine.Debug.Log("模板生成取消 - {0}", outcomeDetail);
+            }
+            catch (CurvedMeshLimitException ex)
+            {
+                outcomeDetail = "已停止以保護記憶體。" + RollbackMessage(rollbackUncertain);
+                errorDialog = outcomeDetail + FormatHostContext() + "\n\n" + ex.Message;
+                FormworkEngine.Debug.Log("模板生成資源限制 - {0}", ex.Message);
+            }
             catch (Exception ex)
             {
-                _vm.RaiseRunFinished();
-                TaskDialog.Show("模板生成 - 錯誤", ex.ToString());
+                outcomeDetail = "模板生成失敗。" + RollbackMessage(rollbackUncertain);
+                errorDialog = outcomeDetail + FormatHostContext() + "\n\n" + ex;
             }
+            finally
+            {
+                if (engineRunStarted)
+                {
+                    try { FormworkEngine.EndRun(); }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"結束模板執行失敗: {ex.Message}"); }
+                }
+                else if (budgetRunStarted)
+                {
+                    GeometryExtractor.ClearGeometryCache();
+                }
+
+                if (budgetRunStarted)
+                    CurvedMeshBudget.EndRun();
+
+                totalTimer.Stop();
+                FormworkEngine.Debug.Log("執行總計 - {0} ms（{1}）", totalTimer.ElapsedMilliseconds, outcome);
+                _vm.RaiseRunFinished(outcome, outcomeDetail);
+            }
+
+            if (!string.IsNullOrWhiteSpace(errorDialog))
+                TaskDialog.Show("模板生成 - 錯誤", errorDialog);
         }
 
 
         public string GetName() => "HB_BIM_Tools.Run";
+
+        private static void LogPerformanceStage(string stage, Stopwatch timer, string detail = null)
+        {
+            timer.Stop();
+            FormworkEngine.Debug.Log(
+                "執行階段 - {0}: {1} ms{2}",
+                stage,
+                timer.ElapsedMilliseconds,
+                string.IsNullOrWhiteSpace(detail) ? string.Empty : $"（{detail}）");
+        }
+
+        private void RunCheckpoint(string stage, TimeSpan elapsed)
+        {
+            _vm.ThrowIfCancellationRequested(stage);
+            var displayStage = _currentHostId.HasValue
+                ? $"宿主 {_currentHostId.Value}｜{stage}"
+                : stage;
+            _vm.RaiseRunStage(displayStage, elapsed);
+
+            // Revit API 必須留在主執行緒；只在安全檢查點泵送 UI，不能硬中斷正在執行的原生 API。
+            System.Windows.Forms.Application.DoEvents();
+            _vm.ThrowIfCancellationRequested(stage);
+        }
+
+        private string FormatHostContext()
+            => _currentHostId.HasValue ? $"\n目前宿主 ID：{_currentHostId.Value}" : string.Empty;
+
+        private static string RollbackMessage(bool rollbackUncertain)
+            => rollbackUncertain
+                ? "未能確認所有模型變更均已回復，請立即檢查模型。"
+                : "本輪模型變更已回復。";
+
+        private static bool RollBackTransactionIfNeeded(Transaction transaction)
+        {
+            try
+            {
+                var status = transaction.GetStatus();
+                if (status == TransactionStatus.Started)
+                    return transaction.RollBack() == TransactionStatus.RolledBack;
+                return status == TransactionStatus.RolledBack ||
+                       status == TransactionStatus.Uninitialized ||
+                       status == TransactionStatus.Committed;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool RollBackGroupIfNeeded(TransactionGroup group)
+        {
+            try
+            {
+                var status = group.GetStatus();
+                if (status == TransactionStatus.Started)
+                    return group.RollBack() == TransactionStatus.RolledBack;
+                return status == TransactionStatus.RolledBack || status == TransactionStatus.Uninitialized;
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
         private static IList<Element> ExpandHostsForProcessing(Document doc, IList<Element> hosts)
         {
@@ -313,7 +511,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     return new List<ElementId>();
                 }
 
-                return ImprovedFormworkEngine.CreateFormworkFromElement(doc, element, 18.0);
+                return ImprovedFormworkEngine.CreateFormworkFromElement(doc, element, _vm.ThicknessMm);
             }
             catch (Exception ex)
             {
@@ -335,7 +533,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 {
                     if (face is PlanarFace planarFace && ShouldGenerateFormwork(planarFace, element, _vm))
                     {
-                        var formworkId = FormworkEngine.BuildFromFaceAccurate(doc, element, planarFace, 18.0, null);
+                        var formworkId = FormworkEngine.BuildFromFaceAccurate(doc, element, planarFace, _vm.ThicknessMm, null);
                         if (formworkId != ElementId.InvalidElementId)
                         {
                             formworkIds.Add(formworkId);
@@ -906,6 +1104,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // 面積太小的面不生成模板
                 if (area < 0.01) return false;
 
+                if (ElementCategorizer.IsStructuralBeam(element) && normal.Z > 0.7)
+                    return false;
+
                 if (normal.Z < -0.7 && !ShouldIncludeBottom(element, vm))
                     return false;
 
@@ -932,27 +1133,51 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
     // ---------- ViewModel + UI ----------
     public class UiVm
     {
+        public enum FormworkRunOutcome
+        {
+            Completed,
+            Cancelled,
+            Failed
+        }
+
         internal readonly Document _doc;
         private readonly UIDocument _uidoc;
+        private int _runState; // 0 = idle, 1 = queued, 2 = executing
+        private int _cancellationRequested;
+
+        // Keep open-document settings alive until DocumentClosed, even between tool windows.
+        private static readonly Dictionary<Document, SessionSettings> Sessions
+            = new Dictionary<Document, SessionSettings>();
+        private readonly SessionSettings _settings;
+
+        private sealed class SessionSettings
+        {
+            internal bool IncludeWall = true, IncludeColumn = true, IncludeBeam = true,
+                IncludeSlab = true, IncludeStairs = true;
+            internal bool DrawFormwork = true, Isolate = true, WriteExplanation = true,
+                ActiveViewOnly = false, IncludeStructuralBottom = true, IncludeFoundationBottom = true;
+            internal double ThicknessMm = 20.0, BottomOffsetMm = 30.0;
+            internal long WallMaterialId = -1, ColumnMaterialId = -1, BeamMaterialId = -1, SlabMaterialId = -1;
+        }
 
         // ���O
-        public bool IncludeWall = true;
-        public bool IncludeColumn = true;
-        public bool IncludeBeam = true;
-        public bool IncludeSlab = true;
-        public bool IncludeStairs = true;
+        public bool IncludeWall { get => _settings.IncludeWall; set => _settings.IncludeWall = value; }
+        public bool IncludeColumn { get => _settings.IncludeColumn; set => _settings.IncludeColumn = value; }
+        public bool IncludeBeam { get => _settings.IncludeBeam; set => _settings.IncludeBeam = value; }
+        public bool IncludeSlab { get => _settings.IncludeSlab; set => _settings.IncludeSlab = value; }
+        public bool IncludeStairs { get => _settings.IncludeStairs; set => _settings.IncludeStairs = value; }
 
         // �ﶵ
-        public bool DrawFormwork = true;
-        public bool Isolate = true;
-        public bool WriteExplanation = true;
-        public bool ActiveViewOnly = false;
-        public bool IncludeStructuralBottom = true;
-        public bool IncludeFoundationBottom = true;
+        public bool DrawFormwork { get => _settings.DrawFormwork; set => _settings.DrawFormwork = value; }
+        public bool Isolate { get => _settings.Isolate; set => _settings.Isolate = value; }
+        public bool WriteExplanation { get => _settings.WriteExplanation; set => _settings.WriteExplanation = value; }
+        public bool ActiveViewOnly { get => _settings.ActiveViewOnly; set => _settings.ActiveViewOnly = value; }
+        public bool IncludeStructuralBottom { get => _settings.IncludeStructuralBottom; set => _settings.IncludeStructuralBottom = value; }
+        public bool IncludeFoundationBottom { get => _settings.IncludeFoundationBottom; set => _settings.IncludeFoundationBottom = value; }
 
         // �Ѽ�
-        public double ThicknessMm = 20.0;
-        public double BottomOffsetMm = 30.0;
+        public double ThicknessMm { get => _settings.ThicknessMm; set => _settings.ThicknessMm = value; }
+        public double BottomOffsetMm { get => _settings.BottomOffsetMm; set => _settings.BottomOffsetMm = value; }
         public ElementId MaterialId = ElementId.InvalidElementId;
 
         // 分類材質設定
@@ -965,11 +1190,34 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         public event Action<int> SelectionChanged;
         public event Action<int> RunStarted;
         public event Action<int, int, TimeSpan> ProgressChanged;
-        public event Action RunFinished;
+        public event Action<string, TimeSpan> RunStageChanged;
+        public event Action<FormworkRunOutcome, string> RunFinished;
 
         private IList<ElementId> _pickedHostIds = new List<ElementId>();
 
-        public UiVm(Document doc, UIDocument uidoc) { _doc = doc; _uidoc = uidoc; }
+        public UiVm(Document doc, UIDocument uidoc)
+        {
+            _doc = doc;
+            _uidoc = uidoc;
+            ClearClosedSessions();
+            if (!Sessions.TryGetValue(doc, out var settings))
+            {
+                settings = new SessionSettings();
+                Sessions.Add(doc, settings);
+            }
+            _settings = settings;
+        }
+
+        internal static void ClearClosedSessions()
+        {
+            foreach (var doc in Sessions.Keys.Where(doc => !doc.IsValidObject).ToList())
+                Sessions.Remove(doc);
+        }
+
+        internal bool IsActiveDocument(UIApplication app)
+            => _doc.IsValidObject && _doc.Equals(app.ActiveUIDocument?.Document);
+
+        internal bool IsRunPending => System.Threading.Volatile.Read(ref _runState) != 0;
 
         public void SetPicked(IList<ElementId> ids)
         {
@@ -1012,7 +1260,43 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
         internal void RaiseRunStarted(int total) => RunStarted?.Invoke(total);
         internal void RaiseProgress(int c, int t, TimeSpan e) => ProgressChanged?.Invoke(c, t, e);
-        internal void RaiseRunFinished() => RunFinished?.Invoke();
+        internal void RaiseRunStage(string stage, TimeSpan elapsed) => RunStageChanged?.Invoke(stage, elapsed);
+
+        internal bool TryQueueRun()
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _runState, 1, 0) != 0)
+                return false;
+            System.Threading.Volatile.Write(ref _cancellationRequested, 0);
+            return true;
+        }
+
+        internal bool TryStartRun()
+            => System.Threading.Interlocked.CompareExchange(ref _runState, 2, 1) == 1;
+
+        internal void CancelQueuedRun()
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _runState, 0, 1) == 1)
+                System.Threading.Volatile.Write(ref _cancellationRequested, 0);
+        }
+
+        internal void RequestCancellation()
+        {
+            if (System.Threading.Volatile.Read(ref _runState) != 0)
+                System.Threading.Volatile.Write(ref _cancellationRequested, 1);
+        }
+
+        internal void ThrowIfCancellationRequested(string stage)
+        {
+            if (System.Threading.Volatile.Read(ref _cancellationRequested) != 0)
+                throw new System.OperationCanceledException($"已在安全檢查點取消（{stage}）");
+        }
+
+        internal void RaiseRunFinished(FormworkRunOutcome outcome, string detail)
+        {
+            System.Threading.Volatile.Write(ref _cancellationRequested, 0);
+            System.Threading.Volatile.Write(ref _runState, 0);
+            RunFinished?.Invoke(outcome, detail);
+        }
 
         // --- 主視窗 ---
         public class UiMain : WpfWindow
@@ -1024,309 +1308,275 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             private WpfLabel _lblCount;
             private ProgressWindow _progressWindow;
 
+            internal Document SourceDocument => _vm._doc;
+            internal bool IsRunPending => _vm.IsRunPending;
+
             public UiMain(UiVm vm, ExternalEvent pickEvt, ExternalEvent runEvt)
             {
                 _vm = vm; _pickEvt = pickEvt; _runEvt = runEvt;
-
-                Title = "模板（Formwork）";
-                Width = 480; Height = 780;
-                WindowStyle = System.Windows.WindowStyle.ToolWindow;
+                Title = "模板生成";
+                Width = 540; Height = 690;
+                MinWidth = 460; MinHeight = 440;
+                MaxHeight = System.Windows.SystemParameters.WorkArea.Height;
                 WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen;
                 FontFamily = new System.Windows.Media.FontFamily("Microsoft JhengHei UI");
-                FontSize = 12;
-                var g = new WpfGrid 
-                { 
-                    Margin = new WpfThickness(15),
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(250, 250, 250))
-                };
-                Content = g;
-                Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(240, 240, 240));
-                // 前4行自動高度（移除進度條區域）
-                for (int i = 0; i < 4; ++i)
-                    g.RowDefinitions.Add(new WpfRowDef { Height = System.Windows.GridLength.Auto });
-                // 內容區域使用剩餘空間
-                g.RowDefinitions.Add(new WpfRowDef { Height = new System.Windows.GridLength(1, System.Windows.GridUnitType.Star) });
-                // 最後一行（按鈕行）固定高度
-                g.RowDefinitions.Add(new WpfRowDef { Height = new System.Windows.GridLength(60) });
+                FontSize = 13;
+                UseLayoutRounding = true;
+                Background = Brush("#FFFFFF");
+                Foreground = Brush("#20262E");
 
-                // 選取模型
-                var gbPick = new WpfGroupBox 
-                { 
-                    Header = "選取模型", 
-                    Margin = new WpfThickness(0, 0, 0, 8),
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.White),
-                    BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 200, 200)),
-                    BorderThickness = new WpfThickness(1)
+                var inputStyle = new System.Windows.Style(typeof(WpfTextBox));
+                inputStyle.Setters.Add(new System.Windows.Setter(WpfTextBox.PaddingProperty, new WpfThickness(9, 6, 9, 6)));
+                inputStyle.Setters.Add(new System.Windows.Setter(WpfTextBox.MinHeightProperty, 34.0));
+                inputStyle.Setters.Add(new System.Windows.Setter(WpfTextBox.BorderBrushProperty, Brush("#C7CED6")));
+                Resources.Add(typeof(WpfTextBox), inputStyle);
+                var comboStyle = new System.Windows.Style(typeof(WpfComboBox));
+                comboStyle.Setters.Add(new System.Windows.Setter(WpfComboBox.MinHeightProperty, 34.0));
+                comboStyle.Setters.Add(new System.Windows.Setter(WpfComboBox.PaddingProperty, new WpfThickness(8, 5, 8, 5)));
+                comboStyle.Setters.Add(new System.Windows.Setter(WpfComboBox.HorizontalContentAlignmentProperty, System.Windows.HorizontalAlignment.Stretch));
+                Resources.Add(typeof(WpfComboBox), comboStyle);
+
+                var root = new WpfGrid { Background = Brush("#FFFFFF") };
+                root.RowDefinitions.Add(new WpfRowDef { Height = System.Windows.GridLength.Auto });
+                root.RowDefinitions.Add(new WpfRowDef { Height = new System.Windows.GridLength(1, System.Windows.GridUnitType.Star) });
+                root.RowDefinitions.Add(new WpfRowDef { Height = System.Windows.GridLength.Auto });
+                Content = root;
+
+                var header = new WpfStackPanel { Margin = new WpfThickness(24, 16, 24, 12) };
+                header.Children.Add(new WpfTextBlock { Text = "模板生成", FontSize = 22, FontWeight = WpfFontWeights.SemiBold });
+                header.Children.Add(new WpfTextBlock
+                {
+                    Text = _vm._doc.Title, ToolTip = _vm._doc.Title,
+                    Foreground = Brush("#65717E"), Margin = new WpfThickness(0, 5, 0, 0),
+                    TextTrimming = System.Windows.TextTrimming.CharacterEllipsis
+                });
+                root.Children.Add(header);
+
+                var body = new WpfStackPanel { Margin = new WpfThickness(24, 0, 24, 16) };
+                var scroll = new System.Windows.Controls.ScrollViewer
+                {
+                    Content = body, VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled
                 };
-                var pickRow = new WpfStackPanel { Orientation = WpfOrientation.Horizontal, Margin = new WpfThickness(8) };
-                var btnPick = new WpfButton 
-                { 
-                    Content = "選取模型", 
-                    Width = 110, 
-                    Height = 32,
-                    ToolTip = "在模型中選取要處理的結構元素",
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(240, 248, 255)),
-                    BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 130, 180))
-                };
+                root.Children.Add(scroll); WpfGrid.SetRow(scroll, 1);
+
+                var pickRow = new WpfGrid { Margin = new WpfThickness(0, 0, 0, 2) };
+                pickRow.ColumnDefinitions.Add(new WpfColumnDef { Width = System.Windows.GridLength.Auto });
+                pickRow.ColumnDefinitions.Add(new WpfColumnDef());
+                var btnPick = ActionButton("選取模型", false);
+                btnPick.ToolTip = "在目前專案選取要處理的元素";
                 btnPick.Click += (s, e) => { try { _pickEvt.Raise(); } catch { } };
-                _lblCount = new WpfLabel { Content = "已選取 0 個模型", Margin = new WpfThickness(12, 0, 0, 0), FontWeight = WpfFontWeights.Bold, Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 130, 180)) };
+                _lblCount = new WpfLabel
+                {
+                    Content = "已選取 0 個模型", Foreground = Brush("#65717E"),
+                    Margin = new WpfThickness(12, 0, 0, 0), VerticalAlignment = System.Windows.VerticalAlignment.Center
+                };
                 pickRow.Children.Add(btnPick);
-                pickRow.Children.Add(_lblCount);
-                gbPick.Content = pickRow;
-                g.Children.Add(gbPick);
-                WpfGrid.SetRow(gbPick, 0);
+                pickRow.Children.Add(_lblCount); WpfGrid.SetColumn(_lblCount, 1);
+                body.Children.Add(pickRow);
 
                 _vm.SelectionChanged += n => Dispatcher.Invoke(() => _lblCount.Content = $"已選取 {n} 個模型");
-
-                // 設定進度事件處理
-                _vm.RunStarted += total => Dispatcher.Invoke(() =>
+                _vm.RunStarted += total => Dispatcher.Invoke(() => _progressWindow?.UpdateProgress(0, total, TimeSpan.Zero));
+                _vm.ProgressChanged += (curr, total, elapsed) => Dispatcher.Invoke(() => _progressWindow?.UpdateProgress(curr, total, elapsed));
+                _vm.RunStageChanged += (stage, elapsed) => Dispatcher.Invoke(() => _progressWindow?.UpdateStage(stage, elapsed));
+                _vm.RunFinished += (outcome, detail) => Dispatcher.Invoke(() =>
                 {
-                    if (_progressWindow != null)
-                    {
-                        _progressWindow.UpdateProgress(0, total, TimeSpan.Zero);
-                    }
+                    _progressWindow?.Finish(outcome, detail);
+                    Show();
+                    WindowState = System.Windows.WindowState.Normal;
+                    Activate();
                 });
 
-                _vm.ProgressChanged += (curr, total, elapsed) => Dispatcher.Invoke(() =>
-                {
-                    if (_progressWindow != null)
-                    {
-                        _progressWindow.UpdateProgress(curr, total, elapsed);
-                    }
-                });
+                var categories = new System.Windows.Controls.WrapPanel { ItemWidth = 90, ItemHeight = 28 };
+                AddCheck(categories, "牆", v => _vm.IncludeWall = v, _vm.IncludeWall);
+                AddCheck(categories, "結構柱", v => _vm.IncludeColumn = v, _vm.IncludeColumn);
+                AddCheck(categories, "結構梁", v => _vm.IncludeBeam = v, _vm.IncludeBeam);
+                AddCheck(categories, "樓板", v => _vm.IncludeSlab = v, _vm.IncludeSlab);
+                AddCheck(categories, "樓梯", v => _vm.IncludeStairs = v, _vm.IncludeStairs);
+                AddSection(body, "包含類別", categories);
 
-                _vm.RunFinished += () => Dispatcher.Invoke(() =>
-                {
-                    if (_progressWindow != null)
-                    {
-                        _progressWindow.Complete();
-                    }
-                    
-                    // 進度完成後重新顯示主介面
-                    System.Threading.Tasks.Task.Delay(3000).ContinueWith(_ => Dispatcher.Invoke(() =>
-                    {
-                        this.Show();
-                        this.WindowState = System.Windows.WindowState.Normal;
-                        this.Activate();
-                    }));
-                });
+                var options = new System.Windows.Controls.WrapPanel { ItemWidth = 224, ItemHeight = 30 };
+                AddCheck(options, "繪製模板", v => _vm.DrawFormwork = v, _vm.DrawFormwork);
+                AddCheck(options, "隔離模板", v => _vm.Isolate = v, _vm.Isolate);
+                AddCheck(options, "寫入解說參數", v => _vm.WriteExplanation = v, _vm.WriteExplanation);
+                AddCheck(options, "僅目前視圖", v => _vm.ActiveViewOnly = v, _vm.ActiveViewOnly);
+                AddCheck(options, "結構產出底模", v => _vm.IncludeStructuralBottom = v, _vm.IncludeStructuralBottom);
+                AddCheck(options, "基礎產出底模", v => _vm.IncludeFoundationBottom = v, _vm.IncludeFoundationBottom);
+                AddSection(body, "處理選項", options);
 
-                // 包含類別
-                var gbCat = new WpfGroupBox 
-                { 
-                    Header = "包含類別", 
-                    Margin = new WpfThickness(0, 0, 0, 8),
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.White),
-                    BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 200, 200)),
-                    BorderThickness = new WpfThickness(1)
-                };
-                var cat = new WpfStackPanel { Orientation = WpfOrientation.Vertical, Margin = new WpfThickness(8) };
-                AddCheck(cat, "牆", v => _vm.IncludeWall = v, _vm.IncludeWall);
-                AddCheck(cat, "結構柱", v => _vm.IncludeColumn = v, _vm.IncludeColumn);
-                AddCheck(cat, "結構梁", v => _vm.IncludeBeam = v, _vm.IncludeBeam);
-                AddCheck(cat, "樓板 / 地板", v => _vm.IncludeSlab = v, _vm.IncludeSlab);
-                AddCheck(cat, "樓梯", v => _vm.IncludeStairs = v, _vm.IncludeStairs);
-                gbCat.Content = cat;
-                g.Children.Add(gbCat);
-                WpfGrid.SetRow(gbCat, 1);
-
-                // 處理選項
-                var gbOpt = new WpfGroupBox 
-                { 
-                    Header = "處理選項", 
-                    Margin = new WpfThickness(0, 0, 0, 8),
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.White),
-                    BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 200, 200)),
-                    BorderThickness = new WpfThickness(1)
-                };
-                var opt = new WpfStackPanel { Orientation = WpfOrientation.Vertical, Margin = new WpfThickness(8) };
-                AddCheck(opt, "繪製模板", v => _vm.DrawFormwork = v, _vm.DrawFormwork);
-                AddCheck(opt, "隔離模板（僅現時檢視）", v => _vm.Isolate = v, _vm.Isolate);
-                AddCheck(opt, "寫入解說參數", v => _vm.WriteExplanation = v, _vm.WriteExplanation);
-                AddCheck(opt, "僅目前視圖", v => _vm.ActiveViewOnly = v, _vm.ActiveViewOnly);
-                AddCheck(opt, "結構產出底模", v => _vm.IncludeStructuralBottom = v, _vm.IncludeStructuralBottom);
-                AddCheck(opt, "基礎產出底模", v => _vm.IncludeFoundationBottom = v, _vm.IncludeFoundationBottom);
-                gbOpt.Content = opt;
-                g.Children.Add(gbOpt);
-                WpfGrid.SetRow(gbOpt, 2);
-
-                // 參數設定
-                var gbParam = new WpfGroupBox 
-                { 
-                    Header = "參數設定", 
-                    Margin = new WpfThickness(0, 0, 0, 8),
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.White),
-                    BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 200, 200)),
-                    BorderThickness = new WpfThickness(1)
-                };
-                var pGrid = new WpfGrid { Margin = new WpfThickness(8) };
-                pGrid.ColumnDefinitions.Add(new WpfColumnDef { Width = new System.Windows.GridLength(135) });
-                pGrid.ColumnDefinitions.Add(new WpfColumnDef());
-                var lb1 = new WpfLabel { Content = "模板厚度 (mm)：", VerticalAlignment = System.Windows.VerticalAlignment.Center };
+                var parameters = TwoColumnGrid(1);
                 var tbThk = new WpfTextBox { Text = _vm.ThicknessMm.ToString(CultureInfo.InvariantCulture) };
-                var lb2 = new WpfLabel { Content = "底模下偏 (mm)：", VerticalAlignment = System.Windows.VerticalAlignment.Center };
                 var tbOff = new WpfTextBox { Text = _vm.BottomOffsetMm.ToString(CultureInfo.InvariantCulture) };
-                pGrid.Children.Add(lb1); WpfGrid.SetRow(lb1, 0); WpfGrid.SetColumn(lb1, 0);
-                pGrid.Children.Add(tbThk); WpfGrid.SetRow(tbThk, 0); WpfGrid.SetColumn(tbThk, 1);
-                pGrid.RowDefinitions.Add(new WpfRowDef { Height = System.Windows.GridLength.Auto });
-                pGrid.RowDefinitions.Add(new WpfRowDef { Height = System.Windows.GridLength.Auto });
-                pGrid.Children.Add(lb2); WpfGrid.SetRow(lb2, 1); WpfGrid.SetColumn(lb2, 0);
-                pGrid.Children.Add(tbOff); WpfGrid.SetRow(tbOff, 1); WpfGrid.SetColumn(tbOff, 1);
-                gbParam.Content = pGrid;
-                g.Children.Add(gbParam);
-                WpfGrid.SetRow(gbParam, 3);
+                tbThk.TextChanged += (s, e) => RememberNumber(tbThk.Text, 0.1, v => _vm.ThicknessMm = v);
+                tbOff.TextChanged += (s, e) => RememberNumber(tbOff.Text, 0.0, v => _vm.BottomOffsetMm = v);
+                AddField(parameters, "模板厚度 (mm)", tbThk, 0, 0);
+                AddField(parameters, "底模下偏 (mm)", tbOff, 0, 1);
+                AddSection(body, "尺寸", parameters);
 
-                // 模板材質設定（分類）
-                var gbMat = new WpfGroupBox 
-                { 
-                    Header = "模板材質設定", 
-                    Margin = new WpfThickness(0, 0, 0, 8),
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.White),
-                    BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 200, 200)),
-                    BorderThickness = new WpfThickness(1)
-                };
-                var matGrid = new WpfGrid { Margin = new WpfThickness(8) };
-                matGrid.ColumnDefinitions.Add(new WpfColumnDef { Width = new System.Windows.GridLength(80) });
-                matGrid.ColumnDefinitions.Add(new WpfColumnDef());
-                
+                var materials = TwoColumnGrid(2);
                 var mats = new FilteredElementCollector(_vm._doc)
                     .OfClass(typeof(Material)).Cast<Material>().OrderBy(m => m.Name).ToList();
-                var matItems = new List<ComboItem> { new ComboItem("＜不指定＞", ElementId.InvalidElementId) };
+                var matItems = new List<ComboItem> { new ComboItem("不指定", ElementId.InvalidElementId) };
                 foreach (var m in mats) matItems.Add(new ComboItem(m.Name, m.Id));
-
-                // 牆模板材質
-                var lblWall = new WpfLabel { Content = "牆：", VerticalAlignment = System.Windows.VerticalAlignment.Center };
-                var cmbWall = new WpfComboBox();
-                foreach (var item in matItems) cmbWall.Items.Add(item);
-                cmbWall.SelectedIndex = 0;
-                cmbWall.SelectionChanged += (s, e) =>
+                AddField(materials, "牆", MaterialCombo(matItems, _vm._settings.WallMaterialId, id =>
                 {
-                    var item = cmbWall.SelectedItem as ComboItem;
-                    _vm.WallMaterialId = item?.Id ?? ElementId.InvalidElementId;
-                };
-
-                // 柱模板材質
-                var lblColumn = new WpfLabel { Content = "柱：", VerticalAlignment = System.Windows.VerticalAlignment.Center };
-                var cmbColumn = new WpfComboBox();
-                foreach (var item in matItems) cmbColumn.Items.Add(item);
-                cmbColumn.SelectedIndex = 0;
-                cmbColumn.SelectionChanged += (s, e) =>
+                    _vm.WallMaterialId = id; _vm._settings.WallMaterialId = id.GetIdValue();
+                }), 0, 0);
+                AddField(materials, "柱", MaterialCombo(matItems, _vm._settings.ColumnMaterialId, id =>
                 {
-                    var item = cmbColumn.SelectedItem as ComboItem;
-                    _vm.ColumnMaterialId = item?.Id ?? ElementId.InvalidElementId;
-                };
-
-                // 梁模板材質
-                var lblBeam = new WpfLabel { Content = "梁：", VerticalAlignment = System.Windows.VerticalAlignment.Center };
-                var cmbBeam = new WpfComboBox();
-                foreach (var item in matItems) cmbBeam.Items.Add(item);
-                cmbBeam.SelectedIndex = 0;
-                cmbBeam.SelectionChanged += (s, e) =>
+                    _vm.ColumnMaterialId = id; _vm._settings.ColumnMaterialId = id.GetIdValue();
+                }), 0, 1);
+                AddField(materials, "梁", MaterialCombo(matItems, _vm._settings.BeamMaterialId, id =>
                 {
-                    var item = cmbBeam.SelectedItem as ComboItem;
-                    _vm.BeamMaterialId = item?.Id ?? ElementId.InvalidElementId;
-                };
-
-                // 板模板材質
-                var lblSlab = new WpfLabel { Content = "板：", VerticalAlignment = System.Windows.VerticalAlignment.Center };
-                var cmbSlab = new WpfComboBox();
-                foreach (var item in matItems) cmbSlab.Items.Add(item);
-                cmbSlab.SelectedIndex = 0;
-                cmbSlab.SelectionChanged += (s, e) =>
+                    _vm.BeamMaterialId = id; _vm._settings.BeamMaterialId = id.GetIdValue();
+                }), 1, 0);
+                AddField(materials, "板", MaterialCombo(matItems, _vm._settings.SlabMaterialId, id =>
                 {
-                    var item = cmbSlab.SelectedItem as ComboItem;
-                    _vm.SlabMaterialId = item?.Id ?? ElementId.InvalidElementId;
-                };
+                    _vm.SlabMaterialId = id; _vm._settings.SlabMaterialId = id.GetIdValue();
+                }), 1, 1);
+                AddSection(body, "模板材質", materials);
 
-                // 佈局
-                for (int i = 0; i < 4; i++)
+                var footer = new System.Windows.Controls.Border
                 {
-                    matGrid.RowDefinitions.Add(new WpfRowDef { Height = System.Windows.GridLength.Auto });
-                }
-
-                matGrid.Children.Add(lblWall); WpfGrid.SetRow(lblWall, 0); WpfGrid.SetColumn(lblWall, 0);
-                matGrid.Children.Add(cmbWall); WpfGrid.SetRow(cmbWall, 0); WpfGrid.SetColumn(cmbWall, 1);
-                matGrid.Children.Add(lblColumn); WpfGrid.SetRow(lblColumn, 1); WpfGrid.SetColumn(lblColumn, 0);
-                matGrid.Children.Add(cmbColumn); WpfGrid.SetRow(cmbColumn, 1); WpfGrid.SetColumn(cmbColumn, 1);
-                matGrid.Children.Add(lblBeam); WpfGrid.SetRow(lblBeam, 2); WpfGrid.SetColumn(lblBeam, 0);
-                matGrid.Children.Add(cmbBeam); WpfGrid.SetRow(cmbBeam, 2); WpfGrid.SetColumn(cmbBeam, 1);
-                matGrid.Children.Add(lblSlab); WpfGrid.SetRow(lblSlab, 3); WpfGrid.SetColumn(lblSlab, 0);
-                matGrid.Children.Add(cmbSlab); WpfGrid.SetRow(cmbSlab, 3); WpfGrid.SetColumn(cmbSlab, 1);
-
-                gbMat.Content = matGrid;
-                g.Children.Add(gbMat);
-                WpfGrid.SetRow(gbMat, 4);
-
-                // 進度條將在獨立視窗顯示，這裡不需要了
-
-                // 操作列 - 固定在右下角
-                var btnRow = new WpfStackPanel 
-                { 
-                    Orientation = WpfOrientation.Horizontal, 
-                    HorizontalAlignment = WpfHorizontal.Right,
-                    VerticalAlignment = System.Windows.VerticalAlignment.Bottom,
-                    Margin = new WpfThickness(0, 10, 10, 10) 
+                    BorderBrush = Brush("#E3E7EB"), BorderThickness = new WpfThickness(0, 1, 0, 0),
+                    Background = Brush("#F7F8FA"), Padding = new WpfThickness(24, 14, 24, 14)
                 };
-                var btnRun = new WpfButton 
-                { 
-                    Content = "開始", 
-                    Width = 120, 
-                    Height = 36, 
-                    Margin = new WpfThickness(0, 0, 12, 0), 
-                    IsDefault = true,
-                    FontSize = 14,
-                    FontWeight = WpfFontWeights.Bold,
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(34, 139, 34)),
-                    Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.White),
-                    BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 100, 0))
-                };
-                var btnClose = new WpfButton 
-                { 
-                    Content = "關閉", 
-                    Width = 120, 
-                    Height = 36, 
-                    IsCancel = true,
-                    FontSize = 14,
-                    Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 220, 220)),
-                    Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(64, 64, 64)),
-                    BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 160, 160))
-                };
+                var buttons = new WpfStackPanel { Orientation = WpfOrientation.Horizontal, HorizontalAlignment = WpfHorizontal.Right };
+                var btnClose = ActionButton("關閉", false);
+                btnClose.IsCancel = true;
+                btnClose.Margin = new WpfThickness(0, 0, 10, 0);
+                btnClose.Click += (s, e) => Close();
+                var btnRun = ActionButton("開始生成", true);
+                btnRun.IsDefault = true;
                 btnRun.Click += (s, e) =>
                 {
-                    double tmm = ParseOr(_vm.ThicknessMm, tbThk.Text, 20);
-                    double off = ParseOr(_vm.BottomOffsetMm, tbOff.Text, 30);
-                    _vm.ThicknessMm = Math.Max(0.1, tmm);
-                    _vm.BottomOffsetMm = Math.Max(0.0, off);
-                    
-                    // 隱藏主介面，只顯示進度視窗
-                    this.Hide();
+                    if (!_vm.TryQueueRun())
+                    {
+                        System.Windows.MessageBox.Show(this, "模板生成已在排程或執行中。", "模板生成",
+                            System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+                        return;
+                    }
+                    _vm.ThicknessMm = Math.Max(0.1, ParseOr(_vm.ThicknessMm, tbThk.Text));
+                    _vm.BottomOffsetMm = Math.Max(0.0, ParseOr(_vm.BottomOffsetMm, tbOff.Text));
+                    tbThk.Text = _vm.ThicknessMm.ToString(CultureInfo.InvariantCulture);
+                    tbOff.Text = _vm.BottomOffsetMm.ToString(CultureInfo.InvariantCulture);
+                    Hide();
                     ShowProgressWindow();
-                    
-                    try { _runEvt.Raise(); } catch { }
+                    try
+                    {
+                        if (_runEvt.Raise() != ExternalEventRequest.Accepted)
+                        {
+                            _vm.CancelQueuedRun();
+                            _progressWindow?.Finish(FormworkRunOutcome.Failed, "Revit 未接受執行要求，請稍後再試。");
+                            Show(); Activate();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _vm.CancelQueuedRun();
+                        _progressWindow?.Finish(FormworkRunOutcome.Failed, "無法排程模板生成：" + ex.Message);
+                        Show(); Activate();
+                    }
                 };
-                btnClose.Click += (s, e) => Close();
-                btnRow.Children.Add(btnRun); btnRow.Children.Add(btnClose);
-                g.Children.Add(btnRow);
-                WpfGrid.SetRow(btnRow, 5); // 調整到最後一行
+                buttons.Children.Add(btnClose); buttons.Children.Add(btnRun);
+                footer.Child = buttons;
+                root.Children.Add(footer); WpfGrid.SetRow(footer, 2);
             }
 
+            private static System.Windows.Media.Brush Brush(string color)
+                => (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString(color);
+
+            private static WpfButton ActionButton(string text, bool primary)
+                => new WpfButton
+                {
+                    Content = text, MinWidth = 100, Height = 36, Padding = new WpfThickness(16, 0, 16, 0),
+                    FontWeight = primary ? WpfFontWeights.SemiBold : WpfFontWeights.Normal,
+                    Background = Brush(primary ? "#087F8C" : "#FFFFFF"),
+                    Foreground = Brush(primary ? "#FFFFFF" : "#303B47"),
+                    BorderBrush = Brush(primary ? "#087F8C" : "#C7CED6"),
+                    BorderThickness = new WpfThickness(1)
+                };
+
+            private static void AddSection(WpfPanel panel, string title, System.Windows.UIElement content)
+            {
+                panel.Children.Add(new WpfTextBlock
+                {
+                    Text = title, FontSize = 13, FontWeight = WpfFontWeights.SemiBold,
+                    Margin = new WpfThickness(0, 14, 0, 7), Foreground = Brush("#303B47")
+                });
+                panel.Children.Add(content);
+            }
+
+            private static WpfGrid TwoColumnGrid(int rows)
+            {
+                var grid = new WpfGrid();
+                grid.ColumnDefinitions.Add(new WpfColumnDef());
+                grid.ColumnDefinitions.Add(new WpfColumnDef());
+                for (int i = 0; i < rows; i++) grid.RowDefinitions.Add(new WpfRowDef { Height = System.Windows.GridLength.Auto });
+                return grid;
+            }
+
+            private static void AddField(WpfGrid grid, string label, System.Windows.FrameworkElement input, int row, int column)
+            {
+                var field = new WpfStackPanel { Margin = new WpfThickness(column == 0 ? 0 : 8, row > 0 ? 10 : 0, column == 0 ? 8 : 0, 0) };
+                field.Children.Add(new WpfTextBlock { Text = label, Foreground = Brush("#65717E"), Margin = new WpfThickness(0, 0, 0, 5) });
+                field.Children.Add(input);
+                grid.Children.Add(field); WpfGrid.SetRow(field, row); WpfGrid.SetColumn(field, column);
+            }
+
+            private static WpfComboBox MaterialCombo(IList<ComboItem> items, long savedId, Action<ElementId> set)
+            {
+                var combo = new WpfComboBox { ItemsSource = items, MinWidth = 0 };
+                // Material IDs are resolved against the current document's fresh material list.
+                combo.SelectedItem = items.FirstOrDefault(item => item.Id.GetIdValue() == savedId) ?? items[0];
+                set(((ComboItem)combo.SelectedItem).Id);
+                combo.ToolTip = combo.SelectedItem.ToString();
+                combo.SelectionChanged += (s, e) =>
+                {
+                    var item = combo.SelectedItem as ComboItem;
+                    set(item?.Id ?? ElementId.InvalidElementId);
+                    combo.ToolTip = item?.Name;
+                };
+                var template = new System.Windows.DataTemplate();
+                var text = new System.Windows.FrameworkElementFactory(typeof(WpfTextBlock));
+                text.SetBinding(WpfTextBlock.TextProperty, new System.Windows.Data.Binding());
+                text.SetValue(WpfTextBlock.TextTrimmingProperty, System.Windows.TextTrimming.CharacterEllipsis);
+                template.VisualTree = text;
+                combo.ItemTemplate = template;
+                return combo;
+            }
             private void ShowProgressWindow()
             {
                 if (_progressWindow != null)
                 {
-                    _progressWindow.Close();
+                    _progressWindow.ForceClose();
                     _progressWindow = null;
                 }
 
                 _progressWindow = new ProgressWindow();
                 _progressWindow.Owner = this;
+                _progressWindow.CancelRequested += _vm.RequestCancellation;
+                var shownWindow = _progressWindow;
+                _progressWindow.Closed += (s, e) =>
+                {
+                    if (ReferenceEquals(_progressWindow, shownWindow))
+                        _progressWindow = null;
+                };
                 _progressWindow.Show();
             }
 
-            private static double ParseOr(double def, string s, double fallback)
+            private static double ParseOr(double def, string s)
             {
                 double v;
-                return double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out v) ? v : fallback;
+                return double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out v)
+                    && !double.IsNaN(v) && !double.IsInfinity(v) ? v : def;
+            }
+
+            private static void RememberNumber(string text, double minimum, Action<double> set)
+            {
+                if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out double value)
+                    && !double.IsNaN(value) && !double.IsInfinity(value) && value >= minimum)
+                    set(value);
             }
 
             private static void AddCheck(WpfPanel p, string text, Action<bool> set, bool init)
@@ -1374,21 +1624,27 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         private WpfProgressBar _progressBar;
         private WpfLabel _lblProgress;
         private WpfLabel _lblTime;
-        private WpfLabel _lblStatus;
+        private WpfTextBlock _lblStatus;
         private WpfButton _btnCancel;
         private DateTime _startTime;
+        private bool _cancelRequested;
+        private bool _finished;
+
+        public event Action CancelRequested;
 
         public ProgressWindow()
         {
             InitializeWindow();
             _startTime = DateTime.Now;
+            Closing += OnClosing;
         }
 
         private void InitializeWindow()
         {
             Title = "模板生成進度";
-            Width = 400;
-            Height = 200;
+            Width = 480;
+            Height = 320;
+            MaxHeight = System.Windows.SystemParameters.WorkArea.Height - 40;
             WindowStyle = System.Windows.WindowStyle.ToolWindow;
             WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner;
             ResizeMode = System.Windows.ResizeMode.NoResize;
@@ -1406,11 +1662,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             grid.RowDefinitions.Add(new WpfRowDef { Height = System.Windows.GridLength.Auto });
 
             // 狀態標籤
-            _lblStatus = new WpfLabel 
+            _lblStatus = new WpfTextBlock
             { 
-                Content = "正在準備...", 
+                Text = "正在準備...",
                 FontWeight = WpfFontWeights.Bold,
-                Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 130, 180))
+                Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 130, 180)),
+                TextWrapping = System.Windows.TextWrapping.Wrap,
+                TextTrimming = System.Windows.TextTrimming.CharacterEllipsis,
+                MaxHeight = 72,
+                Margin = new WpfThickness(5, 4, 5, 8),
+                ToolTip = "Revit 原生 API 的單次運算無法強制中斷；取消會在下一個安全檢查點生效。"
             };
             grid.Children.Add(_lblStatus);
             WpfGrid.SetRow(_lblStatus, 0);
@@ -1457,7 +1718,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 220, 220)),
                 BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 160, 160))
             };
-            _btnCancel.Click += (s, e) => Close();
+            _btnCancel.Click += (s, e) =>
+            {
+                if (_finished) Close();
+                else RequestCancellation();
+            };
             grid.Children.Add(_btnCancel);
             WpfGrid.SetRow(_btnCancel, 6);
 
@@ -1466,67 +1731,109 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
         public void UpdateProgress(int current, int total, TimeSpan elapsed)
         {
-            // 使用 BeginInvoke 代替 Invoke，避免阻塞
-            Dispatcher.BeginInvoke(new Action(() =>
+            if (!Dispatcher.CheckAccess())
             {
-                if (total > 0)
-                {
-                    _progressBar.IsIndeterminate = false;
-                    _progressBar.Value = (double)current / total * 100;
-                    _lblProgress.Content = $"{current} / {total}";
-                    _lblStatus.Content = $"正在處理第 {current} 個元素...";
-                    
-                    // 計算預計剩餘時間
-                    if (current > 0 && elapsed.TotalSeconds > 0)
-                    {
-                        double avgTimePerItem = elapsed.TotalSeconds / current;
-                        int remaining = total - current;
-                        double estimatedRemainingSeconds = avgTimePerItem * remaining;
-                        var estimatedRemaining = TimeSpan.FromSeconds(estimatedRemainingSeconds);
-                        
-                        var remainingString = estimatedRemaining.TotalHours >= 1 
-                            ? estimatedRemaining.ToString(@"hh\:mm\:ss") 
-                            : estimatedRemaining.ToString(@"mm\:ss");
-                        
-                        _lblStatus.Content = $"正在處理第 {current} 個元素... (預計剩餘: {remainingString})";
-                    }
-                }
-                else
-                {
-                    _progressBar.IsIndeterminate = true;
-                    _lblProgress.Content = "準備中...";
-                    _lblStatus.Content = "正在初始化...";
-                }
+                Dispatcher.BeginInvoke(new Action(() => UpdateProgress(current, total, elapsed)));
+                return;
+            }
 
-                var timeString = elapsed.TotalHours >= 1 
-                    ? elapsed.ToString(@"hh\:mm\:ss") 
-                    : elapsed.ToString(@"mm\:ss");
-                _lblTime.Content = $"用時: {timeString}";
-                
-                // 強制更新 UI
-                UpdateLayout();
-            }), System.Windows.Threading.DispatcherPriority.Background);
+            if (total > 0)
+            {
+                _progressBar.IsIndeterminate = false;
+                _progressBar.Value = (double)current / total * 100;
+                _lblProgress.Content = $"{current} / {total}";
+            }
+            else
+            {
+                _progressBar.IsIndeterminate = true;
+                _lblProgress.Content = "準備中...";
+            }
+
+            UpdateElapsed(elapsed);
+            if (!_cancelRequested && !_finished)
+                _lblStatus.Text = total > 0 ? $"正在處理第 {current} 個元素..." : "正在初始化...";
         }
 
-        public void Complete()
+        public void UpdateStage(string stage, TimeSpan elapsed)
         {
-            Dispatcher.Invoke(() =>
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => UpdateStage(stage, elapsed)));
+                return;
+            }
+
+            UpdateElapsed(elapsed);
+            if (!_cancelRequested && !_finished)
+                _lblStatus.Text = string.IsNullOrWhiteSpace(stage) ? "正在處理..." : stage;
+        }
+
+        internal void Finish(UiVm.FormworkRunOutcome outcome, string detail)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => Finish(outcome, detail)));
+                return;
+            }
+
+            _finished = true;
+            _progressBar.IsIndeterminate = false;
+            _lblStatus.Text = detail;
+            _btnCancel.IsEnabled = true;
+            _btnCancel.Content = "關閉";
+
+            if (outcome == UiVm.FormworkRunOutcome.Completed)
             {
                 _progressBar.Value = 100;
-                _lblStatus.Content = "完成！";
                 _lblStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(34, 139, 34));
-                _btnCancel.Content = "關閉";
-                
-                // 3秒後自動關閉
                 var timer = new System.Windows.Threading.DispatcherTimer();
-                timer.Interval = TimeSpan.FromSeconds(3);
+                timer.Interval = TimeSpan.FromSeconds(2);
                 timer.Tick += (s, e) =>
                 {
                     timer.Stop();
                     Close();
                 };
                 timer.Start();
-            });
+            }
+            else if (outcome == UiVm.FormworkRunOutcome.Cancelled)
+            {
+                _lblStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(184, 134, 11));
+            }
+            else
+            {
+                _lblStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(178, 34, 34));
+            }
+        }
+
+        internal void ForceClose()
+        {
+            _finished = true;
+            Close();
+        }
+
+        private void RequestCancellation()
+        {
+            if (_cancelRequested || _finished) return;
+            _cancelRequested = true;
+            _btnCancel.IsEnabled = false;
+            _btnCancel.Content = "取消中...";
+            _lblStatus.Text = "已要求取消；正在等待安全檢查點...";
+            _lblStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(184, 134, 11));
+            CancelRequested?.Invoke();
+        }
+
+        private void OnClosing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (_finished) return;
+            e.Cancel = true;
+            RequestCancellation();
+        }
+
+        private void UpdateElapsed(TimeSpan elapsed)
+        {
+            var timeString = elapsed.TotalHours >= 1
+                ? elapsed.ToString(@"hh\:mm\:ss")
+                : elapsed.ToString(@"mm\:ss");
+            _lblTime.Content = $"用時: {timeString}";
         }
     }
 }

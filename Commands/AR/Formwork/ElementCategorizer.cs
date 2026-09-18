@@ -171,6 +171,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             return element?.Category?.Id.GetIdValue() == (long)BuiltInCategory.OST_Walls;
         }
+
+        public static bool CanDeductFormwork(Element element)
+        {
+            if (element == null) return false;
+            if (!IsWall(element)) return true;
+
+            // Only the instance Structural checkbox authorizes a wall as a cutter.
+            var structural = element.get_Parameter(BuiltInParameter.WALL_STRUCTURAL_SIGNIFICANT);
+            return structural != null && structural.StorageType == StorageType.Integer &&
+                   structural.AsInteger() == 1;
+        }
         
         /// <summary>
         /// 檢查元素是否為樓梯

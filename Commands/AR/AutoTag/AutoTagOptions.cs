@@ -70,6 +70,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         public ElementId TagTypeId { get; }
     }
 
+    internal enum AutoTagTextDirection
+    {
+        Horizontal,
+        Vertical,
+        FollowElement
+    }
+
     internal sealed class AutoTagOptions
     {
         public AutoTagTemplate Template { get; set; } = AutoTagTemplate.Mep;
@@ -81,6 +88,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         public AutoTagPlacement Placement { get; set; } = AutoTagPlacement.Above;
 
         public bool AddLeader { get; set; } = true;
+
+        public AutoTagTextDirection TextDirection { get; set; } = AutoTagTextDirection.Horizontal;
+        public bool PipeBank { get; set; }
+        public double BankGapPaperMm { get; set; } = 2.0;
+        public double BankLeaderPaperMm { get; set; } = 5.0;
 
         public bool SkipExistingTags { get; set; } = true;
 

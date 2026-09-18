@@ -1,10 +1,10 @@
 ; HB_BIM Tools 安裝腳本 - Inno Setup
-; 版本: 2.5.14
-; 日期: 2026-08-31
+; 版本: 2.5.17
+; 日期: 2026-09-18 / Test_20260918_MepDimension
 ; 支援: Revit 2022, 2024, 2025, 2026
 
 #define MyAppName "HB_BIM Tools"
-#define MyAppVersion "2.5.14"
+#define MyAppVersion "2.5.17"
 #define MyAppPublisher "LAN"
 #define MyAppURL "https://www.ydbim.com"
 #define LanCertificateThumbprint "5EBE6DDEEBEBE5194CBDC9E71CDE8E6BB91AB166"
@@ -31,7 +31,7 @@ DisableDirPage=yes
 
 ; 輸出設定
 OutputDir=..\Output
-OutputBaseFilename=HB_BIM_Tools_v{#MyAppVersion}_Setup
+OutputBaseFilename=HB_BIM_Tools_v{#MyAppVersion}_Test_20260918_MepUi_Setup
 ; SetupIconFile=..\Resources\Icons\license_32.png  ; PNG 不支援，需要 ICO 檔案
 
 ; 壓縮設定
@@ -208,18 +208,26 @@ Source: "System.ValueTuple.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins
 ; Revit 2022 DLL
 Source: "2022\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2022
 Source: "2022\CompanyFamilyLibraryMvp.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM"; Flags: ignoreversion uninsrestartdelete skipifsourcedoesntexist; Tasks: revit2022
+Source: "2022\database\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM\database"; Flags: onlyifdoesntexist uninsneveruninstall recursesubdirs createallsubdirs; Tasks: revit2022
+Source: "2022\previewer\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM\previewer"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: revit2022
 
 ; Revit 2024 DLL
 Source: "2024\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2024
 Source: "2024\CompanyFamilyLibraryMvp.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM"; Flags: ignoreversion uninsrestartdelete skipifsourcedoesntexist; Tasks: revit2024
+Source: "2024\database\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM\database"; Flags: onlyifdoesntexist uninsneveruninstall recursesubdirs createallsubdirs; Tasks: revit2024
+Source: "2024\previewer\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM\previewer"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: revit2024
 
 ; Revit 2025 DLL
 Source: "2025\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2025
 Source: "2025\CompanyFamilyLibraryMvp.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM"; Flags: ignoreversion uninsrestartdelete skipifsourcedoesntexist; Tasks: revit2025
+Source: "2025\database\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM\database"; Flags: onlyifdoesntexist uninsneveruninstall recursesubdirs createallsubdirs; Tasks: revit2025
+Source: "2025\previewer\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM\previewer"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: revit2025
 
 ; Revit 2026 DLL
 Source: "2026\YD_RevitTools.LicenseManager.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM"; Flags: ignoreversion uninsrestartdelete; Tasks: revit2026
 Source: "2026\CompanyFamilyLibraryMvp.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM"; Flags: ignoreversion uninsrestartdelete skipifsourcedoesntexist; Tasks: revit2026
+Source: "2026\database\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM\database"; Flags: onlyifdoesntexist uninsneveruninstall recursesubdirs createallsubdirs; Tasks: revit2026
+Source: "2026\previewer\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM\previewer"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: revit2026
 
 ; 其他附件 (可選)
 Source: "README.txt"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM"; Flags: ignoreversion; Tasks: revit2022

@@ -37,11 +37,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         private static readonly System.Guid GUID_Height = new System.Guid("4421969D-9E56-4B58-9F60-5EE6BB25A0C7");
         private static readonly System.Guid GUID_MaterialName = new System.Guid("B8C9D1E2-F3A4-4B5C-9D1E-8F9A0B1C2D3E");
 
-        static bool _ensuredThisSession = false;
-
         public static void Ensure(Document doc)
         {
-            if (_ensuredThisSession) return;
+            // Check this document every run: a surrounding transaction group may have rolled back.
 
             var app = doc.Application;
             DefinitionFile defFile = null;
@@ -118,7 +116,6 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     using (var t = new Transaction(doc, "Ensure Shared Parameters")) { t.Start(); BindAll(); t.Commit(); }
                 }
 
-                _ensuredThisSession = true;
             }
             finally
             {

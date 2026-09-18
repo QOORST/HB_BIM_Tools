@@ -94,12 +94,35 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
 
         #region 幾何運算輔助方法
+        private static BoundingBoxXYZ GetModelSpaceBounds(Solid solid)
+        {
+            var bounds = solid.GetBoundingBox();
+            var transform = bounds.Transform;
+            var min = new XYZ(double.MaxValue, double.MaxValue, double.MaxValue);
+            var max = new XYZ(double.MinValue, double.MinValue, double.MinValue);
+
+            // Solid bounds are local; all eight corners are needed for rotated bounds.
+            for (int x = 0; x < 2; x++)
+            for (int y = 0; y < 2; y++)
+            for (int z = 0; z < 2; z++)
+            {
+                var point = transform.OfPoint(new XYZ(
+                    x == 0 ? bounds.Min.X : bounds.Max.X,
+                    y == 0 ? bounds.Min.Y : bounds.Max.Y,
+                    z == 0 ? bounds.Min.Z : bounds.Max.Z));
+                min = new XYZ(Math.Min(min.X, point.X), Math.Min(min.Y, point.Y), Math.Min(min.Z, point.Z));
+                max = new XYZ(Math.Max(max.X, point.X), Math.Max(max.Y, point.Y), Math.Max(max.Z, point.Z));
+            }
+
+            return new BoundingBoxXYZ { Min = min, Max = max };
+        }
+
         private static bool IntersectBBox(Solid a, Solid b)
         {
             try 
             {
-                var ba = a.GetBoundingBox();
-                var bb = b.GetBoundingBox();
+                var ba = GetModelSpaceBounds(a);
+                var bb = GetModelSpaceBounds(b);
                 return !(ba.Min.X > bb.Max.X || ba.Max.X < bb.Min.X ||
                         ba.Min.Y > bb.Max.Y || ba.Max.Y < bb.Min.Y ||
                         ba.Min.Z > bb.Max.Z || ba.Max.Z < bb.Min.Z);
@@ -157,6 +180,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
         public static IList<Solid> GetElementSolids(Element e)
         {
+            CurvedMeshBudget.Checkpoint($"讀取元素 {e?.Id} 幾何");
             var result = new List<Solid>();
             try
             {
@@ -167,6 +191,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 };
                 
                 var geomElem = e.get_Geometry(opt);
+                CurvedMeshBudget.Checkpoint($"元素 {e.Id} 幾何已讀取");
                 if (geomElem != null)
                 {
                     foreach (var obj in geomElem)
@@ -200,6 +225,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         }
 
         // 補上缺失的 BooleanUnionMany 方法
+        private static Solid ExecuteCheckedBooleanOperation(Solid first, Solid second, BooleanOperationsType operation)
+        {
+            CurvedMeshBudget.Checkpoint($"模板布林運算 {operation}");
+            var result = BooleanOperationsUtils.ExecuteBooleanOperation(first, second, operation);
+            CurvedMeshBudget.Checkpoint($"模板布林運算 {operation} 完成");
+            return result;
+        }
+
         private static Solid BooleanUnionMany(IList<Solid> solids)
         {
             if (solids == null || solids.Count == 0)
@@ -208,6 +241,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             Solid result = null;
             foreach (var s in solids)
             {
+                CurvedMeshBudget.Checkpoint("合併模板實體");
                 if (IsNullOrTiny(s)) continue;
                 if (result == null)
                 {
@@ -217,7 +251,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 {
                     try
                     {
-                        result = BooleanOperationsUtils.ExecuteBooleanOperation(result, s, BooleanOperationsType.Union);
+                        result = ExecuteCheckedBooleanOperation(result, s, BooleanOperationsType.Union);
+                        CurvedMeshBudget.Checkpoint("模板實體合併完成");
                     }
                     catch (Exception ex)
                     {
@@ -252,15 +287,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         internal static XYZ GetFaceDominantNormal(Face face)
         {
             if (face is PlanarFace pf) return pf.FaceNormal;
-            try
-            {
-                return face.ComputeNormal(new UV(0.5, 0.5)).Normalize();
-            }
-            catch
-            {
-                try { return face.ComputeNormal(new UV(0, 0)).Normalize(); }
-                catch { return XYZ.BasisZ; }
-            }
+            var bounds = face.GetBoundingBox();
+            var center = new UV((bounds.Min.U + bounds.Max.U) / 2.0,
+                (bounds.Min.V + bounds.Max.V) / 2.0);
+            // UV coordinates are not generally normalized. Do not invent an
+            // upward normal on failure: callers must report the failed sample.
+            return face.ComputeNormal(center).Normalize();
         }
 
         /// <summary>
@@ -313,16 +345,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// </summary>
         private static IList<GeometryObject> CreateCurvedFormworkGeometries(Face face, double thickness)
         {
-            // ── 策略 1：高精度 Tessellation + AnyGeometry/Mesh（仿 Dynamo PolySurface.Surfaces 邏輯）
-            // Dynamo 邏輯：PolySurface.BySolid → Surfaces → DirectShape.ByGeometry(Surface)
-            // 等效 C# 作法：高精度三角化 → TessellatedShapeBuilder(AnyGeometry, Mesh)
-            // 優點：不要求封閉實體，徹底消除 Salvage 產出的破面/碎片問題
-            var result = TryBuildTessellatedFormwork(face, thickness, levelOfDetail: 0.02);
-            if (result != null) return result;
-
-            // ── 策略 2：降低精度重試（相容性兜底）
-            result = TryBuildTessellatedFormwork(face, thickness, levelOfDetail: 0.1);
-            if (result != null) return result;
+            // Preserve the verified cylinder path. Complex ramp surfaces use
+            // bounded lower-detail attempts before declaring a mesh budget failure.
+            var levels = face is CylindricalFace
+                ? new[] { 0.5, 1.0 }
+                : new[] { CurvedMeshBudget.PrimaryLevelOfDetail, CurvedMeshBudget.RetryLevelOfDetail, 0.0 };
+            for (int i = 0; i < levels.Length; i++)
+            {
+                CurvedMeshBudget.Checkpoint($"曲面取樣 {i + 1}/{levels.Length} (LOD {levels[i]})");
+                var result = TryBuildTessellatedFormwork(face, thickness, levels[i], i == levels.Length - 1);
+                if (result != null) return result;
+            }
 
             return null;
         }
@@ -332,55 +365,62 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         /// 高精度三角化 → 雙層（內+外）+ 側壁 → TessellatedShapeBuilder(AnyGeometry, Mesh)
         /// AnyGeometry+Mesh 不要求封閉實體，即使拓撲有缺陷也能產出乾淨 mesh，無破面問題。
         /// </summary>
-        private static IList<GeometryObject> TryBuildTessellatedFormwork(Face face, double thickness, double levelOfDetail)
+        private static IList<GeometryObject> TryBuildTessellatedFormwork(Face face, double thickness, double levelOfDetail, bool finalAttempt)
         {
             try
             {
-                Mesh mesh = face.Triangulate(levelOfDetail);
+                CurvedMeshBudget.Checkpoint($"曲面三角化 (LOD {levelOfDetail})");
+                using Mesh mesh = face.Triangulate(levelOfDetail);
+                CurvedMeshBudget.Checkpoint("曲面三角化完成，檢查網格數量");
                 if (mesh == null || mesh.NumTriangles == 0) return null;
 
+                int nt = mesh.NumTriangles;
                 var meshVerts = mesh.Vertices;
                 int nv = meshVerts.Count;
-                int nt = mesh.NumTriangles;
+                // Reject oversized candidates before reserving the run budget or
+                // allocating offset arrays. The using scope disposes this mesh.
+                bool oversized = nt > CurvedMeshBudget.MaxTrianglesPerFace || nv > CurvedMeshBudget.MaxVerticesPerFace;
+                if (oversized && !finalAttempt && !(face is CylindricalFace))
+                {
+                    Debug.Log("曲面取樣過密 (LOD {0}): {1} 三角片, {2} 頂點，釋放後降低精度重試。", levelOfDetail, nt, nv);
+                    return null;
+                }
+                CurvedMeshBudget.ValidateAndReserve(nt, nv);
+                Debug.Log("曲面網格 - LOD {0}、三角片 {1}、頂點 {2}", levelOfDetail, nt, nv);
                 if (nv < 3 || nt == 0) return null;
 
-                XYZ dominantNormal = GetFaceDominantNormal(face);
+                // Reuse the untrimmed surface only for normal evaluation. Mesh
+                // positions and boundaries remain those of the original face.
+                using var normalSurface = face is RuledFace ? face.GetSurface() : null;
 
                 // 步驟 1：收集三角形索引
                 var triIdx = new int[nt][];
                 for (int t = 0; t < nt; t++)
                 {
+                    if ((t & 255) == 0) CurvedMeshBudget.Checkpoint("建立曲面網格索引");
                     var tri = mesh.get_Triangle(t);
                     triIdx[t] = new[] { (int)tri.get_Index(0), (int)tri.get_Index(1), (int)tri.get_Index(2) };
                 }
 
                 // 步驟 2：計算每個頂點的面積加權平均法向量（確保偏移方向一致）
-                var accumX = new double[nv];
-                var accumY = new double[nv];
-                var accumZ = new double[nv];
                 for (int t = 0; t < nt; t++)
                 {
-                    int i0 = triIdx[t][0], i1 = triIdx[t][1], i2 = triIdx[t][2];
-                    XYZ v0 = meshVerts[i0], v1 = meshVerts[i1], v2 = meshVerts[i2];
-                    XYZ cross = (v1 - v0).CrossProduct(v2 - v0);
-                    double area = cross.GetLength() / 2.0;
-                    if (area < 1e-10) continue;
-                    XYZ n = cross.Divide(cross.GetLength());
-                    if (n.DotProduct(dominantNormal) < 0) n = n.Negate();
-                    accumX[i0] += n.X * area; accumX[i1] += n.X * area; accumX[i2] += n.X * area;
-                    accumY[i0] += n.Y * area; accumY[i1] += n.Y * area; accumY[i2] += n.Y * area;
-                    accumZ[i0] += n.Z * area; accumZ[i1] += n.Z * area; accumZ[i2] += n.Z * area;
+                    if ((t & 255) == 0) CurvedMeshBudget.Checkpoint("校正曲面三角形方向");
+                    var idx = triIdx[t];
+                    XYZ p0 = meshVerts[idx[0]], p1 = meshVerts[idx[1]], p2 = meshVerts[idx[2]];
+                    if ((p1 - p0).CrossProduct(p2 - p0).DotProduct(
+                        GetLocalFaceNormal(face, (p0 + p1 + p2) / 3.0, normalSurface)) < 0)
+                    {
+                        int swap = idx[1]; idx[1] = idx[2]; idx[2] = swap;
+                    }
                 }
-
-                // 步驟 3：建立內側與外側偏移頂點
                 var innerVerts = new XYZ[nv];
                 var outerVerts = new XYZ[nv];
                 for (int i = 0; i < nv; i++)
                 {
+                    if ((i & 255) == 0) CurvedMeshBudget.Checkpoint("建立曲面偏移頂點");
                     innerVerts[i] = meshVerts[i];
-                    double len = Math.Sqrt(accumX[i] * accumX[i] + accumY[i] * accumY[i] + accumZ[i] * accumZ[i]);
-                    XYZ vn = len > 1e-10 ? new XYZ(accumX[i] / len, accumY[i] / len, accumZ[i] / len) : dominantNormal;
-                    outerVerts[i] = meshVerts[i] + vn.Multiply(thickness);
+                    outerVerts[i] = meshVerts[i] + GetLocalFaceNormal(face, meshVerts[i], normalSurface).Multiply(thickness);
                 }
 
                 // 步驟 4：找出邊界邊（只出現一次的有向邊，即網格外輪廓）
@@ -390,7 +430,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     for (int e = 0; e < 3; e++)
                     {
                         int a = triIdx[t][e], b = triIdx[t][(e + 1) % 3];
-                        edgeSet.Add((long)a * maxV + b);
+                        if (a == b || !edgeSet.Add((long)a * maxV + b))
+                            throw new InvalidOperationException($"曲面網格含退化或重複有向邊：{a}->{b}，三角片 {t}。");
                     }
 
                 var boundaryEdges = new List<(int from, int to)>();
@@ -402,62 +443,76 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             boundaryEdges.Add((a, b));
                     }
 
-                // 步驟 5：用 TessellatedShapeBuilder 建立幾何
-                // ─ 關鍵修正（仿 Dynamo）─
-                // Target.AnyGeometry + Fallback.Mesh：
-                //   不要求封閉實體（Solid），拓撲不完美時回退為 Mesh 而非 Salvage
-                //   → 徹底消除 Salvage 產出的破面/透明/碎片問題
-                var builder = new TessellatedShapeBuilder();
-                builder.OpenConnectedFaceSet(false); // false = 開放殼體（不強制封閉）
+                var boundaryIn = new Dictionary<int, int>();
+                var boundaryOut = new Dictionary<int, int>();
+                foreach (var edge in boundaryEdges)
+                {
+                    boundaryOut[edge.from] = boundaryOut.TryGetValue(edge.from, out int outgoing) ? outgoing + 1 : 1;
+                    boundaryIn[edge.to] = boundaryIn.TryGetValue(edge.to, out int incoming) ? incoming + 1 : 1;
+                }
+                foreach (var vertex in boundaryOut)
+                    if (vertex.Value != 1 || !boundaryIn.TryGetValue(vertex.Key, out int incoming) || incoming != 1)
+                        throw new InvalidOperationException($"曲面邊界未形成單純閉合輪廓，頂點 {vertex.Key}。");
+
+                // Both skins and all boundary walls must form one closed solid.
+                using var builder = new TessellatedShapeBuilder();
+                builder.OpenConnectedFaceSet(true); // One closed shell contains both skins and boundary walls.
                 var matId = ElementId.InvalidElementId;
 
                 // 內側面（反向繞向）
                 for (int t = 0; t < nt; t++)
                 {
+                    if ((t & 255) == 0) CurvedMeshBudget.Checkpoint("建立曲面模板內側");
                     var idx = triIdx[t];
                     XYZ p0 = innerVerts[idx[0]], p1 = innerVerts[idx[1]], p2 = innerVerts[idx[2]];
-                    if (p0.DistanceTo(p1) < 1e-6 || p1.DistanceTo(p2) < 1e-6 || p2.DistanceTo(p0) < 1e-6) continue;
-                    try { builder.AddFace(new TessellatedFace(new[] { p0, p2, p1 }, matId)); }
-                    catch { }
+                    if (p0.DistanceTo(p1) < 1e-6 || p1.DistanceTo(p2) < 1e-6 || p2.DistanceTo(p0) < 1e-6)
+                        throw new InvalidOperationException("Degenerate curved contact triangle.");
+                    builder.AddFace(new TessellatedFace(new[] { p0, p2, p1 }, matId));
                 }
 
-                builder.CloseConnectedFaceSet(); // 關閉內側面集合
 
                 // 外側面（正向繞向）
-                builder.OpenConnectedFaceSet(false);
                 for (int t = 0; t < nt; t++)
                 {
+                    if ((t & 255) == 0) CurvedMeshBudget.Checkpoint("建立曲面模板外側");
                     var idx = triIdx[t];
                     XYZ p0 = outerVerts[idx[0]], p1 = outerVerts[idx[1]], p2 = outerVerts[idx[2]];
-                    if (p0.DistanceTo(p1) < 1e-6 || p1.DistanceTo(p2) < 1e-6 || p2.DistanceTo(p0) < 1e-6) continue;
-                    try { builder.AddFace(new TessellatedFace(new[] { p0, p1, p2 }, matId)); }
-                    catch { }
+                    if (p0.DistanceTo(p1) < 1e-6 || p1.DistanceTo(p2) < 1e-6 || p2.DistanceTo(p0) < 1e-6)
+                        throw new InvalidOperationException("Degenerate curved offset triangle.");
+                    builder.AddFace(new TessellatedFace(new[] { p0, p1, p2 }, matId));
                 }
 
-                builder.CloseConnectedFaceSet(); // 關閉外側面集合
 
                 // 側邊面（邊界邊 → 四邊形，分 ConnectedFaceSet 避免拓撲錯誤）
                 if (boundaryEdges.Count > 0)
                 {
-                    builder.OpenConnectedFaceSet(false);
+                    int boundaryIndex = 0;
                     foreach (var (fromIdx, toIdx) in boundaryEdges)
                     {
+                        if ((boundaryIndex++ & 255) == 0) CurvedMeshBudget.Checkpoint("建立曲面模板邊界");
                         XYZ p0 = innerVerts[fromIdx], p1 = innerVerts[toIdx];
                         XYZ p2 = outerVerts[toIdx],   p3 = outerVerts[fromIdx];
                         if (p0.DistanceTo(p1) < 1e-6 || p1.DistanceTo(p2) < 1e-6 ||
-                            p2.DistanceTo(p3) < 1e-6 || p3.DistanceTo(p0) < 1e-6) continue;
-                        try { builder.AddFace(new TessellatedFace(new[] { p0, p3, p2, p1 }, matId)); }
-                        catch { }
+                            p2.DistanceTo(p3) < 1e-6 || p3.DistanceTo(p0) < 1e-6)
+                            throw new InvalidOperationException("曲面封邊含退化邊，不能略過後輸出不完整殼體。");
+                        builder.AddFace(new TessellatedFace(new[] { p0, p1, p2 }, matId));
+                        builder.AddFace(new TessellatedFace(new[] { p0, p2, p3 }, matId));
                     }
-                    builder.CloseConnectedFaceSet();
                 }
 
-                // ─ 核心修正：AnyGeometry + Mesh（不強制 Solid，避免破面）─
-                builder.Target   = TessellatedShapeBuilderTarget.AnyGeometry;
-                builder.Fallback = TessellatedShapeBuilderFallback.Mesh;
+                // Reject incomplete shells instead of returning isolated fragments.
+                builder.CloseConnectedFaceSet();
+                builder.Target   = TessellatedShapeBuilderTarget.Solid;
+                builder.Fallback = TessellatedShapeBuilderFallback.Abort;
 
-                builder.Build();
-                var buildResult = builder.GetBuildResult();
+                CurvedMeshBudget.Checkpoint("建立曲面模板形狀");
+                try { builder.Build(); }
+                catch (Autodesk.Revit.Exceptions.InvalidOperationException ex)
+                {
+                    throw new InvalidOperationException($"封閉實體失敗：三角片={nt}，頂點={nv}，邊界邊={boundaryEdges.Count}，厚度={thickness:R} ft。{ex.Message}", ex);
+                }
+                CurvedMeshBudget.Checkpoint("曲面模板形狀建立完成");
+                using var buildResult = builder.GetBuildResult();
                 if (buildResult != null && buildResult.Outcome != TessellatedShapeBuilderOutcome.Nothing)
                 {
                     var geoms = buildResult.GetGeometricalObjects().ToList();
@@ -469,9 +524,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     }
                 }
             }
+            catch (CurvedMeshLimitException) { throw; }
+            catch (System.OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 Debug.Log($"TryBuildTessellatedFormwork(lod={levelOfDetail}) 失敗: {ex.Message}");
+                if (finalAttempt)
+                    throw new InvalidOperationException($"曲面封閉實體建立失敗（LOD {levelOfDetail}）：{ex.Message}", ex);
             }
             return null;
         }
@@ -483,10 +542,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
-                Mesh mesh = face.Triangulate(0.8);
+                CurvedMeshBudget.Checkpoint("曲面實體備援三角化");
+                using Mesh mesh = face.Triangulate(CurvedMeshBudget.RetryLevelOfDetail);
+                CurvedMeshBudget.Checkpoint("曲面實體備援網格檢查");
                 if (mesh == null || mesh.NumTriangles == 0) return null;
 
+                CurvedMeshBudget.ValidateAndReserve(mesh.NumTriangles, 0, booleanFallback: true);
                 var meshVerts = mesh.Vertices;
+                CurvedMeshBudget.ValidateAndReserve(0, meshVerts.Count, booleanFallback: true);
                 int nt = mesh.NumTriangles;
                 if (meshVerts.Count < 3) return null;
 
@@ -497,6 +560,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 {
                     try
                     {
+                        CurvedMeshBudget.Checkpoint($"曲面實體備援 {t + 1}/{nt}");
                         var tri = mesh.get_Triangle(t);
                         XYZ v0 = meshVerts[(int)tri.get_Index(0)];
                         XYZ v1 = meshVerts[(int)tri.get_Index(1)];
@@ -526,6 +590,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 if (prisms.Count == 0) return null;
                 return BooleanUnionMany(prisms);
             }
+            catch (CurvedMeshLimitException) { throw; }
+            catch (System.OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 Debug.Log($"CreateCurvedFormworkSolidFallback 失敗: {ex.Message}");
@@ -651,101 +717,113 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         public static ElementId BuildFromAnyFace(Document doc, Element host, Face face, double thicknessMm, Material mat)
         {
             if (doc == null || host == null || face == null) return ElementId.InvalidElementId;
-
             if (face is PlanarFace pf)
                 return BuildFromFace(doc, host, pf, thicknessMm, mat);
+            if (thicknessMm <= 0) throw new ArgumentOutOfRangeException(nameof(thicknessMm));
 
-            // 曲面路徑
-            Debug.Log("BuildFromAnyFace: 曲面，Host:{0}, 厚度:{1}mm", host.Id.GetIdValue(), thicknessMm);
+            // Stage 1 validates the host boundary independently of neighboring cutters.
+            var geometry = CreateCurvedFormworkGeometries(face, Mm(thicknessMm));
+            if (geometry == null || geometry.Count == 0 ||
+                geometry.Any(g => !(g is Solid s) || IsNullOrTiny(s)))
+                throw new InvalidOperationException("弧面未形成完整封閉實體；不輸出碎片或等高替代模板。");
 
-            double thk = Mm(thicknessMm);
-
-            // ── 優先 1：CylindricalFace → CreateRevolvedGeometry（真正圓柱 BREP，完全無條紋/破面）
-            if (face is CylindricalFace)
+            var ds = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
+            ds.ApplicationId = SharedParams.AppId;
+            ds.Name = "CurvedFace_BoundaryValidation";
+            ds.SetShape(geometry);
+            if (mat != null && mat.Id != ElementId.InvalidElementId)
             {
-                var revolvedSolid = TryCreateRevolutionFormwork(face, thk);
-                if (!IsNullOrTiny(revolvedSolid))
+                var material = ds.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM);
+                if (material != null && !material.IsReadOnly) material.Set(mat.Id);
+            }
+            double area = ToM2(face.Area);
+            XYZ normal = GetFaceDominantNormal(face);
+            bool bottom = normal.Z < -0.85;
+            WriteForDS(ds, host, bottom ? 0 : area, bottom ? area : 0);
+            var comments = ds.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
+            if (comments != null && !comments.IsReadOnly)
+                comments.Set((comments.AsString() ?? "") +
+                    " | 弧面輪廓驗證版：三角化近似；未扣除鄰近構件，面積為宿主面毛面積，非最終淨面積。");
+            return ds.Id;
+        }
+
+        private static XYZ GetLocalFaceNormal(Face face, XYZ point, Surface normalSurface = null)
+        {
+            if (face is RuledFace && normalSurface != null)
+            {
+                // Face.Project can reject boundary points. The underlying
+                // surface provides UV coordinates without changing the trim.
+                UV uv;
+                double distance;
+                try { normalSurface.Project(point, out uv, out distance); }
+                catch (Autodesk.Revit.Exceptions.InvalidOperationException)
                 {
-                    var revolvedId = CreateDS(doc, revolvedSolid, host, "CurvedFace", mat);
-                    if (revolvedId != ElementId.InvalidElementId)
-                    {
-                        XYZ rn = GetFaceDominantNormal(face);
-                        double rAreaM2 = ToM2(face.Area);
-                        double rSide   = Math.Abs(Math.Abs(rn.Z) - 1.0) < 0.15 ? 0 : rAreaM2;
-                        double rBottom = rAreaM2 - rSide;
-                        WriteForDS(doc.GetElement(revolvedId), host, rSide, rBottom);
-                        Debug.Log("BuildFromAnyFace: 旋轉體模板成功（無條紋）- 面積:{0:F3}m²", rAreaM2);
-                        return revolvedId;
-                    }
+                    // Bounded seeds recover native projection failures without
+                    // moving mesh vertices or inventing a face normal.
+                    var bounds = face.GetBoundingBox();
+                    UV bestUv = null;
+                    double bestDistance = double.PositiveInfinity;
+                    foreach (double u in new[] { 0.5, 0.0, 1.0 })
+                        foreach (double v in new[] { 0.5, 0.0, 1.0 })
+                        {
+                            CurvedMeshBudget.Checkpoint("重試曲面局部投影");
+                            var guess = new UV(bounds.Min.U + u * (bounds.Max.U - bounds.Min.U),
+                                bounds.Min.V + v * (bounds.Max.V - bounds.Min.V));
+                            try
+                            {
+                                normalSurface.ProjectWithGuessPoint(point, guess, out UV candidate, out double candidateDistance);
+                                if (candidate == null || double.IsNaN(candidate.U) || double.IsInfinity(candidate.U) ||
+                                    double.IsNaN(candidate.V) || double.IsInfinity(candidate.V) ||
+                                    double.IsNaN(candidateDistance) || double.IsInfinity(candidateDistance) || candidateDistance < 0)
+                                    continue;
+                                if (candidateDistance < bestDistance)
+                                {
+                                    bestDistance = candidateDistance;
+                                    bestUv = candidate;
+                                }
+                            }
+                            catch (Autodesk.Revit.Exceptions.InvalidOperationException) { }
+                        }
+                    if (bestUv == null)
+                        throw new InvalidOperationException($"RuledFace 投影及 9 次 UV 重試皆失敗，點=({point.X:R},{point.Y:R},{point.Z:R})。");
+                    uv = bestUv;
+                    distance = bestDistance;
                 }
-                Debug.Log("BuildFromAnyFace: 旋轉體失敗，降級到 Tessellation");
+                if (uv == null || double.IsNaN(uv.U) || double.IsInfinity(uv.U) ||
+                    double.IsNaN(uv.V) || double.IsInfinity(uv.V) ||
+                    double.IsNaN(distance) || double.IsInfinity(distance))
+                    throw new InvalidOperationException("RuledFace 底層曲面投影結果無效。");
+                var normal = face.ComputeNormal(uv);
+                if (normal == null || normal.GetLength() < 1e-9)
+                    throw new InvalidOperationException("RuledFace 底層曲面法向量退化。");
+                return normal.Normalize();
             }
-
-            // ── 優先 2：TessellatedShapeBuilder Solid（其他曲面或旋轉體失敗時使用）
-            var tessGeoms = CreateCurvedFormworkGeometries(face, thk);
-            if (tessGeoms != null && tessGeoms.Count > 0)
+            if (face is CylindricalFace cylinder)
             {
-                // 過濾出有效的幾何物件（Solid 優先，Mesh 備用）
-                var validGeoms = tessGeoms
-                    .Where(g => g != null)
-                    .Where(g => !(g is Solid s) || !IsNullOrTiny(s))
-                    .ToList();
+                // Boundary vertices can fail projection onto a trimmed face. Use
+                // the underlying cylinder, preserving the host face orientation.
+                XYZ axis = cylinder.Axis.Normalize();
+                XYZ delta = point - cylinder.Origin;
+                XYZ radial = delta - axis.Multiply(delta.DotProduct(axis));
+                if (radial.GetLength() < 1e-9)
+                    throw new InvalidOperationException("圓柱面取樣點過於接近軸線，無法決定法向量。");
 
-                if (validGeoms.Count > 0)
-                {
-                    var ds = Autodesk.Revit.DB.DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
-                    ds.ApplicationId = SharedParams.AppId;
-                    ds.Name = "CurvedFace";
-                    ds.SetShape(validGeoms);
-                    if (mat != null && mat.Id != ElementId.InvalidElementId)
-                    {
-                        var param = ds.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM);
-                        if (param != null && !param.IsReadOnly)
-                            param.Set(mat.Id);
-                    }
-
-                    XYZ dominantNormal = GetFaceDominantNormal(face);
-                    double areaM2 = ToM2(face.Area);
-                    double sideM2   = Math.Abs(Math.Abs(dominantNormal.Z) - 1.0) < 0.15 ? 0 : areaM2;
-                    double bottomM2 = Math.Abs(Math.Abs(dominantNormal.Z) - 1.0) < 0.15 ? areaM2 : 0;
-
-                    WriteForDS(doc.GetElement(ds.Id), host, sideM2, bottomM2);
-                    bool isSolid = validGeoms.Any(g => g is Solid);
-                    Debug.Log("BuildFromAnyFace: 曲面模板建立成功（{0}）- 側:{1:F3}m², 底:{2:F3}m²",
-                        isSolid ? "Solid" : "Mesh", sideM2, bottomM2);
-                    return ds.Id;
-                }
+                var bounds = cylinder.GetBoundingBox();
+                var uv = new UV((bounds.Min.U + bounds.Max.U) / 2.0,
+                    (bounds.Min.V + bounds.Max.V) / 2.0);
+                XYZ referenceDelta = cylinder.Evaluate(uv) - cylinder.Origin;
+                XYZ referenceRadial = referenceDelta - axis.Multiply(referenceDelta.DotProduct(axis));
+                if (referenceRadial.GetLength() < 1e-9)
+                    throw new InvalidOperationException("無法取得圓柱面的參考徑向方向。");
+                double orientation = referenceRadial.Normalize().DotProduct(cylinder.ComputeNormal(uv).Normalize());
+                if (Math.Abs(orientation) < 0.99)
+                    throw new InvalidOperationException("圓柱面法向量與徑向不一致，停止此面生成。");
+                return radial.Normalize().Multiply(orientation >= 0 ? 1.0 : -1.0);
             }
-
-            // 退路：三角稜柱合併法（最後手段，有縫隙但至少能生成）
-            var formworkSolid = CreateCurvedFormworkSolidFallback(face, thk);
-            if (IsNullOrTiny(formworkSolid))
-            {
-                Debug.Log("BuildFromAnyFace: 無法建立曲面模板實體（面積={0:F3}m²）", ToM2(face.Area));
-                return ElementId.InvalidElementId;
-            }
-
-            // 鄰近結構裁切（退路才做，Mesh 路徑不做 Boolean）
-            double eps    = Mm(SHELL_EPS_MM);
-            double growFb = Mm(AABB_GROW_MM);
-            var neighborInfosFb = GetNeighborSolidsWithElements(doc, host, thk + growFb);
-            var neighborsFb     = neighborInfosFb.Select(n => n.Solid).ToList();
-            var unionCutterFb   = BooleanUnionMany(neighborsFb);
-            formworkSolid = ApplyDynamoLikeCut(formworkSolid, unionCutterFb, neighborsFb, eps, true);
-
-            if (IsNullOrTiny(formworkSolid)) return ElementId.InvalidElementId;
-
-            var id = CreateDS(doc, formworkSolid, host, "CurvedFace", mat);
-
-            XYZ dominantNormal2 = GetFaceDominantNormal(face);
-            double areaM2b = ToM2(face.Area);
-            double sideM2b  = Math.Abs(Math.Abs(dominantNormal2.Z) - 1.0) < 0.15 ? 0 : areaM2b;
-            double bottomM2b = Math.Abs(Math.Abs(dominantNormal2.Z) - 1.0) < 0.15 ? areaM2b : 0;
-
-            WriteForDS(doc.GetElement(id), host, sideM2b, bottomM2b);
-            Debug.Log("BuildFromAnyFace: 曲面模板建立成功（退路）- 側:{0:F3}m², 底:{1:F3}m²", sideM2b, bottomM2b);
-
-            return id;
+            var projection = face.Project(point);
+            if (projection == null)
+                throw new InvalidOperationException("無法取得曲面局部法向量。");
+            return face.ComputeNormal(projection.UVPoint).Normalize();
         }
 
         // 補上缺失的 ApplyDynamoLikeCut 方法 - 平衡的接觸面扣除
@@ -766,7 +844,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // 先用聯合實體進行接觸面扣除（使用適中的閾值）
                 if (useUnionCutter && !IsNullOrTiny(unionCutter))
                 {
-                    var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(result, unionCutter, BooleanOperationsType.Intersect);
+                    var intersection = ExecuteCheckedBooleanOperation(result, unionCutter, BooleanOperationsType.Intersect);
                     if (!IsNullOrTiny(intersection))
                     {
                         double intersectionRatio = intersection.Volume / originalVolume;
@@ -775,7 +853,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         // 使用適中的閾值（10%以上才扣除）
                         if (intersectionRatio > 0.10)
                         {
-                            var cut = BooleanOperationsUtils.ExecuteBooleanOperation(result, unionCutter, BooleanOperationsType.Difference);
+                            var cut = ExecuteCheckedBooleanOperation(result, unionCutter, BooleanOperationsType.Difference);
                             if (!IsNullOrTiny(cut) && cut.Volume > originalVolume * 0.15) // 保留至少15%
                             {
                                 result = cut;
@@ -801,7 +879,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                     try
                     {
-                        var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(result, neighbor, BooleanOperationsType.Intersect);
+                        var intersection = ExecuteCheckedBooleanOperation(result, neighbor, BooleanOperationsType.Intersect);
                         if (!IsNullOrTiny(intersection))
                         {
                             double intersectionRatio = intersection.Volume / result.Volume;
@@ -810,7 +888,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             // 使用保守的閾值（15%以上才扣除）
                             if (intersectionRatio > 0.15)
                             {
-                                var cut = BooleanOperationsUtils.ExecuteBooleanOperation(result, neighbor, BooleanOperationsType.Difference);
+                                var cut = ExecuteCheckedBooleanOperation(result, neighbor, BooleanOperationsType.Difference);
                                 if (!IsNullOrTiny(cut) && cut.Volume > result.Volume * 0.25) // 每次保留至少25%
                                 {
                                     result = cut;
@@ -861,7 +939,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     .WherePasses(new BoundingBoxIntersectsFilter(outline));
 
                 return collector
-                    .Where(e => e.Id != host.Id && IntersectsSolid(e, probe))
+                    .Where(e => e.Id != host.Id && ElementCategorizer.CanDeductFormwork(e) && IntersectsSolid(e, probe))
                     .ToList();
             }
             catch (Exception ex)
@@ -946,7 +1024,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         foreach (var hitSolid in hitSolids)
                         {
                             if (IsNullOrTiny(hitSolid)) continue;
-                            var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(
+                            var intersection = ExecuteCheckedBooleanOperation(
                                 probe, hitSolid, BooleanOperationsType.Intersect);
                             if (!IsNullOrTiny(intersection))
                             {
@@ -996,7 +1074,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                     try
                     {
-                        var inter = BooleanOperationsUtils.ExecuteBooleanOperation(probe, s, BooleanOperationsType.Intersect);
+                        var inter = ExecuteCheckedBooleanOperation(probe, s, BooleanOperationsType.Intersect);
                         if (!IsNullOrTiny(inter))
                         {
                             double vol = inter.Volume;
@@ -1031,10 +1109,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         private static readonly Dictionary<string, Bucket> _sum = new Dictionary<string, Bucket>();
         private static string _lastSum = "";
 
-        public static void BeginRun() { _sum.Clear(); _lastSum = ""; }
+        public static void BeginRun()
+        {
+            _sum.Clear();
+            _lastSum = "";
+            GeometryExtractor.BeginGeometryCache();
+        }
         
         public static void EndRun()
         {
+            GeometryExtractor.ClearGeometryCache();
             var lines = new List<string>();
             double grand = 0;
             string[] cats = { "牆", "結構柱", "結構梁", "板", "樓梯" };
@@ -1617,6 +1701,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             if (doc == null || host == null || face == null) return ElementId.InvalidElementId;
 
+            if (ElementCategorizer.IsStructuralBeam(host) && face.FaceNormal.Z > 0.7)
+                return ElementId.InvalidElementId;
+
             Debug.Log("開始精確面生面 - Host:{0}, 厚度:{1}mm", host.Id.GetIdValue(), thicknessMm);
 
             double thk = Mm(thicknessMm);
@@ -1714,7 +1801,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                     try
                     {
-                        var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(
+                        var intersection = ExecuteCheckedBooleanOperation(
                             probeSolid, neighborInfo.Solid, BooleanOperationsType.Intersect);
                             
                         if (!IsNullOrTiny(intersection))
@@ -1787,7 +1874,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         if (!IntersectBBox(result, neighborInfo.Solid)) continue;
 
                         // 計算交集
-                        var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(
+                        var intersection = ExecuteCheckedBooleanOperation(
                             result, neighborInfo.Solid, BooleanOperationsType.Intersect);
                         
                         if (IsNullOrTiny(intersection)) continue;
@@ -1815,10 +1902,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                         if (intersectionRatio > effectiveCutThreshold)
                         {
-                            var cut = BooleanOperationsUtils.ExecuteBooleanOperation(
+                            var cut = ExecuteCheckedBooleanOperation(
                                 result, neighborInfo.Solid, BooleanOperationsType.Difference);
-                            
-                            if (!IsNullOrTiny(cut))
+
+                            if (IsNullOrTiny(cut))
+                            {
+                                Debug.Log("模板被 {0} 完全裁切", neighborInfo.Element.Id.GetIdValue());
+                                return null;
+                            }
+                            else
                             {
                                 result = cut;
                                 processedCount++;
@@ -1852,8 +1944,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             try
             {
-                var bbox1 = solid1.GetBoundingBox();
-                var bbox2 = solid2.GetBoundingBox();
+                var bbox1 = GetModelSpaceBounds(solid1);
+                var bbox2 = GetModelSpaceBounds(solid2);
                 
                 var center1 = (bbox1.Min + bbox1.Max) * 0.5;
                 var center2 = (bbox2.Min + bbox2.Max) * 0.5;
@@ -1960,7 +2052,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     
                     try
                     {
-                        var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(
+                        var intersection = ExecuteCheckedBooleanOperation(
                             probeSolid, neighborInfo.Solid, BooleanOperationsType.Intersect);
                             
                         if (!IsNullOrTiny(intersection))
@@ -2014,7 +2106,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         if (!IntersectBBox(result, neighborInfo.Solid)) continue;
 
                         // 快速相交檢查 - 只處理明顯的大相交
-                        var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(
+                        var intersection = ExecuteCheckedBooleanOperation(
                             result, neighborInfo.Solid, BooleanOperationsType.Intersect);
                         
                         if (IsNullOrTiny(intersection)) continue;
@@ -2024,7 +2116,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         // 快速版：只處理明顯的大相交（>15%）
                         if (intersectionRatio > 0.15)
                         {
-                            var cut = BooleanOperationsUtils.ExecuteBooleanOperation(
+                            var cut = ExecuteCheckedBooleanOperation(
                                 result, neighborInfo.Solid, BooleanOperationsType.Difference);
                             if (!IsNullOrTiny(cut))
                             {
@@ -2071,7 +2163,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var collector = new FilteredElementCollector(doc)
                     .WherePasses(filter)
                     .WherePasses(new BoundingBoxIntersectsFilter(outline))
-                    .Where(e => e.Id != host.Id)
+                    .Where(e => e.Id != host.Id && ElementCategorizer.CanDeductFormwork(e))
                     .Take(10); // 限制處理數量
 
                 foreach (var e in collector)
@@ -2124,7 +2216,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                         if (!IntersectBBox(result, neighborInfo.Solid)) continue;
 
                         // 計算相交體積
-                        var intersection = BooleanOperationsUtils.ExecuteBooleanOperation(
+                        var intersection = ExecuteCheckedBooleanOperation(
                             result, neighborInfo.Solid, BooleanOperationsType.Intersect);
 
                         if (IsNullOrTiny(intersection)) continue;
@@ -2140,7 +2232,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                         if (shouldCut)
                         {
-                            var cut = BooleanOperationsUtils.ExecuteBooleanOperation(
+                            var cut = ExecuteCheckedBooleanOperation(
                                 result, neighborInfo.Solid, BooleanOperationsType.Difference);
                             if (!IsNullOrTiny(cut))
                             {
@@ -2310,7 +2402,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 BoundingBoxXYZ hostBB = null;
                 foreach (var s in hostSolids)
                 {
-                    var bb = s.GetBoundingBox();
+                    var bb = GetModelSpaceBounds(s);
                     if (hostBB == null)
                     {
                         hostBB = new BoundingBoxXYZ { Min = bb.Min, Max = bb.Max };
@@ -2337,7 +2429,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var collector = new FilteredElementCollector(doc)
                     .WherePasses(filter)
                     .WherePasses(new BoundingBoxIntersectsFilter(outline))
-                    .Where(e => e.Id != host.Id);
+                    .Where(e => e.Id != host.Id && ElementCategorizer.CanDeductFormwork(e));
 
                 foreach (var e in collector)
                 {

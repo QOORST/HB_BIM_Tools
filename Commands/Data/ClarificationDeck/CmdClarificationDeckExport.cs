@@ -46,10 +46,21 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
 
             try
             {
-                using (var dialog = new ClarificationDeckDialog(doc))
+                using (var dialog = new ClarificationDeckDialog(doc, commandData.Application.ActiveUIDocument))
                 {
                     if (dialog.ShowDialog() != DialogResult.OK)
                         return Result.Cancelled;
+
+                    if (dialog.LocateRequested)
+                    {
+                        dialog.LocateInModel(commandData.Application.ActiveUIDocument);
+                        return Result.Succeeded;
+                    }
+                    if (dialog.Options.DraftOnly)
+                    {
+                        ClarificationDeckRecordStore.UpsertFromOptions(dialog.Options);
+                        return Result.Succeeded;
+                    }
 
                     dialog.Options.SlideIndex = ClarificationDeckBuilder.Build(dialog.Options);
                     ClarificationDeckRecordStore.UpsertFromOptions(dialog.Options);
@@ -83,6 +94,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
 
     internal sealed class ClarificationDeckOptions
     {
+        public bool DraftOnly { get; set; }
+        public string ModelContextJson { get; set; }
         public string ProjectId { get; set; }
         public string ProjectName { get; set; }
         public string ProjectPath { get; set; }
@@ -143,11 +156,19 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
         private string _lastGeneratedItemNo;
         private bool _loadingRecord;
         private ImageSlotCard[] _imageCards;
+        private string _modelContextJson;
+        public bool LocateRequested { get; private set; }
 
         public ClarificationDeckOptions Options { get; private set; }
 
-        public ClarificationDeckDialog(Document doc)
+        public ClarificationDeckDialog(Document doc, UIDocument uiDoc = null)
         {
+            _modelContextJson = JsonConvert.SerializeObject(new ClarificationModelContext {
+                ProjectUniqueId = doc.ProjectInformation.UniqueId,
+                ProjectPath = doc.PathName,
+                ViewUniqueId = doc.ActiveView?.UniqueId,
+                ElementUniqueIds = uiDoc?.Selection.GetElementIds().Select(doc.GetElement).Where(e => e != null).Select(e => e.UniqueId).ToList() ?? new List<string>()
+            });
             Text = "釋疑簡報快速產出";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(980, 850);
@@ -220,11 +241,21 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
 
             var ok = BuildButton("產出簡報", 110);
             ok.Click += (s, e) => Accept();
+            var draft = BuildButton("儲存草稿", 100);
+            draft.Click += (s, e) => Accept(true);
+            var locate = BuildButton("回到模型", 100);
+            locate.Click += (s, e) => {
+                if (MessageBox.Show("關閉視窗並定位紀錄；尚未儲存的欄位修改不會保存。", Text,
+                    MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+                LocateRequested = true; DialogResult = DialogResult.OK;
+            };
             var history = BuildButton("歷史紀錄", 100);
             history.Click += (s, e) => ShowHistory();
             var cancel = BuildButton("取消", 86);
             cancel.Click += (s, e) => DialogResult = DialogResult.Cancel;
             buttons.Controls.Add(ok);
+            buttons.Controls.Add(draft);
+            buttons.Controls.Add(locate);
             buttons.Controls.Add(history);
             buttons.Controls.Add(cancel);
 
@@ -498,6 +529,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
 
         private void LoadRecord(ClarificationDeckRecord record)
         {
+            _modelContextJson = record.ModelContextJson;
             _loadingRecord = true;
             try
             {
@@ -575,7 +607,23 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
             return value;
         }
 
-        private void Accept()
+        public void LocateInModel(UIDocument ui)
+        {
+            var context = string.IsNullOrWhiteSpace(_modelContextJson) ? null : JsonConvert.DeserializeObject<ClarificationModelContext>(_modelContextJson);
+            if (context == null || context.ProjectUniqueId != ui.Document.ProjectInformation.UniqueId)
+                throw new InvalidOperationException("此紀錄沒有目前模型的定位資料，請勿套用到其他專案。");
+            if (!string.IsNullOrWhiteSpace(context.ProjectPath) && !string.Equals(context.ProjectPath, ui.Document.PathName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("模型路徑與紀錄不同，請確認是否為另存副本；本次不自動定位。");
+            var view = string.IsNullOrWhiteSpace(context.ViewUniqueId) ? null : ui.Document.GetElement(context.ViewUniqueId) as Autodesk.Revit.DB.View;
+            if (view != null && !view.IsTemplate) ui.ActiveView = view;
+            var ids = (context.ElementUniqueIds ?? new List<string>()).Select(id => ui.Document.GetElement(id)).Where(e => e != null).Select(e => e.Id).ToList();
+            if (ids.Count > 0) { ui.Selection.SetElementIds(ids); ui.ShowElements(ids); }
+            if (ids.Count != (context.ElementUniqueIds?.Count ?? 0))
+                TaskDialog.Show("釋疑定位", "部分元素已刪除或不存在，僅定位仍存在的元素。");
+            else if (ids.Count == 0 && view == null) TaskDialog.Show("釋疑定位", "原始視圖已不存在，也沒有可定位的元素。");
+        }
+
+        private void Accept(bool draftOnly = false)
         {
             if (string.IsNullOrWhiteSpace(_itemNo.Text))
             {
@@ -591,14 +639,14 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(_description.Text))
+            if (!draftOnly && string.IsNullOrWhiteSpace(_description.Text))
             {
                 MessageBox.Show("請填寫問題處。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 _description.Focus();
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(_outputPath.Text))
+            if (!draftOnly && string.IsNullOrWhiteSpace(_outputPath.Text))
             {
                 MessageBox.Show("請指定輸出檔案。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 _outputPath.Focus();
@@ -614,11 +662,11 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
             }
 
             var outputDir = Path.GetDirectoryName(_outputPath.Text);
-            if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
+            if (!draftOnly && !string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
                 Directory.CreateDirectory(outputDir);
 
             var outputPath = _outputPath.Text.Trim();
-            if (File.Exists(outputPath) && IsFileLocked(outputPath))
+            if (!draftOnly && File.Exists(outputPath) && IsFileLocked(outputPath))
             {
                 MessageBox.Show("輸出簡報目前可能已被 PowerPoint 開啟，請先關閉該檔案後再產出。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -638,6 +686,8 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
 
             Options = new ClarificationDeckOptions
             {
+                DraftOnly = draftOnly,
+                ModelContextJson = _modelContextJson,
                 ProjectId = _projectId,
                 ProjectName = _projectName,
                 ProjectPath = _projectPath,
@@ -654,10 +704,10 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
                 DetailImagePath = _detailImage.Text.Trim(),
                 ThreeDImagePath = _threeDImage.Text.Trim(),
                 ExtraImagePath = _extraImage.Text.Trim(),
-                OutputPath = _outputPath.Text.Trim(),
+                OutputPath = draftOnly ? string.Empty : _outputPath.Text.Trim(),
                 PageNo = _pageNo.Text.Trim(),
                 AppendToProjectDeck = _appendToProjectDeck.Checked,
-                ExportMode = _appendToProjectDeck.Checked ? "AppendDeck" : "SingleFile",
+                ExportMode = draftOnly ? "Draft" : (_appendToProjectDeck.Checked ? "AppendDeck" : "SingleFile"),
                 TemplateMode = SelectedTemplateMode,
                 Revision = ClarificationDeckRecordStore.GetNextRevision(_projectId, _itemNo.Text.Trim()),
                 IsCurrent = isCurrent
@@ -761,8 +811,17 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
         }
     }
 
+    internal sealed class ClarificationModelContext
+    {
+        public string ProjectUniqueId { get; set; }
+        public string ProjectPath { get; set; }
+        public string ViewUniqueId { get; set; }
+        public List<string> ElementUniqueIds { get; set; }
+    }
+
     internal sealed class ClarificationDeckRecord
     {
+        public string ModelContextJson { get; set; }
         public string Id { get; set; }
         public string ProjectId { get; set; }
         public string ProjectName { get; set; }
@@ -819,6 +878,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
             var now = DateTime.Now;
             var record = new ClarificationDeckRecord
             {
+                ModelContextJson = options.ModelContextJson,
                 Id = Guid.NewGuid().ToString("N"),
                 ProjectId = options.ProjectId,
                 ProjectName = options.ProjectName,
@@ -1011,7 +1071,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data.ClarificationDeck
                     command.CommandText = @"
 SELECT Id, ProjectId, ProjectName, ProjectPath, RevitVersion, ItemNo, Title, SystemName, IssueDate,
        Description, Reply, Handling, Progress, OutputPath, ExportMode, TemplateMode, SlideIndex, Revision, IsCurrent,
-       OverviewImagePath, DetailImagePath, ThreeDImagePath, ExtraImagePath, CreatedAt, UpdatedAt, CreatedBy
+       OverviewImagePath, DetailImagePath, ThreeDImagePath, ExtraImagePath, CreatedAt, UpdatedAt, CreatedBy, ModelContextJson
 FROM ClarificationRecords
 ORDER BY CreatedAt DESC;";
 
@@ -1124,6 +1184,7 @@ CREATE TABLE IF NOT EXISTS ClarificationRecords (
                 }
 
                 EnsureColumn(connection, "TemplateMode", "TEXT");
+                EnsureColumn(connection, "ModelContextJson", "TEXT");
 
                 using (var index = connection.CreateCommand())
                 {
@@ -1227,7 +1288,8 @@ CREATE TABLE IF NOT EXISTS ClarificationRecords (
                 ExtraImagePath = ReadString(reader, 22),
                 CreatedAt = ReadDateTime(reader, 23),
                 UpdatedAt = ReadDateTime(reader, 24),
-                CreatedBy = ReadString(reader, 25)
+                CreatedBy = ReadString(reader, 25),
+                ModelContextJson = ReadString(reader, 26)
             };
         }
 
@@ -1240,11 +1302,11 @@ CREATE TABLE IF NOT EXISTS ClarificationRecords (
 INSERT OR REPLACE INTO ClarificationRecords (
     Id, ProjectId, ProjectName, ProjectPath, RevitVersion, ItemNo, Title, SystemName, IssueDate,
     Description, Reply, Handling, Progress, OutputPath, ExportMode, TemplateMode, SlideIndex, Revision, IsCurrent,
-    OverviewImagePath, DetailImagePath, ThreeDImagePath, ExtraImagePath, CreatedAt, UpdatedAt, CreatedBy
+    OverviewImagePath, DetailImagePath, ThreeDImagePath, ExtraImagePath, CreatedAt, UpdatedAt, CreatedBy, ModelContextJson
 ) VALUES (
     $Id, $ProjectId, $ProjectName, $ProjectPath, $RevitVersion, $ItemNo, $Title, $SystemName, $IssueDate,
     $Description, $Reply, $Handling, $Progress, $OutputPath, $ExportMode, $TemplateMode, $SlideIndex, $Revision, $IsCurrent,
-    $OverviewImagePath, $DetailImagePath, $ThreeDImagePath, $ExtraImagePath, $CreatedAt, $UpdatedAt, $CreatedBy
+    $OverviewImagePath, $DetailImagePath, $ThreeDImagePath, $ExtraImagePath, $CreatedAt, $UpdatedAt, $CreatedBy, $ModelContextJson
 );";
 
                 AddParameter(command, "$Id", record.Id);
@@ -1273,6 +1335,7 @@ INSERT OR REPLACE INTO ClarificationRecords (
                 AddParameter(command, "$CreatedAt", ToStorageDate(record.CreatedAt));
                 AddParameter(command, "$UpdatedAt", ToStorageDate(record.UpdatedAt));
                 AddParameter(command, "$CreatedBy", record.CreatedBy);
+                AddParameter(command, "$ModelContextJson", record.ModelContextJson);
                 command.ExecuteNonQuery();
             }
         }
@@ -1522,14 +1585,14 @@ INSERT OR REPLACE INTO ClarificationRecords (
                 TemplateName = GetTemplateDisplayName(record.TemplateMode),
                 Progress = record.Progress,
                 Revision = record.Revision,
-                CurrentStatus = record.IsCurrent ? "有效" : "歷史",
+                CurrentStatus = (record.IsCurrent ? "有效" : "歷史") + (record.ExportMode == "Draft" ? "／草稿" : ""),
                 SlideIndex = record.SlideIndex,
                 OutputPath = record.OutputPath
             }).ToList();
 
             _grid.DataSource = rows;
 
-            SetHeader("CreatedAt", "產出時間");
+            SetHeader("CreatedAt", "紀錄時間");
             SetHeader("ItemNo", "項次");
             SetHeader("Title", "標題");
             SetHeader("SystemName", "系統");
@@ -1776,6 +1839,7 @@ INSERT OR REPLACE INTO ClarificationRecords (
         {
             return new ClarificationDeckOptions
             {
+                ModelContextJson = record.ModelContextJson,
                 ProjectId = record.ProjectId,
                 ProjectName = record.ProjectName,
                 ProjectPath = record.ProjectPath,

@@ -100,11 +100,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
 
             var result = new PipeSleeveResult { PipeCount = pipes.Count };
-            var candidates = SuppressWallSleevesCoveredByBeams(Analyze(doc, pipes, options)).ToList();
+            var diagnostics = new List<string>();
+            var candidates = SuppressWallSleevesCoveredByBeams(Analyze(doc, pipes, options, diagnostics)).ToList();
+            result.Messages.AddRange(diagnostics.Take(20));
             result.CandidateCount = candidates.Count;
             EvaluateBeamOpeningPrinciples(candidates, options.ClearanceMm * MmToFeet, result);
 
-            if (!options.SkipExisting)
+            if (!options.SkipExisting && diagnostics.Count == 0)
             {
                 int removedStale = DeleteStaleSleevesForPipes(doc, pipes, candidates, options);
                 if (removedStale > 0)
@@ -126,12 +128,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
             int sleeveNumber = GetNextSleeveNumber(doc);
             var updatedSleeveIds = new HashSet<long>();
+            var existingSleeves = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance))
+                .Cast<FamilyInstance>().Where(IsSleeveInstance).ToList();
             foreach (PipeSleeveCandidate candidate in candidates)
             {
                 try
                 {
-                    if (options.SkipExisting && HasExistingSleeveNear(doc, candidate))
+                    FamilyInstance matchedSleeve = FindExistingSleeveForUpdate(doc, candidate, updatedSleeveIds, existingSleeves);
+                    if (options.SkipExisting && matchedSleeve != null)
                     {
+                        updatedSleeveIds.Add(matchedSleeve.Id.GetIdValue());
                         result.SkippedExistingCount++;
                         continue;
                     }
@@ -148,7 +154,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     EnsureSymbolActive(doc, symbol);
                     if (!options.SkipExisting)
                     {
-                        FamilyInstance existingSleeve = FindExistingSleeveForUpdate(doc, candidate, updatedSleeveIds);
+                        FamilyInstance existingSleeve = matchedSleeve;
                         if (existingSleeve != null)
                         {
                             UpdateExistingSleeve(doc, existingSleeve, candidate, symbol, options.ClearanceMm * MmToFeet, options);
@@ -310,7 +316,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return sleevePoint.DistanceTo(candidate.Point) <= GetExistingSleeveTolerance(candidate);
             });
         }
-        private static IEnumerable<PipeSleeveCandidate> Analyze(Document doc, IList<Element> pipes, PipeSleeveOptions options)
+        private static IEnumerable<PipeSleeveCandidate> Analyze(Document doc, IList<Element> pipes, PipeSleeveOptions options, List<string> diagnostics)
         {
             Outline searchOutline = CreatePipeSearchOutline(pipes, 500.0 * MmToFeet);
             var hosts = options.IncludeCurrentModel ? CollectHostElements(doc, searchOutline).ToList() : new List<Element>();
@@ -336,7 +342,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                     XYZ point;
                     double hostThickness;
-                    if (!TryGetIntersectionData(curve, host, hostType, out point, out hostThickness)) continue;
+                    if (!TryGetIntersectionData(curve, host, hostType, out point, out hostThickness))
+                    {
+                        if (MayCurveIntersectElementBox(curve, host)) diagnostics.Add($"管線 {pipe.Id}／宿主 {host.Id}：未確認完整實體穿越；不以外包框生成，保留舊套管。");
+                        continue;
+                    }
 
                     if (!IsPointInActiveViewScope(doc, options, point)) continue;
 
@@ -370,7 +380,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     Curve curveInLink = curve.CreateTransformed(linkTransform.Inverse);
                     XYZ pointInLink;
                     double hostThickness;
-                    if (!TryGetIntersectionData(curveInLink, host, hostType, out pointInLink, out hostThickness)) continue;
+                    if (!TryGetIntersectionData(curveInLink, host, hostType, out pointInLink, out hostThickness))
+                    {
+                        if (MayCurveIntersectElementBox(curveInLink, host)) diagnostics.Add($"管線 {pipe.Id}／連結宿主 {host.Id}：未確認完整實體穿越；不以外包框生成，保留舊套管。");
+                        continue;
+                    }
 
                     XYZ point = linkTransform.OfPoint(pointInLink);
                     if (!IsPointInActiveViewScope(doc, options, point)) continue;
@@ -464,6 +478,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
             foreach (PipeSleeveCandidate beamCandidate in beamCandidates)
             {
+                if (!((beamCandidate?.HostElement?.Location as LocationCurve)?.Curve is Line)) continue;
                 if (beamCandidate == null || beamCandidate.Pipe == null || beamCandidate.Point == null)
                 {
                     continue;
@@ -747,6 +762,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
 
             string key = MakeKey(candidate.Pipe.Id, candidate.HostType, candidate.Point);
+            key += ":" + candidate.HostElement.UniqueId + ":" + candidate.HostElement.Document.GetHashCode();
             PipeSleeveCandidate existingByKey;
             if (!candidatesByKey.TryGetValue(key, out existingByKey))
             {
@@ -766,6 +782,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         private static bool CanMergeBeamCandidates(PipeSleeveCandidate existing, PipeSleeveCandidate candidate)
         {
+            // Separate hosts must never stretch a sleeve across empty space.
+            if (existing?.HostElement == null || candidate?.HostElement == null ||
+                !existing.HostElement.Document.Equals(candidate.HostElement.Document) ||
+                existing.HostElement.Id != candidate.HostElement.Id || existing.IsFromLink || candidate.IsFromLink)
+                return false;
             if (existing == null || candidate == null || existing.HostType != "Beam" || candidate.HostType != "Beam")
             {
                 return false;
@@ -1079,6 +1100,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             Curve segment = GetIntersectionSegment(curve, element);
             if (segment != null)
             {
+                if (hostType == "Beam")
+                {
+                    // Require solid entry and exit before either source endpoint.
+                    double a = curve.ComputeNormalizedParameter(curve.Project(segment.GetEndPoint(0)).Parameter);
+                    double b = curve.ComputeNormalizedParameter(curve.Project(segment.GetEndPoint(1)).Parameter);
+                    double tolerance = 0.5 * MmToFeet / curve.Length;
+                    if (Math.Min(a, b) <= tolerance || Math.Max(a, b) >= 1 - tolerance) return false;
+                    point = segment.Evaluate(0.5, true);
+                    thicknessFeet = segment.Length;
+                    return thicknessFeet > 0.5 * MmToFeet;
+                }
                 if (!HasCompleteTraversal(curve, element, hostType))
                 {
                     return false;
@@ -1097,20 +1129,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return false;
             }
 
-            double sampledLength;
-            if (!TryGetBoundingBoxIntersectionData(curve, element, out point, out sampledLength))
-            {
-                return false;
-            }
-
-            if (!HasCompleteTraversal(curve, element, hostType))
-            {
-                return false;
-            }
-
-            point = AdjustPointToHostCenter(element, hostType, point);
-            thicknessFeet = ResolveSleeveLengthFeet(element, hostType, sampledLength);
-            return true;
+            // Bounding boxes are broad-phase filters, never sleeve geometry.
+            return false;
         }
 
         private static XYZ AdjustPointToHostCenter(Element host, string hostType, XYZ point)
@@ -1433,17 +1453,49 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         private static Curve GetIntersectionSegment(Curve curve, Element element)
         {
-            Options options = new Options { DetailLevel = ViewDetailLevel.Fine, IncludeNonVisibleObjects = true };
+            Options options = new Options { DetailLevel = ViewDetailLevel.Fine, IncludeNonVisibleObjects = false };
             GeometryElement geometry = element.get_Geometry(options);
             if (geometry == null) return null;
+            var intervals = new List<Tuple<double, double>>();
+            try
+            {
+                CollectSolidIntervals(curve, geometry, intervals);
+            }
+            catch (Autodesk.Revit.Exceptions.ArgumentException) { return null; }
+            catch (InvalidOperationException) { return null; }
+            if (intervals.Count == 0) return null;
+            intervals = intervals.OrderBy(x => x.Item1).ToList();
+            double start = intervals[0].Item1, end = intervals[0].Item2;
+            foreach (var interval in intervals.Skip(1))
+            {
+                // Do not join disconnected penetrations across a void.
+                if (interval.Item1 > end + 1e-9) return null;
+                end = Math.Max(end, interval.Item2);
+            }
+            Curve result = curve.Clone();
+            result.MakeBound(curve.ComputeRawParameter(start), curve.ComputeRawParameter(end));
+            return result;
+        }
 
+        private static void CollectSolidIntervals(Curve curve, GeometryElement geometry, List<Tuple<double, double>> intervals)
+        {
             foreach (GeometryObject obj in geometry)
             {
-                Curve found = GetIntersectionSegmentFromObject(curve, obj);
-                if (found != null) return found;
+                if (obj is GeometryInstance instance)
+                    CollectSolidIntervals(curve, instance.GetInstanceGeometry(), intervals);
+                else if (obj is Solid solid && solid.Volume > 0)
+                {
+                    using (var options = new SolidCurveIntersectionOptions())
+                    using (var intersection = solid.IntersectWithCurve(curve, options))
+                        for (int i = 0; i < intersection.SegmentCount; i++)
+                        {
+                            Curve part = intersection.GetCurveSegment(i);
+                            double a = curve.ComputeNormalizedParameter(curve.Project(part.GetEndPoint(0)).Parameter);
+                            double b = curve.ComputeNormalizedParameter(curve.Project(part.GetEndPoint(1)).Parameter);
+                            intervals.Add(Tuple.Create(Math.Min(a, b), Math.Max(a, b)));
+                        }
+                }
             }
-
-            return null;
         }
 
         private static Curve GetIntersectionSegmentFromObject(Curve curve, GeometryObject obj)
@@ -1784,6 +1836,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         private static XYZ GetSleeveDirection(Element host, string hostType, XYZ pipeDirection, Transform linkTransform)
         {
+            // Beam thickness is measured along this project-coordinate MEP axis.
+            if (hostType == "Beam") return pipeDirection?.Normalize();
             XYZ direction = null;
 
             if (hostType == "Wall")
@@ -2269,7 +2323,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
         }
 
-        private static FamilyInstance FindExistingSleeveForUpdate(Document doc, PipeSleeveCandidate candidate, HashSet<long> usedSleeveIds)
+        private static FamilyInstance FindExistingSleeveForUpdate(Document doc, PipeSleeveCandidate candidate, HashSet<long> usedSleeveIds, IList<FamilyInstance> existingSleeves)
         {
             if (doc == null || candidate?.Pipe == null || candidate.Point == null)
             {
@@ -2280,10 +2334,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             string crossingType = GetCrossingTypeText(candidate.HostType);
             double nearTolerance = GetExistingSleeveTolerance(candidate);
 
-            return new FilteredElementCollector(doc)
-                .OfClass(typeof(FamilyInstance))
-                .OfType<FamilyInstance>()
-                .Where(fi => IsSleeveInstance(fi))
+            var matches = existingSleeves
+                .Where(fi => fi.IsValidObject)
                 .Where(fi => usedSleeveIds == null || !usedSleeveIds.Contains(fi.Id.GetIdValue()))
                 .Select(fi => new ExistingSleeveMatch
                 {
@@ -2301,12 +2353,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     x.IsNear = x.Distance <= nearTolerance;
                     return x;
                 })
-                .Where(x => x.SourceMatches || (x.IsNear && x.CrossingMatches && string.IsNullOrWhiteSpace(x.Source) && x.Distance <= 25.0 * MmToFeet))
+                .Where(x => x.IsNear && x.CrossingMatches &&
+                    (x.SourceMatches || (string.IsNullOrWhiteSpace(x.Source) && x.Distance <= 25.0 * MmToFeet)))
                 .OrderBy(x => x.SourceMatches ? 0 : 1)
                 .ThenBy(x => x.CrossingMatches ? 0 : 1)
                 .ThenBy(x => x.Distance)
                 .Select(x => x.Instance)
-                .FirstOrDefault();
+                .ToList();
+            if (matches.Count > 1)
+                throw new InvalidOperationException($"管線 {candidate.Pipe.Id}／宿主 {candidate.HostElement?.Id}：存在多支可能配對套管，未自動搬移或新增，請確認既有套管。");
+            return matches.SingleOrDefault();
         }
 
         private static void UpdateExistingSleeve(Document doc, FamilyInstance sleeve, PipeSleeveCandidate candidate, FamilySymbol symbol, double clearanceFeet, PipeSleeveOptions options)

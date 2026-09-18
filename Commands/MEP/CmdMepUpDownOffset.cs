@@ -5,6 +5,7 @@ using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Mechanical;
 using Autodesk.Revit.DB.Plumbing;
+using Autodesk.Revit.DB.Electrical;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
 using WinForms = System.Windows.Forms;
@@ -19,6 +20,31 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     public class CmdMepUpDownOffset : IExternalCommand
     {
         private const double DirectionTolerance = 1e-6;
+        private static MepUpDownOffsetOptions quickOptions;
+        private static Document quickDocument;
+
+        private static bool HasQuickOptions(Document doc)
+        {
+            // Revit may expose different managed wrappers for the same native document.
+            return quickOptions != null && doc != null && doc.IsValidObject &&
+                quickDocument != null && quickDocument.IsValidObject && quickDocument.Equals(doc);
+        }
+
+        internal static bool ConfigureQuickOptions(Document doc, double? startCenterMm = null, bool? directionUp = null)
+        {
+            if (doc == null || doc.IsFamilyDocument) throw new InvalidOperationException("請開啟專案文件。");
+            var choices = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                .OrderBy(l=>l.ProjectElevation).Select(l=>new MepTargetLevel {UniqueId=l.UniqueId,Name=l.Name,
+                    ElevationMm=UnitUtils.ConvertFromInternalUnits(l.ProjectElevation,UnitTypeId.Millimeters)}).ToList();
+            var current = HasQuickOptions(doc) ? quickOptions : null;
+            using (var form = new MepQuickDrawingForm(current ?? MepUpDownOffsetOptions.QuickDefault(), choices, startCenterMm, directionUp))
+            {
+                if (form.ShowDialog() != WinForms.DialogResult.OK) return false;
+                quickOptions = form.Options;
+                quickDocument = doc;
+                return true;
+            }
+        }
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
@@ -132,7 +158,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             ExternalCommandData commandData,
             ref string message,
             ElementSet elements,
-            bool offsetUp)
+            bool offsetUp,
+            bool quick = false)
         {
             UIDocument uiDoc = commandData.Application.ActiveUIDocument;
             Document doc = uiDoc.Document;
@@ -141,34 +168,70 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             {
                 Reference pickedRef = uiDoc.Selection.PickObject(
                     ObjectType.Element,
-                    new MepCurveSelectionFilter(),
-                    offsetUp ? "請選取要末端上行的直線 Pipe 或 Duct" : "請選取要末端下行的直線 Pipe 或 Duct");
+                    new MepCurveSelectionFilter(true),
+                    offsetUp ? "選取管、電管、風管或電纜線架的未連接端附近，建立上行" : "選取管、電管、風管或電纜線架的未連接端附近，建立下行");
 
                 MEPCurve target = doc.GetElement(pickedRef) as MEPCurve;
                 Line line = GetLine(target);
                 if (target == null || line == null)
                 {
-                    TaskDialog.Show("MEP 末端上下行", "目前僅支援直線 Pipe 或 Duct。");
+                    TaskDialog.Show("MEP 末端上下行", "請選取直線管、電管、風管或電纜線架。");
+                    return Result.Cancelled;
+                }
+
+                if (Math.Sqrt(line.Direction.X * line.Direction.X + line.Direction.Y * line.Direction.Y) <= DirectionTolerance)
+                {
+                    TaskDialog.Show("MEP 末端上下行", "此管段為立管，無法判定水平延伸方向；請選取水平或帶坡度的直線段。");
                     return Result.Cancelled;
                 }
 
                 MepUpDownOffsetOptions options = MepUpDownOffsetOptions.Default();
                 options.OffsetUp = offsetUp;
-                using (var form = new MepUpDownOffsetOptionsForm(options, offsetUp))
+                if (quick)
                 {
-                    if (form.ShowDialog() != WinForms.DialogResult.OK)
+                    XYZ selectedPoint = pickedRef.GlobalPoint ?? line.Evaluate(0.5, true);
+                    int selectedEnd = selectedPoint.DistanceTo(line.GetEndPoint(0)) <= selectedPoint.DistanceTo(line.GetEndPoint(1)) ? 0 : 1;
+                    double selectedZ = UnitUtils.ConvertFromInternalUnits(line.GetEndPoint(selectedEnd).Z, UnitTypeId.Millimeters);
+                    if (!HasQuickOptions(doc) && !ConfigureQuickOptions(doc, selectedZ, offsetUp)) return Result.Cancelled;
+                    options = new MepUpDownOffsetOptions {
+                        OffsetUp=offsetUp, UseNinetyDegree=quickOptions.UseNinetyDegree,
+                        AngleDegrees=quickOptions.AngleDegrees, OffsetHeightMm=quickOptions.OffsetHeightMm,
+                        MiddleLengthMm=quickOptions.MiddleLengthMm, UseTargetLevel=quickOptions.UseTargetLevel,
+                        TargetLevelUniqueId=quickOptions.TargetLevelUniqueId, TargetLevelOffsetMm=quickOptions.TargetLevelOffsetMm };
+                }
+                else
+                {
+                    using (var form = new MepUpDownOffsetOptionsForm(options, offsetUp, true))
                     {
-                        return Result.Cancelled;
+                        if (form.ShowDialog() != WinForms.DialogResult.OK) return Result.Cancelled;
+                        options = form.Options;
+                        options.OffsetUp = offsetUp;
                     }
-
-                    options = form.Options;
-                    options.OffsetUp = offsetUp;
                 }
 
                 XYZ pickedPoint = pickedRef.GlobalPoint ?? line.Evaluate(0.5, true);
                 int endIndex = pickedPoint.DistanceTo(line.GetEndPoint(0)) <= pickedPoint.DistanceTo(line.GetEndPoint(1))
                     ? 0
                     : 1;
+
+                if (options.UseTargetLevel)
+                {
+                    var level = string.IsNullOrEmpty(options.TargetLevelUniqueId) ? null : doc.GetElement(options.TargetLevelUniqueId) as Level;
+                    if (level == null) throw new InvalidOperationException("目標樓層已不存在，請重新開啟上下行設定選擇樓層。");
+                    double startMm = UnitUtils.ConvertFromInternalUnits(line.GetEndPoint(endIndex).Z, UnitTypeId.Millimeters);
+                    double levelMm = UnitUtils.ConvertFromInternalUnits(level.ProjectElevation, UnitTypeId.Millimeters);
+                    double delta = MepEndOffsetMath.TargetDeltaMm(startMm, levelMm, options.TargetLevelOffsetMm);
+                    if (Math.Abs(delta) < 10) throw new InvalidOperationException("目標管中心與目前端點高差不足 10 mm，不需建立上下行管段。");
+                    options.OffsetUp = delta > 0;
+                    options.OffsetHeightMm = Math.Abs(delta);
+                    var confirm = new TaskDialog("目標樓層定位") {
+                        MainInstruction=$"{(options.OffsetUp ? "上行" : "下行")} {Math.Abs(delta):0.###} mm → {level.Name}",
+                        MainContent=$"管中心偏移：{options.TargetLevelOffsetMm:0.###} mm\n"+
+                            $"內部管中心標高：{startMm:0.###} → {startMm+delta:0.###} mm\n\n依目標自動決定方向；本次定位不建立持續樓層約束。",
+                        CommonButtons=TaskDialogCommonButtons.Ok | TaskDialogCommonButtons.Cancel,
+                        DefaultButton=TaskDialogResult.Cancel };
+                    if ((!quick || options.OffsetUp != offsetUp) && confirm.Show() != TaskDialogResult.Ok) return Result.Cancelled;
+                }
 
                 if (!TryBuildEndOffsetPath(line, endIndex, options, out List<XYZ> path, out string pathFailReason))
                 {
@@ -177,20 +240,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
 
                 Connector endConnector = GetConnectorAt(target, line.GetEndPoint(endIndex));
-                if (endConnector != null && endConnector.IsConnected)
+                if (endConnector == null || endConnector.IsConnected)
                 {
-                    TaskDialog.Show("MEP 末端上下行", "選取的管線端點已連接，請選擇未連接端點再執行。");
+                    TaskDialog.Show("MEP 末端上下行", "選取端點已連接或無有效連接器，請選擇未連接端點再執行。");
                     return Result.Cancelled;
                 }
 
-                if (!ConfirmEndOffsetPreview(target, path, options, endIndex))
+                if (!quick && !ConfirmEndOffsetPreview(target, path, options, endIndex))
                 {
                     return Result.Cancelled;
                 }
 
                 List<ElementId> segmentIds;
                 int elbowCount;
-                using (Transaction tx = new Transaction(doc, offsetUp ? "MEP 末端上行" : "MEP 末端下行"))
+                using (Transaction tx = new Transaction(doc, options.OffsetUp ? "MEP 末端上行" : "MEP 末端下行"))
                 {
                     tx.Start();
                     if (!TryCreateEndOffsetSegments(doc, target, path, endIndex, out segmentIds, out elbowCount, out string failReason))
@@ -200,10 +263,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         return Result.Cancelled;
                     }
 
-                    tx.Commit();
+                    if (tx.Commit() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("末端上下行交易未完成；請檢查接頭或模型錯誤。");
                 }
 
-                TaskDialog.Show(
+                if (!quick) TaskDialog.Show(
                     "MEP 末端上下行",
                     "完成末端上下行。\n\n" +
                     $"建立管段：{segmentIds.Count}\n" +
@@ -444,6 +508,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             XYZ outward = endIndex == 0
                 ? (start - end).Normalize()
                 : (end - start).Normalize();
+            // Offset angles reference the world XY plane, not the source pipe's slope.
+            if (!MepEndOffsetMath.TryGetPlanDirection(outward.X, outward.Y, out double planX, out double planY))
+            {
+                failReason = "此管段無法判定水平延伸方向。";
+                return false;
+            }
+            outward = new XYZ(planX, planY, 0);
 
             double minSegmentLength = UnitUtils.ConvertToInternalUnits(10.0, UnitTypeId.Millimeters);
             double offsetHeight = UnitUtils.ConvertToInternalUnits(options.OffsetHeightMm, UnitTypeId.Millimeters);
@@ -467,7 +538,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 double angleRadians = options.AngleDegrees * Math.PI / 180.0;
                 if (angleRadians <= 0.0 || Math.Abs(Math.Tan(angleRadians)) < DirectionTolerance)
                 {
-                    failReason = "角度設定不正確，請使用 45、30、20 或 15 度。";
+                    failReason = "角度設定不正確，請使用有效的預設或自訂角度。";
                     return false;
                 }
 
@@ -539,11 +610,36 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var segments = new List<MEPCurve>();
             for (int i = 0; i < path.Count - 1; i++)
             {
-                ICollection<ElementId> copiedIds = ElementTransformUtils.CopyElement(doc, source.Id, new XYZ(1000.0, 0.0, 0.0));
-                MEPCurve segment = copiedIds
-                    .Select(id => doc.GetElement(id))
-                    .OfType<MEPCurve>()
-                    .FirstOrDefault();
+                XYZ start = endIndex == 0 ? path[i + 1] : path[i];
+                XYZ end = endIndex == 0 ? path[i] : path[i + 1];
+                if (start.DistanceTo(end) <= doc.Application.ShortCurveTolerance)
+                {
+                    failReason = $"第 {i + 1} 段短於 Revit 最小曲線長度。";
+                    return false;
+                }
+                MEPCurve segment;
+                if (source is Conduit || source is CableTray)
+                {
+                    ElementId levelId = source.ReferenceLevel?.Id ?? source.LevelId;
+                    if (!(doc.GetElement(levelId) is Level))
+                        throw new InvalidOperationException("原電管或電纜線架缺少有效樓層基準。");
+                    if (source is Conduit)
+                    {
+                        segment = Conduit.Create(doc, source.GetTypeId(), start, end, levelId);
+                        CopySize(source, segment, BuiltInParameter.RBS_CONDUIT_DIAMETER_PARAM);
+                    }
+                    else
+                    {
+                        segment = CableTray.Create(doc, source.GetTypeId(), start, end, levelId);
+                        CopySize(source, segment, BuiltInParameter.RBS_CABLETRAY_WIDTH_PARAM);
+                        CopySize(source, segment, BuiltInParameter.RBS_CABLETRAY_HEIGHT_PARAM);
+                    }
+                }
+                else
+                {
+                    ICollection<ElementId> copiedIds = ElementTransformUtils.CopyElement(doc, source.Id, new XYZ(1000.0, 0.0, 0.0));
+                    segment = copiedIds.Select(id => doc.GetElement(id)).OfType<MEPCurve>().FirstOrDefault();
+                }
                 if (segment == null)
                 {
                     failReason = $"建立第 {i + 1} 段管線失敗。";
@@ -583,6 +679,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
 
             return true;
+        }
+
+        private static void CopySize(MEPCurve source, MEPCurve target, BuiltInParameter parameterId)
+        {
+            Parameter from = source.get_Parameter(parameterId);
+            Parameter to = target.get_Parameter(parameterId);
+            if (from == null || to == null || to.IsReadOnly || !to.Set(from.AsDouble()))
+                throw new InvalidOperationException("無法沿用原管線尺寸，已取消本次建立。");
         }
 
         private static bool TryReplaceWithSegments(
@@ -685,7 +789,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
                 catch
                 {
-                    // Keep the created path even if a fitting family/routing preference is unavailable.
+                    // Caller rejects an incomplete fitting count and rolls back the transaction.
                 }
             }
 
@@ -768,14 +872,18 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         {
             if (element is Pipe) return "Pipe";
             if (element is Duct) return "Duct";
+            if (element is Conduit) return "電管";
+            if (element is CableTray) return "電纜線架";
             return element?.GetType().Name ?? "MEP";
         }
 
         private class MepCurveSelectionFilter : ISelectionFilter
         {
+            private readonly bool includeElectrical;
+            public MepCurveSelectionFilter(bool includeElectrical = false) { this.includeElectrical = includeElectrical; }
             public bool AllowElement(Element elem)
             {
-                return elem is Pipe || elem is Duct;
+                return elem is Pipe || elem is Duct || (includeElectrical && (elem is Conduit || elem is CableTray));
             }
 
             public bool AllowReference(Reference reference, XYZ position)
@@ -821,13 +929,74 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         }
     }
 
+    [Transaction(TransactionMode.Manual)]
+    public sealed class CmdMepQuickUp : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
+            => CmdMepUpDownOffset.ExecuteEndOffset(data, ref message, elements, true, true);
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    public sealed class CmdMepQuickDown : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
+            => CmdMepUpDownOffset.ExecuteEndOffset(data, ref message, elements, false, true);
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    public sealed class CmdMepQuickSettings : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
+        {
+            try { return CmdMepUpDownOffset.ConfigureQuickOptions(data.Application.ActiveUIDocument?.Document) ? Result.Succeeded : Result.Cancelled; }
+            catch (Exception ex) { message=ex.Message;TaskDialog.Show("快速上下行設定",message);return Result.Failed; }
+        }
+    }
+
+    internal static class MepEndOffsetMath
+    {
+        internal static double TargetDeltaMm(double startMm, double levelMm, double offsetMm)
+        {
+            double delta=levelMm+offsetMm-startMm;
+            if (double.IsNaN(delta) || double.IsInfinity(delta)) throw new ArgumentException("標高必須為有效數值。");
+            return delta;
+        }
+        internal static bool TryGetPlanDirection(double x, double y, out double planX, out double planY)
+        {
+            planX = planY = 0;
+            double length = Math.Sqrt(x*x + y*y);
+            if (double.IsNaN(length) || double.IsInfinity(length) || length <= 1e-6) return false;
+            planX = x / length;
+            planY = y / length;
+            return true;
+        }
+    }
+
+    internal sealed class MepTargetLevel
+    {
+        public string UniqueId {get;set;}
+        public string Name {get;set;}
+        public double ElevationMm {get;set;}
+        public override string ToString() => Name;
+    }
+
     internal class MepUpDownOffsetOptions
     {
+        public static MepUpDownOffsetOptions QuickDefault()
+        {
+            var options = Default();
+            options.UseNinetyDegree = true;
+            options.MiddleLengthMm = 0;
+            return options;
+        }
         public bool OffsetUp { get; set; }
         public bool UseNinetyDegree { get; set; }
         public double AngleDegrees { get; set; }
         public double OffsetHeightMm { get; set; }
         public double MiddleLengthMm { get; set; }
+        public bool UseTargetLevel {get;set;}
+        public string TargetLevelUniqueId {get;set;}
+        public double TargetLevelOffsetMm {get;set;}
 
         public static MepUpDownOffsetOptions Default()
         {
@@ -849,12 +1018,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private readonly WinForms.RadioButton _rbNinety;
         private readonly WinForms.RadioButton _rbAngle;
         private readonly WinForms.ComboBox _cmbAngle;
+        private readonly WinForms.NumericUpDown _numCustomAngle;
         private readonly WinForms.NumericUpDown _numOffsetHeight;
         private readonly WinForms.NumericUpDown _numMiddleLength;
+        private readonly WinForms.ComboBox _targetMode;
+        private readonly WinForms.ComboBox _targetLevel;
+        private readonly WinForms.NumericUpDown _targetOffset;
 
         public MepUpDownOffsetOptions Options { get; private set; }
 
-        public MepUpDownOffsetOptionsForm(MepUpDownOffsetOptions options, bool? forcedOffsetUp = null)
+        public MepUpDownOffsetOptionsForm(MepUpDownOffsetOptions options, bool? forcedOffsetUp = null, bool endMode = false,
+            List<MepTargetLevel> targetLevels = null)
         {
             Options = options;
             Text = forcedOffsetUp.HasValue
@@ -881,7 +1055,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 Width = 120,
                 DropDownStyle = WinForms.ComboBoxStyle.DropDownList
             };
-            _cmbAngle.Items.AddRange(new object[] { "45", "30", "20", "15" });
+            _cmbAngle.Items.AddRange(new object[] { "45", "30", "20", "15", "自訂" });
+            _numCustomAngle = new WinForms.NumericUpDown {
+                Left=248, Top=84, Width=80, Minimum=1, Maximum=89,
+                DecimalPlaces=1, Increment=0.5m, Visible=false };
+            _cmbAngle.SelectedIndexChanged += (_, __) => {
+                _numCustomAngle.Visible = (_cmbAngle.SelectedItem as string) == "自訂";
+            };
+            _rbAngle.CheckedChanged += (_, __) => {
+                _cmbAngle.Enabled = _rbAngle.Checked;
+                _numCustomAngle.Enabled = _rbAngle.Checked;
+            };
 
             var lblOffset = new WinForms.Label { Left = 16, Top = 124, Width = 120, Text = "偏移高度 (mm)" };
             _numOffsetHeight = new WinForms.NumericUpDown
@@ -895,7 +1079,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 Increment = 50
             };
 
-            var lblMiddle = new WinForms.Label { Left = 16, Top = 160, Width = 120, Text = "避讓中段 (mm)" };
+            var lblMiddle = new WinForms.Label { Left = 16, Top = 160, Width = 120, Text = endMode ? "末端水平段 (mm)" : "避讓中段 (mm)" };
             _numMiddleLength = new WinForms.NumericUpDown
             {
                 Left = 150,
@@ -909,12 +1093,25 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
             var btnOk = new WinForms.Button { Left = 170, Top = 210, Width = 75, Text = "確定", DialogResult = WinForms.DialogResult.OK };
             var btnCancel = new WinForms.Button { Left = 255, Top = 210, Width = 75, Text = "取消", DialogResult = WinForms.DialogResult.Cancel };
-            btnOk.Click += (_, __) => SaveOptions();
+            btnOk.Click += (_, __) => {
+                if (_targetMode?.SelectedIndex == 1 && !(_targetLevel.SelectedItem is MepTargetLevel))
+                {
+                    DialogResult=WinForms.DialogResult.None;
+                    WinForms.MessageBox.Show(this,"請選擇有效的目標樓層。","上下行設定");
+                    return;
+                }
+                SaveOptions();
+            };
 
+            // Radio buttons are exclusive within a parent: direction and angle need separate groups.
+            var directionPanel = new WinForms.Panel { Left=0, Top=0, Width=340, Height=46 };
+            directionPanel.Controls.AddRange(new WinForms.Control[] {lblDirection, _rbUp, _rbDown});
+            var anglePanel = new WinForms.Panel { Left=0, Top=48, Width=340, Height=34 };
+            lblMode.Top=6;_rbNinety.Top=4;_rbAngle.Top=4;
+            anglePanel.Controls.AddRange(new WinForms.Control[] {lblMode, _rbNinety, _rbAngle});
             Controls.AddRange(new WinForms.Control[]
             {
-                lblDirection, _rbUp, _rbDown,
-                lblMode, _rbNinety, _rbAngle, _cmbAngle,
+                directionPanel, anglePanel, _cmbAngle, _numCustomAngle,
                 lblOffset, _numOffsetHeight,
                 lblMiddle, _numMiddleLength,
                 btnOk, btnCancel
@@ -933,23 +1130,52 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
             _rbNinety.Checked = options.UseNinetyDegree;
             _rbAngle.Checked = !options.UseNinetyDegree;
-            _cmbAngle.SelectedItem = options.AngleDegrees.ToString("0");
-            if (_cmbAngle.SelectedIndex < 0) _cmbAngle.SelectedItem = "45";
+            _cmbAngle.SelectedItem = options.AngleDegrees.ToString("0.########", System.Globalization.CultureInfo.InvariantCulture);
+            _numCustomAngle.Value = Math.Max(1m, Math.Min(89m, (decimal)options.AngleDegrees));
+            if (_cmbAngle.SelectedIndex < 0) _cmbAngle.SelectedItem = "自訂";
+            _cmbAngle.Enabled = _rbAngle.Checked;
+            _numCustomAngle.Enabled = _rbAngle.Checked;
             _numOffsetHeight.Value = (decimal)options.OffsetHeightMm;
             _numMiddleLength.Value = (decimal)options.MiddleLengthMm;
+            if (targetLevels != null)
+            {
+                Height=420;btnOk.Top=340;btnCancel.Top=340;
+                lblDirection.Text="相對高度方向";
+                _targetMode=new WinForms.ComboBox {Left=150,Top=196,Width=178,DropDownStyle=WinForms.ComboBoxStyle.DropDownList};
+                _targetMode.Items.AddRange(new object[]{"相對高度","目標樓層＋偏移"});
+                _targetLevel=new WinForms.ComboBox {Left=150,Top=232,Width=178,DropDownStyle=WinForms.ComboBoxStyle.DropDownList};
+                foreach(var level in targetLevels) _targetLevel.Items.Add(level);
+                _targetLevel.SelectedItem=targetLevels.FirstOrDefault(l=>l.UniqueId==options.TargetLevelUniqueId);
+                _targetOffset=new WinForms.NumericUpDown {Left=150,Top=268,Width=178,Minimum=-1000000,Maximum=1000000,DecimalPlaces=1,Increment=50,
+                    Value=(decimal)options.TargetLevelOffsetMm};
+                Controls.AddRange(new WinForms.Control[]{
+                    new WinForms.Label{Left=16,Top=200,Width=130,Text="定位方式"},_targetMode,
+                    new WinForms.Label{Left=16,Top=236,Width=130,Text="目標樓層"},_targetLevel,
+                    new WinForms.Label{Left=16,Top=272,Width=130,Text="管中心偏移 (mm)"},_targetOffset});
+                _targetMode.SelectedIndexChanged+=(_,__)=>{
+                    bool target=_targetMode.SelectedIndex==1;
+                    _targetLevel.Enabled=target;_targetOffset.Enabled=target;_numOffsetHeight.Enabled=!target;
+                    directionPanel.Visible=!target;
+                };
+                _targetMode.SelectedIndex=options.UseTargetLevel ? 1 : 0;
+            }
         }
 
         private void SaveOptions()
         {
-            double angle = 45.0;
-            double.TryParse(_cmbAngle.SelectedItem?.ToString(), out angle);
+            double angle = (_cmbAngle.SelectedItem as string) == "自訂"
+                ? (double)_numCustomAngle.Value
+                : double.Parse(_cmbAngle.SelectedItem.ToString(), System.Globalization.CultureInfo.InvariantCulture);
             Options = new MepUpDownOffsetOptions
             {
                 OffsetUp = _rbUp.Checked,
                 UseNinetyDegree = _rbNinety.Checked,
                 AngleDegrees = angle,
                 OffsetHeightMm = (double)_numOffsetHeight.Value,
-                MiddleLengthMm = (double)_numMiddleLength.Value
+                MiddleLengthMm = (double)_numMiddleLength.Value,
+                UseTargetLevel = _targetMode?.SelectedIndex == 1,
+                TargetLevelUniqueId = (_targetLevel?.SelectedItem as MepTargetLevel)?.UniqueId,
+                TargetLevelOffsetMm = _targetOffset == null ? 0 : (double)_targetOffset.Value
             };
         }
     }

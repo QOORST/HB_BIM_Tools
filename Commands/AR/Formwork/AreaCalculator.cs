@@ -158,6 +158,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 // 🚀 使用並行計算處理多個結構元素
                 foreach (var element in structuralElements)
                 {
+                    if (!ElementCategorizer.CanDeductFormwork(element)) continue;
                     processedCount++;
                     var elementSolids = GeometryExtractor.GetElementSolids(element);
                     

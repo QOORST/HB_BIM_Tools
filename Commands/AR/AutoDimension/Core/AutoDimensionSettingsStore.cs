@@ -24,6 +24,8 @@ internal sealed class AutoDimensionSavedSettings
 
     public double OffsetMm { get; set; } = 900.0;
 
+    public bool GridOffsetsInPaperSpace { get; set; }
+
     public double GridPrimaryOffsetMm { get; set; } = 1000.0;
 
     public double GridOverallOffsetMm { get; set; } = 2000.0;
@@ -44,6 +46,7 @@ internal sealed class AutoDimensionSavedSettings
             ColumnLeftRightSide = options.ColumnLeftRightSide,
             ColumnFrontBackSide = options.ColumnFrontBackSide,
             OffsetMm = UnitUtils.ConvertFromInternalUnits(options.OffsetInternal, UnitTypeId.Millimeters),
+            GridOffsetsInPaperSpace = options.GridOffsetsInPaperSpace,
             GridPrimaryOffsetMm = UnitUtils.ConvertFromInternalUnits(options.GridPrimaryOffsetInternal, UnitTypeId.Millimeters),
             GridOverallOffsetMm = UnitUtils.ConvertFromInternalUnits(options.GridOverallOffsetInternal, UnitTypeId.Millimeters),
             DimensionTypeName = options.DimensionTypeName,

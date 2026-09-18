@@ -57,6 +57,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 message = ex.Message;
                 return Result.Failed;
             }
+            finally
+            {
+                GeometryExtractor.ClearGeometryCache();
+            }
         }
         
 
@@ -861,7 +865,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     {
                         totalChecked++;
                         
-                        if (element.Id == hostElement.Id) continue; // 跳過自己
+                        if (element.Id == hostElement.Id || !ElementCategorizer.CanDeductFormwork(element)) continue;
 
                         var elemBBox = element.get_BoundingBox(null);
                         if (elemBBox != null && BoundingBoxesOverlap(expandedBBox, elemBBox))

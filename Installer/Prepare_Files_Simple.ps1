@@ -1,4 +1,5 @@
 # Prepare Installer Files
+$ErrorActionPreference = 'Stop'
 Write-Host "===============================================================" -ForegroundColor Cyan
 Write-Host "  Preparing Installer Files" -ForegroundColor Cyan
 Write-Host "===============================================================" -ForegroundColor Cyan
@@ -11,6 +12,17 @@ $familyLibraryProjectRoot = Join-Path $revitApiRoot "Codex\work\family-library-m
 $supportedVersions = @("2022", "2024", "2025", "2026")
 $netStandardOpenXmlVersions = @("2025", "2026")
 $runtimeResourceExtensions = @(".png", ".ico", ".jpg", ".jpeg", ".rfa")
+$familyRoot = Split-Path $familyLibraryProjectRoot -Parent
+foreach ($folder in @('database', 'previewer')) {
+    $source = Join-Path $familyRoot $folder
+    if (-not (Test-Path -LiteralPath $source -PathType Container) -or
+        @(Get-ChildItem -LiteralPath $source -File -Recurse).Count -eq 0) {
+        throw "Family library folder missing or empty: $source"
+    }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $familyRoot 'database\family_library.sqlite') -PathType Leaf)) {
+    throw 'Family library SQLite database is missing.'
+}
 
 function Resolve-FamilyLibraryDll {
     param(
@@ -98,8 +110,7 @@ foreach ($version in $supportedVersions) {
     $familyLibraryDlls[$version] = Resolve-FamilyLibraryDll -Version $version -FallbackVersion $fallbackVersion
 
     if ([string]::IsNullOrWhiteSpace($familyLibraryDlls[$version]) -or -not (Test-Path $familyLibraryDlls[$version])) {
-        Write-Host "[WARNING] CompanyFamilyLibraryMvp.dll not found for Revit $version; the company library button will be skipped for that version." -ForegroundColor Yellow
-        Write-Host "Path: $($familyLibraryDlls[$version])" -ForegroundColor Gray
+        throw "CompanyFamilyLibraryMvp.dll not found for Revit $version."
     }
 }
 
@@ -224,8 +235,13 @@ Write-Host "Creating version directories..." -ForegroundColor Yellow
 
 foreach ($version in $supportedVersions) {
     $versionDir = Join-Path $installerDir $version
+    $resolvedVersionDir = [IO.Path]::GetFullPath($versionDir)
+    $expectedVersionDir = [IO.Path]::Combine([IO.Path]::GetFullPath($installerDir), $version)
+    if ($resolvedVersionDir -ne $expectedVersionDir -or $version -notmatch '^202[2456]$') {
+        throw "Unsafe staging path: $versionDir"
+    }
     if (Test-Path $versionDir) {
-        Remove-Item $versionDir -Recurse -Force
+        Remove-Item -LiteralPath $resolvedVersionDir -Recurse -Force
     }
 
     New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
@@ -234,6 +250,10 @@ foreach ($version in $supportedVersions) {
     $familyLibraryDll = $familyLibraryDlls[$version]
     if (-not [string]::IsNullOrWhiteSpace($familyLibraryDll) -and (Test-Path $familyLibraryDll)) {
         Copy-Item $familyLibraryDll -Destination $versionDir -Force
+
+        foreach ($folder in @('database', 'previewer')) {
+            Copy-Item -LiteralPath (Join-Path $familyRoot $folder) -Destination $versionDir -Recurse -Force
+        }
     }
 
     if ($netStandardOpenXmlVersions -contains $version) {
