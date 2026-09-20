@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.Attributes;
@@ -29,6 +29,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
 
                 UIDocument uidoc = commandData.Application.ActiveUIDocument;
+                if (uidoc == null)
+                {
+                    TaskDialog.Show("自動套管", "請先開啟模型，再執行自動套管。");
+                    return Result.Cancelled;
+                }
                 Document doc = uidoc.Document;
 
 #if REVIT2025 || REVIT2026
@@ -48,22 +53,42 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     .Where(element => element != null)
                     .ToList();
 
+                PipeSleeveOptions options;
+                using (var settings = new PipeSleeveSettingsForm(pipes.Count))
+                {
+                    var owner = new System.Windows.Forms.NativeWindow();
+                    owner.AssignHandle(commandData.Application.MainWindowHandle);
+                    try
+                    {
+                        if (settings.ShowDialog(owner) != System.Windows.Forms.DialogResult.OK)
+                            return Result.Cancelled;
+                    }
+                    finally { owner.ReleaseHandle(); }
+                    options = new PipeSleeveOptions
+                    {
+                        ClearanceMm = settings.ClearanceMm,
+                        IncludeCurrentModel = settings.IncludeCurrentModel,
+                        IncludeLinks = settings.IncludeLinks,
+                        ExcludeAdditionElements = settings.ExcludeAdditionElements,
+                        AutoNumber = settings.AutoNumber,
+                        SkipExisting = settings.SkipExisting,
+                        LimitToActiveView = settings.LimitToActiveView,
+                        ActiveViewId = doc.ActiveView.Id
+                    };
+                }
+
                 using (Transaction tx = new Transaction(doc, "自動放置管線套管"))
                 {
                     tx.Start();
                     PipeSleeveResult result = PipeSleeveService.CreateSleeves(
                         doc,
                         pipes,
-                        new PipeSleeveOptions
-                        {
-                            ClearanceMm = 50.0,
-                            IncludeLinks = true,
-                            AutoNumber = true,
-                            SkipExisting = true,
-                            LimitToActiveView = true,
-                            ActiveViewId = doc.ActiveView != null ? doc.ActiveView.Id : ElementId.InvalidElementId
-                        });
-                    tx.Commit();
+                        options);
+                    if (tx.Commit() != TransactionStatus.Committed)
+                    {
+                        TaskDialog.Show("自動套管", "Revit 未成功提交套管變更，請檢查失敗訊息。");
+                        return Result.Failed;
+                    }
 
                     TaskDialog.Show("管線套管", result.ToTaskDialogText());
                     return result.CreatedCount > 0 || result.SkippedExistingCount > 0
