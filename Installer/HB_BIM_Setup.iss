@@ -31,7 +31,7 @@ DisableDirPage=yes
 
 ; 輸出設定
 OutputDir=..\Output
-OutputBaseFilename=HB_BIM_Tools_v{#MyAppVersion}_Test_20260918_MepUi_Setup
+OutputBaseFilename=HB_BIM_Tools_v{#MyAppVersion}_Test_20260920_AutoJoinUi_Setup
 ; SetupIconFile=..\Resources\Icons\license_32.png  ; PNG 不支援，需要 ICO 檔案
 
 ; 壓縮設定

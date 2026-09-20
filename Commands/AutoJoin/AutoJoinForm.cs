@@ -64,7 +64,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     public void EnableModeless()
     {
         _modeless = true;
-        MinimumSize = new Size(840, 760);
+        MinimumSize = new Size(840, 800);
         if (CancelButton is Button closeButton) closeButton.Text = "關閉";
         Height = Math.Min(820, Screen.PrimaryScreen.WorkingArea.Height);
         var current = new Button { Text = "使用目前選取", Width = 125, Height = 30 };
@@ -76,6 +76,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         _selectionBar.Controls.Add(current);
         _selectionBar.Controls.Add(pick);
         _selectionBar.Visible = true;
+        _root.RowStyles[1].Height = _scopeCombo.PreferredHeight + _selectionBar.Height + 64;
         _resultPanel.Visible = true;
         _root.RowStyles[5].Height = 108;
         FormClosing += (_, e) => { if (_busy) e.Cancel = true; };
@@ -274,7 +275,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         priorityGroup.Controls.Add(priorityLayout);
 
         var detailGroup = new GroupBox { Text = "進階選項", Dock = DockStyle.Fill, Padding = new Padding(8, 20, 8, 6) };
-        var detailLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(4, 0, 4, 2) };
+        var detailLayout = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown,
+            WrapContents = false, Padding = new Padding(4, 0, 4, 2) };
 
         _sameCategoryCheckbox.Text = "允許同類別接合";
         _sameCategoryCheckbox.AutoSize = true;
@@ -361,7 +364,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 106));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
 
@@ -375,7 +378,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         root.SetColumnSpan(root.GetControlFromPosition(0, 1), 2);
         root.Controls.Add(FlatSection(categoryGroup, "02  處理類別"), 0, 2);
         root.Controls.Add(FlatSection(priorityGroup, "03  接合優先序 · 上方優先"), 1, 2);
-        root.Controls.Add(FlatSection(detailGroup, "接合選項"), 0, 3);
+        var detailSection = FlatSection(detailGroup, "接合選項");
+        detailSection.AutoSize = true;
+        detailSection.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        root.Controls.Add(detailSection, 0, 3);
         root.SetColumnSpan(root.GetControlFromPosition(0, 3), 2);
         var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
