@@ -56,6 +56,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 PipeSleeveOptions options;
                 using (var settings = new PipeSleeveSettingsForm(pipes.Count))
                 {
+                    var symbols = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
+                        .Where(s=>s.Category!=null && (s.Category.Id.GetIdValue()==(long)BuiltInCategory.OST_GenericModel || s.Category.Id.GetIdValue()==(long)BuiltInCategory.OST_PipeAccessory))
+                        .Where(s=> (s.FamilyName+" "+s.Name).IndexOf("套管",StringComparison.OrdinalIgnoreCase)>=0 || (s.FamilyName+" "+s.Name).IndexOf("sleeve",StringComparison.OrdinalIgnoreCase)>=0 || (s.FamilyName+" "+s.Name).Contains("開孔"))
+                        .OrderBy(s=>s.FamilyName).ThenBy(s=>s.Name).ToList();
+                    settings.ConfigureSizes(PipeSleeveNominalRules.Mapping.Keys.OrderBy(x=>x).Select(x=>new PipeSleeveSettingsForm.SizeRow { DN=x }).ToList(), symbols.Select(s=>new PipeSleeveSettingsForm.SymbolChoice {
+                        Id=s.Id.GetIdValue().ToString(), Name=s.FamilyName+": "+s.Name, Family=s.FamilyName, Type=s.Name }).ToList());
                     var owner = new System.Windows.Forms.NativeWindow();
                     owner.AssignHandle(commandData.Application.MainWindowHandle);
                     try
@@ -66,6 +72,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     finally { owner.ReleaseHandle(); }
                     options = new PipeSleeveOptions
                     {
+                        PreserveNominalTypeDimensions = true,
+                        UseDiameterSymbolMap = settings.UseDiameterMap,
+                        SleeveSymbolByDiameterMm = settings.SizeRows.Where(r=>!string.IsNullOrEmpty(r.SymbolId)).ToDictionary(r=>r.DN,r=>symbols.First(s=>s.Id.GetIdValue().ToString()==r.SymbolId).Id),
+                        DefaultWallSleeveSymbolId = symbols.FirstOrDefault(s=>s.Id.GetIdValue().ToString()==settings.WallSymbolId)?.Id ?? ElementId.InvalidElementId,
+                        DefaultFloorSleeveSymbolId = symbols.FirstOrDefault(s=>s.Id.GetIdValue().ToString()==settings.FloorSymbolId)?.Id ?? ElementId.InvalidElementId,
                         ClearanceMm = settings.ClearanceMm,
                         IncludeCurrentModel = settings.IncludeCurrentModel,
                         IncludeLinks = settings.IncludeLinks,

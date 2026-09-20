@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -57,13 +57,40 @@ internal static class Program {
         catch(ArgumentException) { badLayout=true; }
         Check(badLayout,"reject nonfinite layout inputs");
         using(var sleeves=new YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveSettingsForm(12)) {
+            var savedSleeves=new YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveSettings {
+                IncludeCurrentModel=true, DefaultWallSleeveDisplayName="測試套管: 100A",
+                SizeMappings=new() { new() { NominalDiameterMm=50,SleeveDisplayName="測試套管: 100A" } }
+            };
+            sleeves.ConfigureSizes(new List<YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveSettingsForm.SizeRow> {
+                new() { DN=50 }, new() { DN=100 }
+            }, new List<YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveSettingsForm.SymbolChoice> {
+                new() { Id="1",Name="測試套管: 100A",Family="測試套管",Type="100A" },
+                new() { Id="2",Name="測試套管: 125A",Family="測試套管",Type="125A" }
+            },savedSleeves);
             ShowForPreview(sleeves);
-            Check(sleeves.ClearanceMm==50 && sleeves.IncludeCurrentModel && sleeves.IncludeLinks && sleeves.AutoNumber && sleeves.SkipExisting && sleeves.LimitToActiveView,"sleeve settings preserve previous defaults");
+            Check(sleeves.SizeRows[0].SymbolId=="1","saved 2024 mapping overrides default");
+            Check(sleeves.SizeRows[1].SymbolId=="2","nominal default matches exact 125A type");
+            Check(sleeves.WallSymbolId=="1","2024 common family restored by name");
+            Check(YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveNominalRules.Mapping[40]==50 && YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveNominalRules.Mapping[65]==80,"company grouped nominal defaults");
+            Check(!YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveNominalRules.Matches("1000A",100),"nominal type match excludes partial sizes");
+            Check(sleeves.ClearanceMm==50 && sleeves.IncludeCurrentModel && sleeves.IncludeLinks && sleeves.AutoNumber && sleeves.SkipExisting && sleeves.LimitToActiveView,"sleeve settings preserve saved defaults");
             var toggles=Descendants(sleeves).OfType<CheckBox>().ToList();
             foreach(var toggle in toggles) toggle.Checked=false;
             Check(!sleeves.IncludeCurrentModel && !sleeves.IncludeLinks && !sleeves.ExcludeAdditionElements && !sleeves.AutoNumber && !sleeves.SkipExisting && !sleeves.LimitToActiveView,"sleeve settings read current choices");
             foreach(var toggle in toggles) toggle.Checked=true;
-            Render(sleeves,Path.Combine(output,"pipe-sleeve-settings.png")); sleeves.Close();
+            Render(sleeves,Path.Combine(output,"pipe-sleeve-settings.png"));
+            var sleeveTabs=Descendants(sleeves).OfType<TabControl>().Single();
+            Check(sleeveTabs.TabPages.Count==2,"sleeve settings tabs with permanent beam reference");
+            sleeveTabs.SelectedIndex=1;
+            Render(sleeves,Path.Combine(output,"pipe-sleeve-processing.png"));
+            Check(Descendants(sleeves).OfType<YD_RevitTools.LicenseManager.Commands.MEP.SleeveBeamReferencePanel>().Single().Visible,"beam reference remains visible on processing tab");
+            Render(sleeves,Path.Combine(output,"pipe-sleeve-beam-reference.png"));
+            sleeves.Size=sleeves.MinimumSize;
+            Render(sleeves,Path.Combine(output,"pipe-sleeve-beam-reference-compact.png"));
+            sleeveTabs.SelectedIndex=0; sleeves.Size=sleeves.MinimumSize;
+            Render(sleeves,Path.Combine(output,"pipe-sleeve-compact.png"));
+            Check(Descendants(sleeves).OfType<Button>().Where(b=>b.Visible).All(b=>b.Parent.ClientRectangle.Contains(b.Bounds)),"sleeve footer buttons fit compact window");
+            sleeves.Close();
         }
         var crossing = new List<YDBIM.AutoDimension.Core.DimensionTextBox> {
             new() { Index=10, Along=0, Across=0, Width=8, Height=3 },

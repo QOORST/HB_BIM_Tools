@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -11,6 +11,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 {
     internal sealed class PipeSleeveOptions
     {
+        public bool PreserveNominalTypeDimensions { get; set; }
         public double ClearanceMm { get; set; } = 50.0;
         public bool IncludeCurrentModel { get; set; } = true;
         public bool IncludeLinks { get; set; } = true;
@@ -174,7 +175,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                     doc.Regenerate();
                     MoveSleeveToPoint(doc, sleeve, candidate.Point);
-                    SetSleeveParameters(sleeve, candidate, options.ClearanceMm * MmToFeet, options.AutoNumber ? $"PS-{sleeveNumber:D3}" : null);
+                    SetSleeveParameters(sleeve, candidate, options.ClearanceMm * MmToFeet, options.AutoNumber ? $"PS-{sleeveNumber:D3}" : null, options.PreserveNominalTypeDimensions);
                     AlignSleeveToDirection(doc, sleeve, candidate.Point, candidate.SleeveDirection ?? candidate.Direction);
                     SetSleeveLevelAndOffset(doc, sleeve, candidate.Point);
                     MoveSleeveToPoint(doc, sleeve, candidate.Point);
@@ -1748,7 +1749,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
             if (options.UseDiameterSymbolMap && options.SleeveSymbolByDiameterMm != null && options.SleeveSymbolByDiameterMm.Count > 0)
             {
-                ElementId mappedId = FindMappedSleeveSymbolId(candidate.PipeNominalDiameterMm, options.SleeveSymbolByDiameterMm);
+                ElementId mappedId = options.PreserveNominalTypeDimensions
+                    ? (options.SleeveSymbolByDiameterMm.TryGetValue(candidate.PipeNominalDiameterMm,out var exact) ? exact : ElementId.InvalidElementId)
+                    : FindMappedSleeveSymbolId(candidate.PipeNominalDiameterMm, options.SleeveSymbolByDiameterMm);
                 FamilySymbol mapped = GetFamilySymbol(doc, mappedId);
                 if (mapped != null && !IsOpeningSymbol(mapped))
                 {
@@ -1756,6 +1759,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
             }
 
+            if (options.PreserveNominalTypeDimensions && options.UseDiameterSymbolMap) return null;
             if (selectedDefault != null && !IsOpeningSymbol(selectedDefault))
             {
                 return selectedDefault;
@@ -2155,12 +2159,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
             return int.TryParse(text, out int value) ? value : 0;
         }
-        private static void SetSleeveParameters(FamilyInstance sleeve, PipeSleeveCandidate candidate, double clearanceFeet, string number)
+        private static void SetSleeveParameters(FamilyInstance sleeve, PipeSleeveCandidate candidate, double clearanceFeet, string number, bool preserveDiameter = false)
         {
             if (!string.IsNullOrWhiteSpace(number)) SetString(sleeve, number, BuiltInParameter.ALL_MODEL_MARK, "套管編號", "編號", "Sleeve Number");
 
             double sleeveDiameter = candidate.PipeDiameterFeet + clearanceFeet;
-            SetDouble(sleeve, sleeveDiameter, "套管直徑", "直徑", "Diameter", "Sleeve Diameter", "Diatot", "邊界寬度", "大小");
+            if (!preserveDiameter || candidate.IsRectangularDuct) SetDouble(sleeve, sleeveDiameter, "套管直徑", "直徑", "Diameter", "Sleeve Diameter", "Diatot", "邊界寬度", "大小");
             SetDouble(sleeve, candidate.PipeDiameterFeet, "管徑", "Pipe Diameter");
             if (candidate.IsRectangularDuct)
             {
@@ -2378,7 +2382,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
 
             MoveSleeveToPoint(doc, sleeve, candidate.Point);
-            SetSleeveParameters(sleeve, candidate, clearanceFeet, null);
+            SetSleeveParameters(sleeve, candidate, clearanceFeet, null, options.PreserveNominalTypeDimensions);
             AlignSleeveToDirection(doc, sleeve, candidate.Point, candidate.SleeveDirection ?? candidate.Direction);
             SetSleeveLevelAndOffset(doc, sleeve, candidate.Point);
             MoveSleeveToPoint(doc, sleeve, candidate.Point);

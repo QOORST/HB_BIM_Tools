@@ -8,6 +8,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Helpers/Data/CsvRecordReader.cs" Link="CsvRecordReader.cs" />
+    <Compile Include="../../Commands/MEP/PipeSleeveSettings.cs" Link="PipeSleeveSettings.cs" />
+    <Compile Include="../../Commands/MEP/SleeveBeamReferencePanel.cs" Link="SleeveBeamReferencePanel.cs" />
+    <Compile Include="../../Commands/MEP/PipeSleeveNominalRules.cs" Link="PipeSleeveNominalRules.cs" />
     <Compile Include="../../Commands/MEP/PipeSleeveSettingsForm.cs" Link="PipeSleeveSettingsForm.cs" />
     <Compile Include="../../Commands/AR/AutoDimension/Core/DimensionTextLayout.cs" Link="DimensionTextLayout.cs" />
     <Compile Include="../../Commands/AR/AutoDimension/UI/DimensionTextCleanupForm.cs" Link="DimensionTextCleanupForm.cs" />

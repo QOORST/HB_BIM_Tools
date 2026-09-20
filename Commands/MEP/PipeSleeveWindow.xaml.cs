@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -325,7 +325,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private void LoadDefaultSizeRows()
         {
             SleeveSizeRows.Clear();
-            int[] sizes = { 15, 20, 25, 32, 40, 50, 65, 80, 100, 125, 150, 200 };
+            int[] sizes = PipeSleeveNominalRules.Mapping.Keys.Concat((_settings.SizeMappings ?? new List<PipeSleeveSizeSetting>()).Select(x=>x.NominalDiameterMm)).Distinct().OrderBy(x=>x).ToArray();
 
             foreach (int size in sizes)
             {
@@ -353,51 +353,19 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return named;
             }
 
-            int[] fallbackDiameters = { 25, 50, 80, 100, 125, 150, 200, 250, 300 };
-            foreach (int fallback in fallbackDiameters.Where(size => size > sleeveDiameterMm))
-            {
-                named = FindSleeveChoiceByDiameter(fallback);
-                if (named != null)
-                {
-                    return named;
-                }
-            }
-
-            return SleeveSymbolChoices.FirstOrDefault();
+            return null;
         }
 
         private static int GetNextSleeveDiameterMm(int nominalDiameterMm)
         {
-            int[] sleeveDiameters = { 25, 50, 80, 100, 125, 150, 200, 250, 300 };
-            foreach (int diameter in sleeveDiameters)
-            {
-                if (diameter > nominalDiameterMm)
-                {
-                    return diameter;
-                }
-            }
-
-            return nominalDiameterMm;
+            return PipeSleeveNominalRules.Mapping.TryGetValue(nominalDiameterMm,out int size) ? size : 0;
         }
 
         private SleeveSymbolChoice FindSleeveChoiceByDiameter(int diameterMm)
         {
-            string[] tokens =
-            {
-                $"-{diameterMm}mm",
-                $"-{diameterMm} mm",
-                $"_{diameterMm}mm",
-                $"_{diameterMm} mm",
-                $" {diameterMm}mm",
-                $" {diameterMm} mm",
-                $"DN{diameterMm}"
-            };
-
-            return SleeveSymbolChoices.FirstOrDefault(choice =>
-                       IsGeneralSleeveChoice(choice) &&
-                       tokens.Any(token => choice.DisplayName.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)) ??
-                   SleeveSymbolChoices.FirstOrDefault(choice =>
-                       tokens.Any(token => choice.DisplayName.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0));
+            var matches=SleeveSymbolChoices.Where(choice=>PipeSleeveNominalRules.Matches(choice.Symbol.Name,diameterMm)).ToList();
+            var preferred=matches.Where(choice=>choice.Symbol.FamilyName=="套管-圓形_無").ToList();
+            return preferred.Count==1 ? preferred[0] : matches.Count==1 ? matches[0] : null;
         }
 
         private static bool IsGeneralSleeveChoice(SleeveSymbolChoice choice)
@@ -493,6 +461,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                             IncludeCurrentModel = chkIncludeCurrentModel.IsChecked == true,
                             IncludeLinks = chkIncludeLinks.IsChecked == true,
                             ExcludeAdditionElements = chkExcludeAdditionElements.IsChecked == true,
+                            PreserveNominalTypeDimensions = true,
                             UseDiameterSymbolMap = chkUseDiameterMap.IsChecked == true,
                             SleeveSymbolByDiameterMm = symbolMap,
                             DefaultWallSleeveSymbolId = GetSelectedSymbolId(cmbWallSleeveFamily),
@@ -631,9 +600,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             {
                 PipeSleeveSizeRow row = SleeveSizeRows.FirstOrDefault(r => r.NominalDiameterMm == saved.NominalDiameterMm);
                 SleeveSymbolChoice choice = FindSleeveChoiceByDisplayName(saved.SleeveDisplayName);
-                if (row != null && choice != null)
+                if (row != null)
                 {
-                    row.SymbolIdValue = choice.IdValue;
+                    row.SymbolIdValue = choice != null ? choice.IdValue : 0;
                 }
             }
 
@@ -2020,74 +1989,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         public int NominalDiameterMm { get; set; }
         public string NominalName { get; set; }
         public int SymbolIdValue { get; set; }
-    }
-
-    public class PipeSleeveSettings
-    {
-        public string DefaultWallSleeveDisplayName { get; set; } = string.Empty;
-        public string DefaultFloorSleeveDisplayName { get; set; } = string.Empty;
-        public double ClearanceMm { get; set; } = 50.0;
-        public bool IncludeCurrentModel { get; set; } = false;
-        public bool IncludeLinks { get; set; } = true;
-        public bool ExcludeAdditionElements { get; set; } = true;
-        public bool UseDiameterMap { get; set; } = true;
-        public bool AutoNumber { get; set; } = true;
-        public bool UpdateExisting { get; set; } = false;
-        public List<PipeSleeveSizeSetting> SizeMappings { get; set; } = new List<PipeSleeveSizeSetting>();
-    }
-
-    public class PipeSleeveSizeSetting
-    {
-        public int NominalDiameterMm { get; set; }
-        public string SleeveDisplayName { get; set; } = string.Empty;
-    }
-
-    internal static class PipeSleeveSettingsStore
-    {
-        private static readonly XmlSerializer Serializer = new XmlSerializer(typeof(PipeSleeveSettings));
-
-        public static string DefaultPath
-        {
-            get
-            {
-                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                return Path.Combine(appData, "HB_BIM_Tools", "PipeSleeveSettings.xml");
-            }
-        }
-
-        public static PipeSleeveSettings Load()
-        {
-            try
-            {
-                if (!File.Exists(DefaultPath))
-                {
-                    return new PipeSleeveSettings();
-                }
-
-                using (StreamReader reader = new StreamReader(DefaultPath))
-                {
-                    return Serializer.Deserialize(reader) as PipeSleeveSettings ?? new PipeSleeveSettings();
-                }
-            }
-            catch
-            {
-                return new PipeSleeveSettings();
-            }
-        }
-
-        public static void Save(PipeSleeveSettings settings)
-        {
-            string directory = Path.GetDirectoryName(DefaultPath);
-            if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            using (StreamWriter writer = new StreamWriter(DefaultPath))
-            {
-                Serializer.Serialize(writer, settings ?? new PipeSleeveSettings());
-            }
-        }
     }
 
     public class SleeveInfo
