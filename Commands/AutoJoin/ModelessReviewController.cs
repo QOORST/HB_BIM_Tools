@@ -8,7 +8,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         private static RevitNavigationRequestHandler _handler;
         private static ExternalEvent _externalEvent;
 
-        public static void ShowOrUpdate(string title, string summary, System.Collections.Generic.IList<JoinFailureDetail> failures)
+        public static void ShowOrUpdate(string title, string summary, System.Collections.Generic.IList<JoinFailureDetail> failures, Autodesk.Revit.DB.Document document)
         {
             if (_handler == null)
             {
@@ -21,6 +21,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 _form = new JoinResultReviewForm(_handler, _externalEvent);
             }
 
+            _handler.BindDocument(document);
             _form.LoadResult(title, summary, failures);
             if (!_form.Visible)
             {

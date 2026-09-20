@@ -1,3 +1,5 @@
+param([string[]]$Names)
+
 Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = "Stop"
@@ -87,6 +89,49 @@ function Draw-Icon([string]$name, [int]$size, [string]$outDir) {
     $g.Clear([System.Drawing.Color]::Transparent)
 
     switch ($name) {
+        { $_ -in "mep_position_dimension", "mep_position_settings", "mep_from_connector", "mep_level_rebase" } {
+            $blue = New-Pen "#2196F3" (2.4*$s)
+            $gray = New-Pen "#8194A5" (2*$s)
+            $orange = New-Pen "#F59E0B" (2.4*$s)
+            if ($name -eq "mep_from_connector") {
+                $g.DrawRectangle($gray, 3*$s, 10*$s, 8*$s, 12*$s)
+                $g.DrawEllipse($orange, 8*$s, 13*$s, 6*$s, 6*$s)
+                $g.DrawLine($blue, 15*$s, 16*$s, 28*$s, 16*$s)
+                $g.DrawLine($blue, 24*$s, 12*$s, 28*$s, 16*$s)
+                $g.DrawLine($blue, 24*$s, 20*$s, 28*$s, 16*$s)
+            } elseif ($name -eq "mep_level_rebase") {
+                foreach ($y in 8,24) { $g.DrawLine($gray, 3*$s, $y*$s, 28*$s, $y*$s) }
+                $g.DrawLine($blue, 5*$s, 16*$s, 17*$s, 16*$s)
+                $g.DrawLine($orange, 23*$s, 11*$s, 23*$s, 21*$s)
+                $g.DrawLine($orange, 19*$s, 17*$s, 23*$s, 21*$s)
+                $g.DrawLine($orange, 27*$s, 17*$s, 23*$s, 21*$s)
+            } else {
+                $g.DrawLine($gray, 5*$s, 5*$s, 5*$s, 27*$s)
+                $g.DrawLine($blue, 24*$s, 5*$s, 24*$s, 16*$s)
+                $g.DrawLine($blue, 5*$s, 22*$s, 24*$s, 22*$s)
+                foreach ($x in 5,24) { $g.DrawLine($blue, ($x-2)*$s, 25*$s, ($x+2)*$s, 19*$s) }
+                if ($name -eq "mep_position_settings") {
+                    $g.DrawLine($orange, 12*$s, 7*$s, 12*$s, 16*$s)
+                    $g.DrawLine($orange, 9*$s, 10*$s, 15*$s, 10*$s)
+                }
+            }
+            $blue.Dispose(); $gray.Dispose(); $orange.Dispose()
+        }
+        { $_ -in "tag_align", "tag_related" } {
+            $blue = New-Pen "#2196F3" (2*$s)
+            $gray = New-Pen "#8194A5" (2*$s)
+            $orange = New-Pen "#F59E0B" (2*$s)
+            if ($name -eq "tag_align") {
+                $g.DrawLine($orange, 5*$s, 3*$s, 5*$s, 29*$s)
+                foreach ($y in 6,14,22) { $g.DrawRectangle($blue, 9*$s, $y*$s, 17*$s, 4*$s) }
+            } else {
+                $g.DrawRectangle($gray, 3*$s, 4*$s, 9*$s, 9*$s)
+                $g.DrawLine($orange, 12*$s, 9*$s, 23*$s, 9*$s)
+                $g.DrawLine($orange, 23*$s, 9*$s, 23*$s, 18*$s)
+                $g.DrawRectangle($blue, 14*$s, 18*$s, 14*$s, 9*$s)
+            }
+            $blue.Dispose(); $gray.Dispose(); $orange.Dispose()
+        }
         "license" {
             $p = New-Pen "#F2B705" (3.2*$s)
             $g.DrawEllipse($p, 4*$s, 6*$s, 12*$s, 12*$s)
@@ -471,6 +516,14 @@ $icons = @(
 New-Item -ItemType Directory -Path $scriptDir -Force | Out-Null
 New-Item -ItemType Directory -Path $installerIconDir -Force | Out-Null
 
+$icons += @("mep_position_dimension", "mep_position_settings", "mep_from_connector", "mep_level_rebase")
+$icons += @("tag_align", "tag_related")
+if ($Names) {
+    foreach ($name in $Names) {
+        if ($name -notin $icons) { throw "Unknown icon: $name" }
+    }
+    $icons = $Names
+}
 foreach ($icon in $icons) {
     foreach ($size in 16, 32) {
         Draw-Icon $icon $size $scriptDir

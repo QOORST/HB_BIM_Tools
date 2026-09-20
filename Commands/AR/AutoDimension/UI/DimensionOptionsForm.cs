@@ -27,8 +27,26 @@ internal sealed class DimensionOptionsForm : Form
 
     private TabControl _tabControl = null!;
     private TabControl _modeTabControl = null!;
+    private TabPage? _bubblesTab;
+    private Panel? _gridHome;
+    private Panel? _bubbleHost;
+    private TableLayoutPanel? _sharedGridPanel;
+    private Control? _gridPlacement;
+    private CheckBox _bubbleLeft = null!;
+    private CheckBox _bubbleRight = null!;
+    private CheckBox _bubbleTop = null!;
+    private CheckBox _bubbleBottom = null!;
+    private readonly List<Action> _selectionUpdates = new List<Action>();
+    private bool IsBubblePage => _bubblesTab != null && _tabControl.SelectedTab == _bubblesTab;
     private ComboBox _placementModeCombo = null!;
     private ComboBox _typeCombo = null!;
+    private CheckBox _includeBeamWidth = null!;
+    private CheckBox _includeBeamSpacing = null!;
+    private ComboBox _beamScope = null!;
+    private TabControl _distanceTabs = null!;
+    private NumericUpDown _beamWidthOffset = null!;
+    private NumericUpDown _beamSpacingOffset = null!;
+    private Label _gridScaleHint = null!;
     private NumericUpDown _offsetNumeric = null!;
     private NumericUpDown _gridPrimaryOffsetNumeric = null!;
     private NumericUpDown _gridOverallOffsetNumeric = null!;
@@ -221,6 +239,7 @@ internal sealed class DimensionOptionsForm : Form
 
         _tabControl.TabPages.Add(dimensionsTab);
         _tabControl.TabPages.Add(offsetsTab);
+        AddBubbleTab();
         return _tabControl;
     }
 
@@ -239,6 +258,7 @@ internal sealed class DimensionOptionsForm : Form
             if (_modeTabControl.SelectedTab?.Tag is DimensionMode selectedMode)
             {
                 ApplySavedSettingsForMode(selectedMode);
+                SyncDistanceTab(selectedMode);
             }
         };
 
@@ -414,6 +434,7 @@ internal sealed class DimensionOptionsForm : Form
 
         _tabControl.TabPages.Add(dimensionsTab);
         _tabControl.TabPages.Add(offsetsTab);
+        AddBubbleTab();
         return _tabControl;
     }
 
@@ -484,8 +505,8 @@ internal sealed class DimensionOptionsForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
             RowCount = 2,
-            BackColor = Color.FromArgb(37, 54, 78),
-            Padding = new Padding(22, 12, 22, 12)
+            BackColor = Color.FromArgb(39, 39, 39),
+            Padding = new Padding(6, 2, 6, 6)
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -520,60 +541,112 @@ internal sealed class DimensionOptionsForm : Form
     private Control BuildOffsetPanel()
     {
         _offsetNumeric = CreateOffsetNumeric(1000);
+        _beamWidthOffset = CreateOffsetNumeric(1000);
+        _beamSpacingOffset = CreateOffsetNumeric(1000);
         _gridPrimaryOffsetNumeric = CreateOffsetNumeric(10);
         _gridOverallOffsetNumeric = CreateOffsetNumeric(10);
-        foreach (NumericUpDown numeric in new[] { _gridPrimaryOffsetNumeric, _gridOverallOffsetNumeric })
+        foreach (var numeric in new[] { _gridPrimaryOffsetNumeric, _gridOverallOffsetNumeric })
         {
             numeric.DecimalPlaces = 2;
             numeric.Increment = 1;
+            numeric.ValueChanged += (_, _) => UpdateGridScaleHint();
         }
-
-        var board = new TableLayoutPanel
+        if (_savedSettings.TryGetValue(DimensionMode.ColumnSetout, out var column)) SetNumericValue(_offsetNumeric, column.OffsetMm);
+        if (_savedSettings.TryGetValue(DimensionMode.BeamWidth, out var beam))
         {
-            Dock = DockStyle.Top,
-            Height = 500,
-            ColumnCount = 2,
-            RowCount = 2,
-            Padding = new Padding(22),
-            BackColor = UseDarkTheme ? Color.FromArgb(34, 34, 34) : Color.White,
-            BorderStyle = BorderStyle.FixedSingle,
-            MinimumSize = new Size(0, 500)
-        };
-        board.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        board.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        board.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        board.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
-
-        Control levelOffsetPanel = BuildLevelOffsetPanel();
-        Control gridOffsetPanel = BuildGridOffsetPanel();
-        board.Controls.Add(levelOffsetPanel, 0, 0);
-        board.Controls.Add(gridOffsetPanel, 1, 0);
-
-        var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        host.Controls.Add(board);
-
-        Action updateResponsiveLayout = () =>
+            SetNumericValue(_beamWidthOffset, beam.OffsetMm);
+            SetNumericValue(_beamSpacingOffset, beam.BeamSpacingOffsetMm ?? beam.OffsetMm);
+        }
+        if (_savedSettings.TryGetValue(DimensionMode.BeamGrid, out var grids))
         {
-            int stackingThreshold = (int)Math.Round(900D * board.DeviceDpi / 96D);
-            bool stackPanels = host.ClientSize.Width > 0 && host.ClientSize.Width < stackingThreshold;
-            int minimumHeight = stackPanels ? 920 : 500;
-
-            board.SuspendLayout();
-            board.ColumnStyles[0].Width = stackPanels ? 100 : 50;
-            board.ColumnStyles[1].Width = stackPanels ? 0 : 50;
-            board.RowStyles[0].SizeType = stackPanels ? SizeType.Absolute : SizeType.Percent;
-            board.RowStyles[0].Height = stackPanels ? 460 : 100;
-            board.RowStyles[1].SizeType = SizeType.Absolute;
-            board.RowStyles[1].Height = stackPanels ? 460 : 0;
-            board.SetCellPosition(levelOffsetPanel, new TableLayoutPanelCellPosition(0, 0));
-            board.SetCellPosition(gridOffsetPanel, new TableLayoutPanelCellPosition(stackPanels ? 0 : 1, stackPanels ? 1 : 0));
-            board.MinimumSize = new Size(0, minimumHeight);
-            board.Height = Math.Max(minimumHeight, host.ClientSize.Height);
-            board.ResumeLayout(true);
+            double scale = grids.GridOffsetsInPaperSpace ? 1 : _viewScale;
+            SetNumericValue(_gridPrimaryOffsetNumeric, grids.GridOverallOffsetMm / scale);
+            SetNumericValue(_gridOverallOffsetNumeric, (grids.GridPrimaryOffsetMm - grids.GridOverallOffsetMm) / scale);
+        }
+        _distanceTabs = CreateDarkTabControl();
+        _distanceTabs.Dock = DockStyle.Fill;
+        foreach (var mode in new[] { DimensionMode.ColumnSetout, DimensionMode.BeamGrid, DimensionMode.BeamWidth })
+        {
+            if (_isModeLocked && mode != _initialMode) continue;
+            var tab = new TabPage(mode == DimensionMode.ColumnSetout ? "柱" : mode == DimensionMode.BeamWidth ? "梁" : "軸線") { Tag = mode, BackColor = Color.FromArgb(39,39,39) };
+            var panel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Padding = new Padding(18) };
+            void Add(Control control, int height) {
+                int row = panel.RowStyles.Count;
+                panel.RowCount = row + 1;
+                panel.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+                panel.Controls.Add(control, 0, row);
+            }
+            if (mode == DimensionMode.BeamGrid)
+            {
+                Add(new Label { Text = "以生成側的軸線端點為基準；隱藏標頭不影響距離。", Dock = DockStyle.Fill }, 28);
+                var diagram = new Panel { Dock = DockStyle.Fill };
+                diagram.Paint += (_, e) => {
+                    using var pen = new Pen(Color.FromArgb(45,132,247),2);
+                    using var font = new Font(UiFontFamily,10);
+                    int x = 40, right = Math.Max(220, diagram.Width-250);
+                    for (int i=0;i<3;i++) {
+                        int y=30+i*60;
+                        e.Graphics.DrawLine(pen,x,y,right,y);
+                        e.Graphics.DrawString(new[]{"① 軸線標頭／端點","② 總尺寸標註","③ 第一道標註"}[i],font,Brushes.White,right+12,y-10);
+                    }
+                    DrawOffsetDimension(e.Graphics,x+40,30,90,pen);
+                    DrawOffsetDimension(e.Graphics,x+100,90,150,pen);
+                    e.Graphics.DrawString("A",font,Brushes.White,x+50,50);
+                    e.Graphics.DrawString("B",font,Brushes.White,x+110,110);
+                    e.Graphics.DrawString("示意：A、B 為正值時，往圖內排列 ↓",font,Brushes.LightGray,x,185);
+                };
+                Add(diagram,230);
+                Add(CreateDistanceRow("A　標頭至總尺寸標註",_gridPrimaryOffsetNumeric,"紙面 mm"),42);
+                Add(CreateDistanceRow("B　總尺寸至第一道標註",_gridOverallOffsetNumeric,"紙面 mm"),42);
+                Add(new Label { Text = "A、B：正值往圖內，負值往圖外；總尺寸位置 = A；第一道位置 = A + B。", Dock = DockStyle.Fill },30);
+                _gridScaleHint = new Label { Dock = DockStyle.Fill, AutoSize = false };
+                Add(_gridScaleHint,60);
+            }
+            else if (mode == DimensionMode.ColumnSetout)
+            {
+                Add(new Label { Text = "柱標註距離獨立保存，不影響梁或軸線。", Dock = DockStyle.Fill },36);
+                Add(CreateDistanceRow("柱標註偏移",_offsetNumeric,"模型 mm"),42);
+            }
+            else
+            {
+                Add(new Label { Text = "梁寬與梁間距各自設定，不影響柱或軸線。", Dock = DockStyle.Fill },36);
+                Add(CreateDistanceRow("梁寬標註偏移",_beamWidthOffset,"模型 mm"),42);
+                Add(CreateDistanceRow("梁間距標註偏移",_beamSpacingOffset,"模型 mm"),42);
+            }
+            var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+            host.Controls.Add(panel); tab.Controls.Add(host); _distanceTabs.TabPages.Add(tab);
+        }
+        SyncDistanceTab(_initialMode);
+        _distanceTabs.SelectedIndexChanged += (_, _) => {
+            if (!_isModeLocked && _distanceTabs.SelectedTab?.Tag is DimensionMode mode)
+                foreach (TabPage page in _modeTabControl.TabPages) if (Equals(page.Tag,mode)) _modeTabControl.SelectedTab=page;
         };
-        host.Resize += (_, _) => updateResponsiveLayout();
-        updateResponsiveLayout();
-        return host;
+        UpdateGridScaleHint();
+        return _distanceTabs;
+    }
+
+    private void SyncDistanceTab(DimensionMode mode)
+    {
+        if (_distanceTabs == null) return;
+        foreach (TabPage page in _distanceTabs.TabPages) if (Equals(page.Tag,mode)) _distanceTabs.SelectedTab=page;
+    }
+
+    private static Control CreateDistanceRow(string text, NumericUpDown numeric, string unit)
+    {
+        var row = new TableLayoutPanel { Dock=DockStyle.Fill, ColumnCount=3 };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,250));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,130));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+        row.Controls.Add(new Label { Text=text,Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft },0,0);
+        row.Controls.Add(numeric,1,0);
+        row.Controls.Add(new Label { Text=unit,Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft },2,0);
+        return row;
+    }
+
+    private void UpdateGridScaleHint()
+    {
+        if (_gridScaleHint == null) return;
+        _gridScaleHint.Text = $"目前視圖 1:{_viewScale}\nA：紙面 {_gridPrimaryOffsetNumeric.Value:0.##} mm → 模型 {_gridPrimaryOffsetNumeric.Value*_viewScale:0.##} mm；B：紙面 {_gridOverallOffsetNumeric.Value:0.##} mm → 模型 {_gridOverallOffsetNumeric.Value*_viewScale:0.##} mm";
     }
 
     private static Label CreateOffsetUnitLabel()
@@ -1026,17 +1099,16 @@ internal sealed class DimensionOptionsForm : Form
 
     private Control BuildTypePanel(IEnumerable<string> dimensionTypeNames)
     {
-        var group = new GroupBox
+        var group = new Panel
         {
             Dock = DockStyle.Top,
-            Text = "標註型式",
-            Padding = new Padding(14, 22, 14, 10),
+            Padding = new Padding(6, 4, 6, 4),
             Margin = new Padding(0, 4, 0, 4),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(28, 48, 74),
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            MinimumSize = new Size(0, 92)
+            MinimumSize = new Size(0, 50)
         };
 
         var layout = new TableLayoutPanel
@@ -1057,7 +1129,7 @@ internal sealed class DimensionOptionsForm : Form
 
         var label = new Label
         {
-            Text = "型式",
+            Text = "標註型式",
             Font = new Font(UiFontFamily, 10F, FontStyle.Bold, GraphicsUnit.Point),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32),
             BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White,
@@ -1223,6 +1295,7 @@ internal sealed class DimensionOptionsForm : Form
         int viewScale)
     {
         _viewScale = Math.Max(1, viewScale);
+        UpdateGridScaleHint();
         string? selectedType = _typeCombo.SelectedIndex > 0 ? _typeCombo.SelectedItem?.ToString() : null;
         HashSet<int> selectedHorizontalIds = GetCheckedGridIds(_horizontalGridList);
         HashSet<int> selectedVerticalIds = GetCheckedGridIds(_verticalGridList);
@@ -1241,15 +1314,16 @@ internal sealed class DimensionOptionsForm : Form
 
         if (_horizontalGridList is not null)
         {
-            PopulateGridList(_horizontalGridList, horizontalGrids, "目前視圖沒有可用的水平軸線");
+            PopulateGridList(_horizontalGridList, horizontalGrids);
             ApplySavedGridSelections(_horizontalGridList, selectedHorizontalIds);
         }
 
         if (_verticalGridList is not null)
         {
-            PopulateGridList(_verticalGridList, verticalGrids, "目前視圖沒有可用的垂直軸線");
+            PopulateGridList(_verticalGridList, verticalGrids);
             ApplySavedGridSelections(_verticalGridList, selectedVerticalIds);
         }
+        foreach (Action update in _selectionUpdates) update();
     }
 
     public void SelectMode(DimensionMode mode)
@@ -1293,11 +1367,6 @@ internal sealed class DimensionOptionsForm : Form
 
     private void ApplySavedSettings(AutoDimensionSavedSettings settings)
     {
-        SetNumericValue(_offsetNumeric, settings.OffsetMm);
-        double scale = settings.GridOffsetsInPaperSpace ? 1 : _viewScale;
-        SetNumericValue(_gridPrimaryOffsetNumeric, settings.GridPrimaryOffsetMm / scale);
-        SetNumericValue(_gridOverallOffsetNumeric, (settings.GridOverallOffsetMm - settings.GridPrimaryOffsetMm) / scale);
-
         SelectDimensionType(settings.DimensionTypeName);
         SelectPlacementMode(settings.Mode);
 
@@ -1365,7 +1434,7 @@ internal sealed class DimensionOptionsForm : Form
 
     private static void ApplySavedGridSelections(CheckedListBox list, IReadOnlyCollection<int> selectedIds)
     {
-        if (list is null || selectedIds is null || selectedIds.Count == 0)
+        if (list is null || selectedIds is null)
         {
             return;
         }
@@ -1421,19 +1490,13 @@ internal sealed class DimensionOptionsForm : Form
 
     private static void PopulateGridList(
         CheckedListBox list,
-        IEnumerable<GridSelectionItem> items,
-        string emptyMessage)
+        IEnumerable<GridSelectionItem> items)
     {
         list.BeginUpdate();
         list.Items.Clear();
         foreach (GridSelectionItem item in items)
         {
             list.Items.Add(new GridItem(item), true);
-        }
-
-        if (list.Items.Count == 0)
-        {
-            list.Items.Add(emptyMessage);
         }
 
         list.EndUpdate();
@@ -1638,7 +1701,7 @@ internal sealed class DimensionOptionsForm : Form
 
         var group = new GroupBox
         {
-            Text = "柱線生成方向",
+            Text = "標註生成方向",
             Dock = DockStyle.Fill,
             Padding = new Padding(14, 24, 14, 10),
             ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(28, 48, 74),
@@ -1757,16 +1820,18 @@ internal sealed class DimensionOptionsForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 154));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 10));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 124));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
 
         var placementPanel = BuildGridPlacementPanel();
+        _gridPlacement = placementPanel;
+        _sharedGridPanel = panel;
         panel.SetColumnSpan(placementPanel, 2);
         panel.Controls.Add(placementPanel, 0, 0);
 
-        var horizontalGroup = new GroupBox
+        var horizontalGroup = new Panel
         {
             Text = "水平軸線",
             Dock = DockStyle.Fill,
@@ -1790,27 +1855,13 @@ internal sealed class DimensionOptionsForm : Form
             _horizontalGridList.Items.Add(new GridItem(item), true);
         }
 
-        if (_horizontalGridList.Items.Count == 0)
-        {
-            _horizontalGridList.Items.Add("目前視圖沒有可用的水平軸線");
-        }
-
-        horizontalGroup.Controls.Add(_horizontalGridList);
+        AddGridEmptyState(horizontalGroup, _horizontalGridList, "目前視圖沒有可用的水平軸線");
         panel.Controls.Add(horizontalGroup, 0, 2);
-
-        var checkH = new CheckBox
-        {
-            Text = "全選水平軸線",
-            AutoSize = true,
-            Checked = true,
-            Margin = new Padding(4, 8, 0, 0),
-            ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32),
-            BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.Transparent
-        };
-        checkH.CheckedChanged += (_, _) => SetAllChecked(_horizontalGridList, checkH.Checked);
+        var checkH = BuildSelectionActions(_horizontalGridList);
         panel.Controls.Add(checkH, 0, 3);
 
-        var verticalGroup = new GroupBox
+
+        var verticalGroup = new Panel
         {
             Text = "垂直軸線",
             Dock = DockStyle.Fill,
@@ -1834,63 +1885,41 @@ internal sealed class DimensionOptionsForm : Form
             _verticalGridList.Items.Add(new GridItem(item), true);
         }
 
-        if (_verticalGridList.Items.Count == 0)
-        {
-            _verticalGridList.Items.Add("目前視圖沒有可用的垂直軸線");
-        }
-
-        verticalGroup.Controls.Add(_verticalGridList);
+        AddGridEmptyState(verticalGroup, _verticalGridList, "目前視圖沒有可用的垂直軸線");
         panel.Controls.Add(verticalGroup, 1, 2);
-
-        var checkV = new CheckBox
-        {
-            Text = "全選垂直軸線",
-            AutoSize = true,
-            Checked = true,
-            Margin = new Padding(14, 8, 0, 0),
-            ForeColor = UseDarkTheme ? Color.White : Color.FromArgb(32, 32, 32),
-            BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.Transparent
-        };
-        checkV.CheckedChanged += (_, _) => SetAllChecked(_verticalGridList, checkV.Checked);
+        var checkV = BuildSelectionActions(_verticalGridList);
         panel.Controls.Add(checkV, 1, 3);
 
-        var bubbles = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true, Margin = new Padding(0, 12, 0, 0) };
-        var horizontalBubble = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
-        horizontalBubble.Items.AddRange(new object[] { "右側", "左側" }); horizontalBubble.SelectedIndex = 0;
-        var verticalBubble = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
-        verticalBubble.Items.AddRange(new object[] { "上側", "下側" }); verticalBubble.SelectedIndex = 0;
-        var bothBubbles = new CheckBox { Text = "兩端顯示", AutoSize = true };
-        bothBubbles.CheckedChanged += (_, _) => horizontalBubble.Enabled = verticalBubble.Enabled = !bothBubbles.Checked;
-        var applyBubbles = new Button { Text = "套用標頭", AutoSize = true, FlatStyle = FlatStyle.Flat };
-        applyBubbles.Enabled = _applyAction != null;
-        applyBubbles.Click += (_, _) => {
-            var horizontalIds = _horizontalGridList.CheckedItems.OfType<GridItem>().Select(i => i.Item.Id).ToList();
-            var verticalIds = _verticalGridList.CheckedItems.OfType<GridItem>().Select(i => i.Item.Id).ToList();
-            if (horizontalIds.Count + verticalIds.Count == 0) { MessageBox.Show("請勾選至少一條軸線。", "軸線標頭"); return; }
-            _applyAction?.Invoke(new DimensionOptions { ModeType = DimensionMode.BeamGrid,
-                GridBubblesOnly = true, GridBubblesBothEnds = bothBubbles.Checked,
-                HorizontalBubbleRight = horizontalBubble.SelectedIndex == 0, VerticalBubbleTop = verticalBubble.SelectedIndex == 0,
-                SelectedHorizontalGridIds = horizontalIds, SelectedVerticalGridIds = verticalIds });
-        };
-        bubbles.Controls.Add(new Label { Text = "水平標頭", AutoSize = true, Margin = new Padding(0, 7, 4, 0) });
-        bubbles.Controls.Add(horizontalBubble);
-        bubbles.Controls.Add(new Label { Text = "垂直標頭", AutoSize = true, Margin = new Padding(8, 7, 4, 0) });
-        bubbles.Controls.Add(verticalBubble); bubbles.Controls.Add(bothBubbles); bubbles.Controls.Add(applyBubbles);
-        panel.RowCount = 7; panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.Controls.Add(bubbles, 0, 6); panel.SetColumnSpan(bubbles, 2);
 
+        bool updatingGridLayout = false;
         Action updateResponsiveLayout = () =>
         {
-            int stackingThreshold = (int)Math.Round(900D * panel.DeviceDpi / 96D);
+            if (updatingGridLayout) return;
+            updatingGridLayout = true;
+            try
+            {
+            int stackingThreshold = (int)Math.Round(640D * panel.DeviceDpi / 96D);
             bool stackSelections = panel.ClientSize.Width > 0 && panel.ClientSize.Width < stackingThreshold;
+            float scale = panel.DeviceDpi / 96F;
+            float buttonHeight = 40 * scale;
+            float placementHeight = IsBubblePage ? 0 : 154 * scale;
+            float gapHeight = 10 * scale;
+            int listCount = stackSelections ? 2 : 1;
+            float availableHeight = (panel.Parent?.ClientSize.Height ?? 0) - panel.Padding.Vertical
+                - panel.Margin.Vertical - placementHeight - gapHeight - listCount * buttonHeight;
+            float listHeight = Math.Max(124 * scale, availableHeight / listCount);
 
             panel.SuspendLayout();
+            panel.RowStyles[0].Height = placementHeight;
+            panel.RowStyles[1].Height = gapHeight;
+            panel.RowStyles[2].Height = listHeight;
+            panel.RowStyles[3].Height = buttonHeight;
             panel.ColumnStyles[0].SizeType = SizeType.Percent;
             panel.ColumnStyles[0].Width = stackSelections ? 100 : 50;
             panel.ColumnStyles[1].SizeType = SizeType.Percent;
             panel.ColumnStyles[1].Width = stackSelections ? 0 : 50;
-            panel.RowStyles[4].Height = stackSelections ? 112 : 0;
-            panel.RowStyles[5].Height = stackSelections ? 34 : 0;
+            panel.RowStyles[4].Height = stackSelections ? listHeight : 0;
+            panel.RowStyles[5].Height = stackSelections ? buttonHeight : 0;
 
             panel.SetCellPosition(horizontalGroup, new TableLayoutPanelCellPosition(0, 2));
             panel.SetCellPosition(checkH, new TableLayoutPanelCellPosition(0, 3));
@@ -1898,16 +1927,123 @@ internal sealed class DimensionOptionsForm : Form
             panel.SetCellPosition(checkV, new TableLayoutPanelCellPosition(stackSelections ? 0 : 1, stackSelections ? 5 : 3));
             horizontalGroup.Margin = stackSelections ? new Padding(0) : new Padding(0, 0, 10, 0);
             verticalGroup.Margin = stackSelections ? new Padding(0) : new Padding(10, 0, 0, 0);
-            checkV.Margin = stackSelections ? new Padding(4, 8, 0, 0) : new Padding(14, 8, 0, 0);
+            checkV.Margin = stackSelections ? new Padding(0) : new Padding(10, 0, 0, 0);
             panel.ResumeLayout(true);
+            }
+            finally { updatingGridLayout = false; }
         };
         panel.SizeChanged += (_, _) => updateResponsiveLayout();
+        Control? observedHost = null;
+        EventHandler resizeGridHost = (_, _) => updateResponsiveLayout();
+        panel.ParentChanged += (_, _) => {
+            if (observedHost != null) observedHost.SizeChanged -= resizeGridHost;
+            observedHost = panel.Parent;
+            if (observedHost != null) observedHost.SizeChanged += resizeGridHost;
+            updateResponsiveLayout();
+        };
+        panel.Disposed += (_, _) => {
+            if (observedHost != null) observedHost.SizeChanged -= resizeGridHost;
+        };
         updateResponsiveLayout();
 
         var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White };
         host.Controls.Add(panel);
+        ApplyDarkTheme(panel);
+        foreach (Action update in _selectionUpdates) update();
+        _gridHome = host;
         tab.Controls.Add(host);
         return tab;
+    }
+
+    private static Button SelectionButton(string text, Action action)
+    {
+        var button = new Button { Text = text, AutoSize = true, FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(58, 58, 58), ForeColor = Color.White,
+            Padding = new Padding(6, 2, 6, 2), Margin = new Padding(0, 2, 8, 2) };
+        button.FlatAppearance.BorderSize = 0;
+        button.Click += (_, _) => action();
+        return button;
+    }
+
+    private Control BuildSelectionActions(CheckedListBox list)
+    {
+        var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
+        var all = SelectionButton("全選", () => SetAllChecked(list, true));
+        var none = SelectionButton("全不選", () => SetAllChecked(list, false));
+        actions.Controls.Add(all);
+        actions.Controls.Add(none);
+        _selectionUpdates.Add(() => all.Enabled = none.Enabled = list.Items.Count > 0);
+        return actions;
+    }
+
+    private void AddGridEmptyState(Panel group, CheckedListBox list, string message)
+    {
+        var heading = new Label { Text = group.Text, AutoSize = true, Location = new Point(10, 3) };
+        var empty = new Label { Text = message, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
+        group.Controls.Add(list);
+        group.Controls.Add(empty);
+        group.Controls.Add(heading);
+        _selectionUpdates.Add(() => {
+            bool hasItems = list.Items.Count > 0;
+            list.Visible = hasItems;
+            empty.Visible = !hasItems;
+        });
+    }
+
+    public void ApplyBubbleSettings(GridBubbleSavedSettings settings)
+    {
+        if (_bubblesTab == null) return;
+        _bubbleLeft.Checked = settings.Left;
+        _bubbleRight.Checked = settings.Right;
+        _bubbleTop.Checked = settings.Top;
+        _bubbleBottom.Checked = settings.Bottom;
+    }
+
+    private void SetAllBubbleVisibility(bool visible)
+    {
+        _bubbleLeft.Checked = _bubbleRight.Checked = _bubbleTop.Checked = _bubbleBottom.Checked = visible;
+    }
+
+    private void AddBubbleTab()
+    {
+        if (_sharedGridPanel == null) return;
+        _bubblesTab = new TabPage("軸線標頭") { BackColor = Color.FromArgb(39, 39, 39) };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(14) };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.Controls.Add(new Label { Text = "僅調整目前平面視圖的軸線標頭顯示，不移動軸線。", AutoSize = true, Margin = new Padding(0, 0, 0, 12) }, 0, 0);
+        var settings = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+        _bubbleLeft = new CheckBox { Text = "左端", AutoSize = true };
+        _bubbleRight = new CheckBox { Text = "右端", AutoSize = true, Checked = true };
+        _bubbleTop = new CheckBox { Text = "上端", AutoSize = true, Checked = true };
+        _bubbleBottom = new CheckBox { Text = "下端", AutoSize = true };
+        settings.Controls.Add(new Label { Text = "水平軸線標頭", AutoSize = true, Margin = new Padding(0, 5, 8, 0) });
+        settings.Controls.Add(_bubbleLeft);
+        settings.Controls.Add(_bubbleRight);
+        settings.Controls.Add(new Label { Text = "垂直軸線標頭", AutoSize = true, Margin = new Padding(16, 5, 8, 0) });
+        settings.Controls.Add(_bubbleTop);
+        settings.Controls.Add(_bubbleBottom);
+        root.Controls.Add(settings, 0, 1);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
+        var all = SelectionButton("全部勾選", () => SetAllBubbleVisibility(true));
+        var none = SelectionButton("全部取消勾選", () => SetAllBubbleVisibility(false));
+        actions.Controls.Add(all); actions.Controls.Add(none);
+        actions.Controls.Add(new Label { Text = "上方勾選控制標頭顯示；下方清單選擇套用軸線。按「套用標頭」才生效。", AutoSize = true, Margin = new Padding(0, 8, 0, 0) });
+        root.Controls.Add(actions, 0, 2);
+        _bubbleHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        root.Controls.Add(_bubbleHost, 0, 3);
+        _bubblesTab.Controls.Add(root);
+        ApplyDarkTheme(root);
+        _tabControl.TabPages.Add(_bubblesTab);
+        foreach (Action update in _selectionUpdates) update();
+        _tabControl.SelectedIndexChanged += (_, _) => {
+            Panel? target = IsBubblePage ? _bubbleHost : _gridHome;
+            if (target != null && _sharedGridPanel.Parent != target) target.Controls.Add(_sharedGridPanel);
+            _gridPlacement!.Visible = !IsBubblePage;
+            if (_applyButton != null) _applyButton.Text = IsBubblePage ? "套用標頭" : _applyAction == null ? "確定" : "執行標註";
+        };
     }
 
     private TabPage BuildBeamWidthTab()
@@ -1961,7 +2097,23 @@ internal sealed class DimensionOptionsForm : Form
             ForeColor = Color.White
         };
         offsetButton.Click += (_, _) => _tabControl.SelectedIndex = 1;
-        panel.Controls.Add(offsetButton, 0, 2);
+        var choices = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Margin = new Padding(0,12,0,0) };
+        _includeBeamWidth = new CheckBox { Text = "梁寬", AutoSize = true };
+        _includeBeamSpacing = new CheckBox { Text = "梁間距", AutoSize = true, Checked = true };
+        _beamScope = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Width = 160 };
+        _beamScope.Items.AddRange(new object[] { "選取梁", "目前視圖" }); _beamScope.SelectedIndex = 0;
+        if (_savedSettings.TryGetValue(DimensionMode.BeamWidth, out var savedBeam)) {
+            _includeBeamWidth.Checked = savedBeam.IncludeBeamWidth;
+            _includeBeamSpacing.Checked = savedBeam.IncludeBeamSpacing;
+            _beamScope.SelectedIndex = savedBeam.SelectedBeamsOnly ? 0 : 1;
+        }
+        choices.Controls.Add(_includeBeamWidth); choices.Controls.Add(_includeBeamSpacing);
+        choices.Controls.Add(new Label { Text="範圍", AutoSize=true, Margin=new Padding(16,5,8,0) }); choices.Controls.Add(_beamScope);
+        panel.RowCount = 5;
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize)); panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.Controls.Add(choices,0,2);
+        panel.Controls.Add(new Label { Text="選取梁：使用目前已選取的梁；若未選取，執行時請點選梁，按 Esc 取消。",AutoSize=true,Margin=new Padding(0,10,0,0) },0,3);
+        panel.Controls.Add(offsetButton, 0, 4);
         panel.SizeChanged += (_, _) =>
         {
             foreach (Control child in panel.Controls)
@@ -2023,11 +2175,12 @@ internal sealed class DimensionOptionsForm : Form
 
     private void ApplyModernTheme()
     {
+        ApplyDarkTheme(this);
         _tabControl.BackColor = UseDarkTheme ? Color.FromArgb(39, 39, 39) : Color.White;
         _tabControl.Appearance = TabAppearance.Normal;
     }
 
-    private void TabControl_DrawItem(object sender, DrawItemEventArgs e)
+    private void TabControl_DrawItem(object? sender, DrawItemEventArgs e)
     {
         if (sender is not TabControl tabControl || tabControl.TabPages.Count <= e.Index)
         {
@@ -2048,6 +2201,11 @@ internal sealed class DimensionOptionsForm : Form
             e.Graphics.FillRectangle(brush, bounds);
         }
 
+        if (isSelected)
+        {
+            using var accent = new SolidBrush(Color.FromArgb(45, 132, 247));
+            e.Graphics.FillRectangle(accent, bounds.Left + 8, bounds.Bottom - 3, bounds.Width - 16, 3);
+        }
         TextRenderer.DrawText(
             e.Graphics,
             tabControl.TabPages[e.Index].Text,
@@ -2059,12 +2217,26 @@ internal sealed class DimensionOptionsForm : Form
 
     public bool TryGetOptions(out DimensionOptions options, out string error)
     {
-        double gridPrimaryOffsetMm = (double)_gridPrimaryOffsetNumeric.Value;
-        double gridOverallOffsetMm = gridPrimaryOffsetMm + (double)_gridOverallOffsetNumeric.Value;
+        if (IsBubblePage)
+        {
+            options = new DimensionOptions {
+                ModeType = DimensionMode.BeamGrid, GridBubblesOnly = true,
+                HorizontalBubbleLeft = _bubbleLeft.Checked,
+                HorizontalBubbleRight = _bubbleRight.Checked,
+                VerticalBubbleTop = _bubbleTop.Checked,
+                VerticalBubbleBottom = _bubbleBottom.Checked,
+                SelectedHorizontalGridIds = _horizontalGridList.CheckedItems.OfType<GridItem>().Select(i => i.Item.Id).ToList(),
+                SelectedVerticalGridIds = _verticalGridList.CheckedItems.OfType<GridItem>().Select(i => i.Item.Id).ToList()
+            };
+            error = options.SelectedHorizontalGridIds.Count + options.SelectedVerticalGridIds.Count == 0 ? "請勾選至少一條軸線。" : string.Empty;
+            return error.Length == 0;
+        }
+        double gridOverallOffsetMm = (double)_gridPrimaryOffsetNumeric.Value;
+        double gridPrimaryOffsetMm = gridOverallOffsetMm + (double)_gridOverallOffsetNumeric.Value;
 
         options = new DimensionOptions
         {
-            OffsetInternal = RevitDB.UnitUtils.ConvertToInternalUnits((double)_offsetNumeric.Value, RevitDB.UnitTypeId.Millimeters),
+            OffsetInternal = RevitDB.UnitUtils.ConvertToInternalUnits((double)((_isModeLocked ? _initialMode : _modeTabControl.SelectedTab?.Tag) is DimensionMode active && active == DimensionMode.BeamWidth ? _beamWidthOffset.Value : _offsetNumeric.Value), RevitDB.UnitTypeId.Millimeters),
             GridOffsetsInPaperSpace = true,
             GridPrimaryOffsetInternal = RevitDB.UnitUtils.ConvertToInternalUnits(gridPrimaryOffsetMm, RevitDB.UnitTypeId.Millimeters),
             GridOverallOffsetInternal = RevitDB.UnitUtils.ConvertToInternalUnits(gridOverallOffsetMm, RevitDB.UnitTypeId.Millimeters),
@@ -2099,6 +2271,11 @@ internal sealed class DimensionOptionsForm : Form
 
         if (selectedMode == DimensionMode.BeamWidth)
         {
+            options.IncludeBeamWidth = _includeBeamWidth.Checked;
+            options.IncludeBeamSpacing = _includeBeamSpacing.Checked;
+            options.SelectedBeamsOnly = _beamScope.SelectedIndex == 0;
+            if (!options.IncludeBeamWidth && !options.IncludeBeamSpacing) { error = "請至少勾選梁寬或梁間距。"; return false; }
+            options.BeamSpacingOffsetInternal = RevitDB.UnitUtils.ConvertToInternalUnits((double)_beamSpacingOffset.Value, RevitDB.UnitTypeId.Millimeters);
             options.ModeType = DimensionMode.BeamWidth;
             return true;
         }

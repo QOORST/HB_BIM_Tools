@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><TargetFramework>net48</TargetFramework><AssemblyName>RevitMCP</AssemblyName><GenerateAssemblyInfo>false</GenerateAssemblyInfo><EnableDefaultCompileItems>false</EnableDefaultCompileItems><McpSourceRoot>C:/Users/藍/OneDrive/Desktop/YD BIM/REVIT_MCP_study-main/MCP</McpSourceRoot></PropertyGroup>
+<ItemGroup><Compile Include="$(McpSourceRoot)/**/*.cs" Exclude="$(McpSourceRoot)/obj/**/*.cs;$(McpSourceRoot)/bin/**/*.cs;$(McpSourceRoot)/Core/CommandExecutor.cs;$(McpSourceRoot)/Commands/MCPCommands.cs"/><Compile Include="CommandExecutor.generated.cs"/><Compile Include="MCPCommands.generated.cs"/>
+<Reference Include="RevitAPI"><HintPath>C:/Program Files/Autodesk/Revit 2024/RevitAPI.dll</HintPath><Private>False</Private></Reference><Reference Include="RevitAPIUI"><HintPath>C:/Program Files/Autodesk/Revit 2024/RevitAPIUI.dll</HintPath><Private>False</Private></Reference><Reference Include="System.Net.Http"/><Reference Include="System.Net.WebSockets"/><Reference Include="System.Net.WebSockets.Client"/>
+<PackageReference Include="Newtonsoft.Json" Version="13.0.3"/></ItemGroup></Project>

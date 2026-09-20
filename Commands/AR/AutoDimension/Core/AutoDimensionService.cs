@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -72,7 +72,7 @@ internal sealed class AutoDimensionService
 
         if (options.ModeType == DimensionMode.BeamWidth)
         {
-            return CreateBeamWidthDimensions(doc, view, options.OffsetInternal, dimensionType);
+            return CreateBeamWidthDimensions(doc, view, options, dimensionType);
         }
 
         if (options.ModeType == DimensionMode.BeamGrid)
@@ -93,6 +93,7 @@ internal sealed class AutoDimensionService
         IReadOnlyList<DatumInfo> horizontal = CollectSelectedGridDatums(allGrids, options.SelectedHorizontalGridIds, view);
         IReadOnlyList<DatumInfo> vertical = CollectSelectedGridDatums(allGrids, options.SelectedVerticalGridIds, view);
 
+        options.Diagnostics?.Add($"Selected H={options.SelectedHorizontalGridIds.Count}, V={options.SelectedVerticalGridIds.Count}; usable H={horizontal.Count}, V={vertical.Count}");
         double scale = options.GridOffsetsInPaperSpace ? Math.Max(1, view.Scale) : 1;
         int created = 0;
         foreach (IReadOnlyList<DatumInfo> group in GroupParallelGrids(horizontal, view))
@@ -104,7 +105,7 @@ internal sealed class AutoDimensionService
                 ResolveHorizontalGridPreferredVector(view, options.Direction),
                 options.GridPrimaryOffsetInternal * scale,
                 options.GridOverallOffsetInternal * scale,
-                dimensionType);
+                dimensionType, options.Diagnostics);
         }
 
         foreach (IReadOnlyList<DatumInfo> group in GroupParallelGrids(vertical, view))
@@ -116,7 +117,7 @@ internal sealed class AutoDimensionService
                 ResolveVerticalGridPreferredVector(view, options.Direction),
                 options.GridPrimaryOffsetInternal * scale,
                 options.GridOverallOffsetInternal * scale,
-                dimensionType);
+                dimensionType, options.Diagnostics);
         }
 
         return created;
@@ -164,8 +165,11 @@ internal sealed class AutoDimensionService
         };
     }
 
-    private static int CreateBeamWidthDimensions(Document doc, View view, double offsetInternal, DimensionType? dimensionType)
+    private static int CreateBeamWidthDimensions(Document doc, View view, DimensionOptions options, DimensionType? dimensionType)
     {
+        double offsetInternal = options.OffsetInternal;
+        double spacingOffsetInternal = options.BeamSpacingOffsetInternal ?? offsetInternal;
+        var selectedIds = new HashSet<int>(options.SelectedBeamIds.Select(ElementIdCompat.ToInt32));
         int created = 0;
         XYZ viewNormal = view.ViewDirection.Normalize();
         IReadOnlyList<DatumInfo> visibleGrids = CollectVisibleGridDatums(doc, view);
@@ -175,15 +179,16 @@ internal sealed class AutoDimensionService
             .OfType<FamilyInstance>()
             .ToList();
 
+        if (options.SelectedBeamsOnly) visibleBeams = visibleBeams.Where(b => selectedIds.Contains(ElementIdCompat.ToInt32(b.Id))).ToList();
         foreach (FamilyInstance beam in visibleBeams)
         {
-            if (TryCreateBeamWidthDimension(doc, view, beam, viewNormal, visibleGrids, offsetInternal, dimensionType))
+            if (options.IncludeBeamWidth && TryCreateBeamWidthDimension(doc, view, beam, viewNormal, visibleGrids, offsetInternal, dimensionType))
             {
                 created++;
             }
         }
 
-        created += CreateBeamToBeamChainDimensions(doc, view, visibleBeams, viewNormal, offsetInternal, dimensionType);
+        if (options.IncludeBeamSpacing) created += CreateBeamToBeamChainDimensions(doc, view, visibleBeams, viewNormal, spacingOffsetInternal, dimensionType);
         return created;
     }
 
@@ -959,13 +964,15 @@ internal sealed class AutoDimensionService
         XYZ preferredVector,
         double primaryOffsetInternal,
         double overallOffsetInternal,
-        DimensionType? dimensionType)
+        DimensionType? dimensionType, List<string>? diagnostics = null)
     {
+        diagnostics?.Add("Group: " + string.Join(", ", group.Select(d => d.Element.Id.ToString())));
         XYZ viewNormal = view.ViewDirection.Normalize();
         XYZ datumDir = DirectionUtils.Canonicalize(group[0].Direction);
         XYZ dimLineDir = viewNormal.CrossProduct(datumDir);
         if (dimLineDir.GetLength() < VectorTolerance)
         {
+            diagnostics?.Add("Skipped: degenerate direction/line or insufficient references.");
             return 0;
         }
 
@@ -974,6 +981,7 @@ internal sealed class AutoDimensionService
         Line? dimLine = BuildDimensionLine(group, datumDir, dimLineDir, primaryOffsetInternal, side);
         if (dimLine is null)
         {
+            diagnostics?.Add("Skipped: degenerate direction/line or insufficient references.");
             return 0;
         }
 
@@ -983,13 +991,16 @@ internal sealed class AutoDimensionService
         ReferenceArray references = BuildSortedReferences(sortedGroup, dimLineDir);
         if (references.Size < 2)
         {
+            diagnostics?.Add("Skipped: degenerate direction/line or insufficient references.");
             return 0;
         }
 
         int created = 0;
         try
         {
-            if (!HasSimilarDimension(doc, view, dimLine, references))
+            bool duplicate = HasSimilarDimension(doc, view, dimLine, references);
+            diagnostics?.Add($"Primary refs={references.Size}, duplicate={duplicate}; line={dimLine.GetEndPoint(0)} -> {dimLine.GetEndPoint(1)}");
+            if (!duplicate)
             {
                 Dimension dimension = doc.Create.NewDimension(view, dimLine, references);
                 if (dimensionType is not null && dimension.GetTypeId() != dimensionType.Id)
@@ -997,7 +1008,9 @@ internal sealed class AutoDimensionService
                     dimension.ChangeTypeId(dimensionType.Id);
                 }
 
-                if (!TryDiscardZeroLengthDimension(doc, dimension))
+                bool zero = TryDiscardZeroLengthDimension(doc, dimension);
+                diagnostics?.Add($"Primary zero-length discarded={zero}");
+                if (!zero)
                 {
                     AdjustOverlappingDimensionText(doc, dimension, view);
                     created++;
@@ -1008,6 +1021,7 @@ internal sealed class AutoDimensionService
             {
                 ReferenceArray overallReferences = BuildOverallReferences(sortedGroup);
                 Line? overallLine = BuildDimensionLine(sortedGroup, datumDir, dimLineDir, overallOffsetInternal, side);
+                diagnostics?.Add($"Overall refs={overallReferences.Size}, line={overallLine != null}, duplicate={(overallLine != null && HasSimilarDimension(doc, view, overallLine, overallReferences))}");
                 if (overallLine is not null &&
                     overallReferences.Size == 2 &&
                     !HasSimilarDimension(doc, view, overallLine, overallReferences))
@@ -1028,8 +1042,9 @@ internal sealed class AutoDimensionService
 
             return created;
         }
-        catch
+        catch (Exception ex)
         {
+            diagnostics?.Add(ex.ToString());
             return created;
         }
     }
@@ -2210,6 +2225,8 @@ internal sealed class AutoDimensionService
 
     private static DimensionType? ResolveDimensionType(Document doc, string? typeName)
     {
+        // Null means keep Revit's default type assigned by NewDimension.
+        if (string.IsNullOrWhiteSpace(typeName)) return null;
         var collector = new FilteredElementCollector(doc)
             .OfClass(typeof(DimensionType));
 

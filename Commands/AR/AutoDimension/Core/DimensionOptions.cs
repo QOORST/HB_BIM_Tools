@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Autodesk.Revit.DB;
 
@@ -48,8 +48,17 @@ internal enum FrontBackSide
 
 internal sealed class DimensionOptions
 {
+    public List<string>? Diagnostics { get; set; }
+
+    public bool IncludeBeamWidth { get; set; }
+    public bool IncludeBeamSpacing { get; set; } = true;
+    public bool SelectedBeamsOnly { get; set; } = true;
+
+    public IReadOnlyList<ElementId> SelectedBeamIds { get; set; } = Array.Empty<ElementId>();
+
     public bool GridBubblesOnly { get; set; }
-    public bool GridBubblesBothEnds { get; set; }
+    public bool HorizontalBubbleLeft { get; set; }
+    public bool VerticalBubbleBottom { get; set; }
     public bool HorizontalBubbleRight { get; set; } = true;
     public bool VerticalBubbleTop { get; set; } = true;
     public DimensionMode ModeType { get; set; } = DimensionMode.ColumnSetout;
@@ -61,6 +70,8 @@ internal sealed class DimensionOptions
     public LeftRightSide ColumnLeftRightSide { get; set; } = LeftRightSide.None;
 
     public FrontBackSide ColumnFrontBackSide { get; set; } = FrontBackSide.Front;
+
+    public double? BeamSpacingOffsetInternal { get; set; }
 
     public double OffsetInternal { get; set; } = 3.0;
 

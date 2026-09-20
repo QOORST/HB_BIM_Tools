@@ -125,7 +125,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                         }
                     }
 
-                    tx.Commit();
+                    if (tx.Commit() != TransactionStatus.Committed)
+                    {
+                        TaskDialog.Show("更新未完成", "Revit 未成功提交參數變更，請檢查失敗訊息。");
+                        return Result.Failed;
+                    }
                 }
 
                 // ── 結果摘要 ────────────────────────────────────────────

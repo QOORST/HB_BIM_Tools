@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Helpers/Data/CsvRecordReader.cs" Link="CsvRecordReader.cs" />
+    <Compile Include="../../Commands/MEP/PipeSleeveSettingsForm.cs" Link="PipeSleeveSettingsForm.cs" />
+    <Compile Include="../../Commands/AR/AutoDimension/Core/DimensionTextLayout.cs" Link="DimensionTextLayout.cs" />
+    <Compile Include="../../Commands/AR/AutoDimension/UI/DimensionTextCleanupForm.cs" Link="DimensionTextCleanupForm.cs" />
+    <Page Include="../../Commands/Family/SliderSettingsWindow.xaml" Link="SliderSettingsWindow.xaml" />
+    <Compile Include="../../Commands/Family/SliderSettingsWindow.xaml.cs" Link="SliderSettingsWindow.xaml.cs" />
+    <Compile Include="../../Commands/FamilyParameterRename/UI/FamilyParameterRenameWindow.cs" Link="FamilyParameterRenameWindow.cs" />
+    <Compile Include="../../Commands/FamilyParameterRename/Models/ParameterRenameRow.cs" Link="ParameterRenameRow.cs" />
+    <Compile Include="../../Commands/AR/AutoTag/TagAlignOptionsForm.cs" Link="TagAlignOptionsForm.cs" />
+    <Compile Include="../../Commands/AR/AutoTag/TagAlignOptions.cs" Link="TagAlignOptions.cs" />
+    <Compile Include="../../Commands/AutoJoin/AutoJoinForm.cs" Link="AutoJoinForm.cs" />
+    <Compile Include="../../Commands/AutoJoin/AutoJoinSettings.cs" Link="AutoJoinSettings.cs" />
+    <Compile Include="../../Commands/AutoJoin/CategoryCatalog.cs" Link="CategoryCatalog.cs" />
+    <Compile Include="../../Commands/AutoJoin/AutoJoinScope.cs" Link="AutoJoinScope.cs" />
+    <Compile Include="../../Commands/AutoJoin/ExecutionAction.cs" Link="ExecutionAction.cs" />
+    <Compile Include="../../Commands/AutoJoin/SettingsSerializer.cs" Link="SettingsSerializer.cs" />
+  </ItemGroup>
+</Project>

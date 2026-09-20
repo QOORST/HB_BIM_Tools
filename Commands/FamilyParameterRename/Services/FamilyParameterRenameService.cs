@@ -134,7 +134,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.Services
 
                 if (string.IsNullOrWhiteSpace(newName))
                 {
-                    messages.Add("New name is required.");
+                    messages.Add("請輸入新名稱。");
                 }
                 else if (string.Equals(row.OldName, newName, StringComparison.Ordinal))
                 {
@@ -146,12 +146,12 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.Services
                 {
                     if (existingNames.Contains(newName))
                     {
-                        messages.Add("Parameter name already exists.");
+                        messages.Add("參數名稱已存在。");
                     }
 
                     if (!pendingNames.Add(newName))
                     {
-                        messages.Add("Duplicate new name.");
+                        messages.Add("新名稱與其他列重複。");
                     }
                 }
 
@@ -230,7 +230,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.Services
                         if (parameter == null)
                         {
                             row.Status = "Failed";
-                            row.Message = "Parameter not found.";
+                            row.Message = "找不到此參數。";
                             continue;
                         }
 

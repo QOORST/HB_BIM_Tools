@@ -30,6 +30,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            _selectedFaces.Clear();
+            _createdElementIds.Clear();
             try
             {
                 // 檢查授權 - 裝修面生面功能
@@ -45,7 +47,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
 
                 var uiapp = commandData.Application;
                 var uidoc = uiapp.ActiveUIDocument;
-                var doc = uidoc.Document;
+                var doc = uidoc?.Document;
 
                 if (doc == null)
                 {
@@ -53,11 +55,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     return Result.Failed;
                 }
 
-                SharedParams.Ensure(doc); // 確保共用參數存在
-
                 // 1) 小視窗：選取牆類型 + 樓板類型 或 一般模型
                 var dlg = new PickFacePalette(doc);
-                dlg.Title = "AR 裝修 - 面生面";
+                dlg.Title = "HB_BIM｜面生面";
                 new System.Windows.Interop.WindowInteropHelper(dlg) { Owner = uiapp.MainWindowHandle };
                 var ok = dlg.ShowDialog();
                 if (ok != true) return Result.Cancelled;
@@ -177,28 +177,30 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     using (var t = new Transaction(doc, "AR裝修-面生面"))
                     {
                         t.Start();
+                        if (validFaces.Count > 0) SharedParams.Ensure(doc);
 
                         foreach (var (host, face, reference) in validFaces)
                         {
+                            int previousIdCount = _createdElementIds.Count;
+                            bool faceCommitted = false;
                             try
                             {
-                                ElementId id = CreateFinishingFace(doc, host, face, _currentThickness, _currentMaterial);
-
-                                if (id != ElementId.InvalidElementId)
+                                using (var faceTransaction = new SubTransaction(doc))
                                 {
-                                    created++;
-                                    _createdElementIds.Add(id);
+                                    faceTransaction.Start();
+                                    ElementId id = CreateFinishingFace(doc, host, face, _currentThickness, _currentMaterial);
+                                    if (id == ElementId.InvalidElementId || doc.GetElement(id) == null)
+                                        throw new InvalidOperationException("未產生有效裝修元素，此面的變更已取消。");
 
-                                    // 計算面積
                                     var areaM2 = face.Area * 0.09290304; // ft² → m²
-                                    totalAreaM2 += areaM2;
+                                    if (faceTransaction.Commit() != TransactionStatus.Committed)
+                                        throw new InvalidOperationException("Revit 未成功提交此面的變更。");
 
+                                    faceCommitted = true;
+                                    if (!_createdElementIds.Contains(id)) _createdElementIds.Add(id);
+                                    created++;
+                                    totalAreaM2 += areaM2;
                                     Debug.WriteLine($"✅ 成功生成裝修面 ID: {id.GetIdValue()}，面積: {areaM2:F2} m²");
-                                }
-                                else
-                                {
-                                    failed++;
-                                    errorMessages.Add($"宿主 {host.Name} (ID: {host.Id}) - 生成失敗");
                                 }
                             }
                             catch (Exception ex)
@@ -208,9 +210,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                                 errorMessages.Add(errorMsg);
                                 Debug.WriteLine($"❌ 生成裝修面失敗: {errorMsg}");
                             }
+                            finally
+                            {
+                                // 一個面可能產生多個分片；回復後也移除暫存的元素 ID。
+                                if (!faceCommitted && _createdElementIds.Count > previousIdCount)
+                                    _createdElementIds.RemoveRange(previousIdCount, _createdElementIds.Count - previousIdCount);
+                            }
                         }
 
-                        t.Commit();
+                        if (created == 0) t.RollBack();
+                        else if (t.Commit() != TransactionStatus.Committed)
+                            throw new InvalidOperationException("Revit 未成功提交裝修面變更。");
                     }
 
                     // 步驟 3.5: 接合所有相鄰的裝修牆
@@ -230,11 +240,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                                 Debug.WriteLine($"⚠️ 裝修牆接合處理失敗: {ex.Message}");
                             }
 
-                            t.Commit();
+                            if (t.Commit() != TransactionStatus.Committed)
+                                throw new InvalidOperationException("Revit 未成功提交裝修牆接合變更。");
                         }
                     }
 
-                    tg.Assimilate();
+                    if (created == 0) tg.RollBack();
+                    else if (tg.Assimilate() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("Revit 未成功完成面生面交易。");
                 }
 
                 // 步驟 4: 顯示完成訊息和統計
@@ -275,9 +288,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     }
                 }
 
-                TaskDialog.Show("AR裝修-面生面完成", summaryMsg);
+                TaskDialog.Show(created > 0 ? "HB_BIM｜面生面結果" : "HB_BIM｜面生面未建立成果", summaryMsg);
 
-                return Result.Succeeded;
+                return created > 0 ? Result.Succeeded : Result.Cancelled;
             }
             catch (Exception ex)
             {
@@ -3860,6 +3873,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                             : null;
 
                         if (!double.TryParse(_txtSlopedFaceFloorMaxAngle.Text, out double slopedFaceFloorMaxAngle) ||
+                            double.IsNaN(slopedFaceFloorMaxAngle) || double.IsInfinity(slopedFaceFloorMaxAngle) ||
                             slopedFaceFloorMaxAngle < 0 ||
                             slopedFaceFloorMaxAngle > 90)
                         {
@@ -3880,7 +3894,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                             return;
                         }
 
-                        if (!double.TryParse(_txtThickness.Text, out double thickness) || thickness <= 0)
+                        if (!double.TryParse(_txtThickness.Text, out double thickness)
+                            || double.IsNaN(thickness) || double.IsInfinity(thickness) || thickness <= 0)
                         {
                             System.Windows.MessageBox.Show("請輸入有效的厚度（大於 0）。", "面生面");
                             return;

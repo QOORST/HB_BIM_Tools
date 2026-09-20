@@ -43,9 +43,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     {
                         tx.Start();
                         result = ArchitecturalOpeningSyncService.SyncFromLinkedSleeves(doc);
-                        if (tx.GetStatus() == TransactionStatus.Started)
+                        if (tx.GetStatus() != TransactionStatus.Started || tx.Commit() != TransactionStatus.Committed)
                         {
-                            tx.Commit();
+                            TaskDialog.Show("建築開孔同步", "Revit 未成功提交開孔變更，請檢查失敗訊息。");
+                            return Result.Failed;
                         }
                     }
                     catch (Exception ex)
@@ -56,7 +57,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         }
 
                         message = ex.Message;
-                        TaskDialog.Show("建築開孔同步", "執行失敗，已復原本次變更：\n" + ex.Message);
+                        string recovery = tx.GetStatus() == TransactionStatus.RolledBack
+                            ? "已復原本次變更。"
+                            : "尚未確認回復狀態，請檢查 Revit 失敗訊息與模型。";
+                        TaskDialog.Show("建築開孔同步", "執行失敗，" + recovery + "\n" + ex.Message);
                         return Result.Cancelled;
                     }
                 }
@@ -69,7 +73,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             catch (Exception ex)
             {
                 message = ex.Message;
-                TaskDialog.Show("建築開孔同步", "執行失敗，未寫入變更：\n" + ex.Message);
+                TaskDialog.Show("建築開孔同步", "執行未完成，請檢查模型與 Revit 失敗訊息：\n" + ex.Message);
                 return Result.Cancelled;
             }
         }

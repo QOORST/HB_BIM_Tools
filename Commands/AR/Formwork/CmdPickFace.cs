@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -38,19 +38,23 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
         {
             _generationFailures.Clear();
             _selectedFaces.Clear();
+            _createdFormworkItems.Clear();
             var uiapp = data.Application;
             var uidoc = uiapp.ActiveUIDocument;
-            var doc = uidoc.Document;
+            var doc = uidoc?.Document;
+            if (doc == null)
+            {
+                msg = "請先開啟 Revit 模型，再執行面選模板。";
+                return Result.Cancelled;
+            }
 
             try
             {
                 // 授權檢查
-                if (!LicenseHelper.CheckLicense("FaceFormwork", "面生面", LicenseType.Standard))
+                if (!LicenseHelper.CheckLicense("FaceFormwork", "面選模板", LicenseType.Standard))
                 {
                     return Result.Cancelled;
                 }
-
-                SharedParams.Ensure(doc); // 確保共用參數存在
 
                 // 1) 小視窗：材料 + 厚度
                 var dlg = new PickFacePalette(doc);
@@ -65,14 +69,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 var filter = new FaceOnHostFilter(allowFloor: true);
                 int created = 0;
                 double totalAreaM2 = 0; // 總面積統計
+                bool parametersReady = false;
+                bool pickedAnyFace = false;
 
-                using (var tg = new TransactionGroup(doc, "面生面"))
+                using (var tg = new TransactionGroup(doc, "面選模板"))
                 {
                     tg.Start();
                     FormworkEngine.BeginRun();
 
                     // 將 Transaction 移到迴圈外，提升效能並整合為單一操作
-                    using (var t = new Transaction(doc, "面生面"))
+                    using (var t = new Transaction(doc, "面選模板"))
                     {
                         t.Start();
                         while (true)
@@ -91,12 +97,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                 break;
                             }
 
+                            pickedAnyFace = true;
                             var host = doc.GetElement(r.ElementId);
                             // 接受平面和曲面（CylindricalFace、RuledFace 等）
                             var selectedFace = host?.GetGeometryObjectFromReference(r) as Face;
                             if (selectedFace == null)
                             {
-                                TaskDialog.Show("面生面", "未能取得有效的面，請重新選取。");
+                                TaskDialog.Show("面選模板", "未能取得有效的面，請重新選取。");
                                 continue;
                             }
 
@@ -117,81 +124,119 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                             }
 
                             // 只生成用戶點選的面的模板（不使用傳統架構）
+                            int previousCreated = created;
+                            double previousArea = totalAreaM2;
+                            int previousItemCount = _createdFormworkItems.Count;
+                            bool faceCommitted = false;
                             try
                             {
                                 ElementId id = ElementId.InvalidElementId;
 
                                 // 直接為選中的面生成模板
-                                id = CreateSingleFaceFormworkDirectly(doc, host, selectedFace, _currentThickness, _currentMaterial);
-                                
-                                if (id != ElementId.InvalidElementId)
+                                if (!parametersReady)
                                 {
-                                    Debug.WriteLine($"成功為選中面生成模板 ID: {id.GetIdValue()}");
+                                    SharedParams.Ensure(doc);
+                                    parametersReady = true;
                                 }
-                                else
+                                using (var faceTransaction = new SubTransaction(doc))
                                 {
-                                    Debug.WriteLine("單面模板生成失敗");
-                                }
+                                    faceTransaction.Start();
+                                    id = CreateSingleFaceFormworkDirectly(doc, host, selectedFace, _currentThickness, _currentMaterial);
 
-                                if (id != ElementId.InvalidElementId) 
-                                {
-                                    created++;
-                                    _selectedFaces.Add(GetFaceKey(host, selectedFace)); // 記錄已選取的面
-                                    
-                                    // 計算並設定模板面積
-                                    var element = doc.GetElement(id);
-                                    double areaM2 = 0;
-                                    if (element is DirectShape ds)
+                                    if (id != ElementId.InvalidElementId)
                                     {
-                                        Debug.WriteLine($"🔍 開始處理DirectShape元素 ID: {id.GetIdValue()}");
-
-                                        // 先計算面積（包含詳細除錯）
-                                        areaM2 = CalculateFormworkAreaWithDebug(doc, ds, selectedFace);
-                                        Debug.WriteLine($"📏 計算得到面積: {areaM2:F6} m²");
-                                        
-                                        // 設定材質和顏色
-                                        SetElementMaterialAndColor(doc, ds, _currentMaterial);
-                                        
-                                        // 設定面積參數和類別 (傳入宿主元素)
-                                        SetFormworkAreaParameter(ds, areaM2, host);
-                                        totalAreaM2 += areaM2; // 累計總面積
-                                        
-                                        Debug.WriteLine($"✅ 元素處理完成，累計總面積: {totalAreaM2:F6} m²");
-                                        
-                                        // 記錄建立的模板項目供後續統計使用
-                                        _createdFormworkItems.Add(new FormworkItem
-                                        {
-                                            ElementId = id,
-                                            MaterialName = _currentMaterial?.Name ?? "預設",
-                                            Thickness = _currentThickness,
-                                            Area = areaM2,
-                                            Notes = $"從 {host.Category?.Name ?? "未知"} 面生成"
-                                        });
+                                        Debug.WriteLine($"成功為選中面生成模板 ID: {id.GetIdValue()}");
                                     }
-                                    
-                                    // 🎨 即時視覺反饋：綠色閃爍表示成功創建（傳入材料以保留顏色）
-                                    VisualFeedbackHelper.FlashElement(doc, uidoc, id, new Color(0, 255, 0), 3, 300, _currentMaterial);
+                                    else
+                                    {
+                                        Debug.WriteLine("單面模板生成失敗");
+                                    }
 
-                                    Debug.WriteLine($"✅ 成功生成模板並立即顯示，面積: {areaM2:F2} m² | 總計: {created} 個 | 總面積: {totalAreaM2:F2} m²");
-                                }
-                                else
-                                {
-                                    // 提供失敗反饋，但不中斷流程
-                                    Debug.WriteLine("該面無法生成模板（面不暴露或被其他結構完全遮擋）");
+                                    if (id != ElementId.InvalidElementId)
+                                    {
+                                        created++;
+                                        _selectedFaces.Add(GetFaceKey(host, selectedFace)); // 記錄已選取的面
+
+                                        // 計算並設定模板面積
+                                        var element = doc.GetElement(id);
+                                        if (element == null)
+                                            throw new InvalidOperationException("無法取得生成的模板元素。");
+                                        double areaM2 = 0;
+                                        if (element is DirectShape ds)
+                                        {
+                                            Debug.WriteLine($"🔍 開始處理DirectShape元素 ID: {id.GetIdValue()}");
+
+                                            // 先計算面積（包含詳細除錯）
+                                            areaM2 = CalculateFormworkAreaWithDebug(doc, ds, selectedFace);
+                                            Debug.WriteLine($"📏 計算得到面積: {areaM2:F6} m²");
+
+                                            // 設定材質和顏色
+                                            SetElementMaterialAndColor(doc, ds, _currentMaterial);
+
+                                            // 設定面積參數和類別 (傳入宿主元素)
+                                            SetFormworkAreaParameter(ds, areaM2, host);
+                                            totalAreaM2 += areaM2; // 累計總面積
+
+                                            Debug.WriteLine($"✅ 元素處理完成，累計總面積: {totalAreaM2:F6} m²");
+
+                                            // 記錄建立的模板項目供後續統計使用
+                                            _createdFormworkItems.Add(new FormworkItem
+                                            {
+                                                ElementId = id,
+                                                MaterialName = _currentMaterial?.Name ?? "預設",
+                                                Thickness = _currentThickness,
+                                                Area = areaM2,
+                                                Notes = $"從 {host.Category?.Name ?? "未知"} 面生成"
+                                            });
+                                        }
+
+                                        // 🎨 即時視覺反饋：綠色閃爍表示成功創建（傳入材料以保留顏色）
+                                        VisualFeedbackHelper.FlashElement(doc, uidoc, id, new Color(0, 255, 0), 3, 300, _currentMaterial);
+
+                                        if (faceTransaction.Commit() != TransactionStatus.Committed)
+                                            throw new InvalidOperationException("Revit 未成功提交此面的模板變更。");
+                                        faceCommitted = true;
+                                        Debug.WriteLine($"✅ 成功生成模板並立即顯示，面積: {areaM2:F2} m² | 總計: {created} 個 | 總面積: {totalAreaM2:F2} m²");
+                                    }
+                                    else
+                                    {
+                                        // 提供失敗反饋，但不中斷流程
+                                        Debug.WriteLine("該面無法生成模板（面不暴露或被其他結構完全遮擋）");
+                                        faceTransaction.RollBack();
+                                    }
                                 }
                             }
                             catch (Exception ex)
                             {
                                 Debug.WriteLine($"生成模板時發生錯誤: {ex.Message}");
+                                _generationFailures.Add($"宿主 {host.Id}：{ex.Message}");
                                 // 繼續執行，不中斷用戶操作
                             }
+                            finally
+                            {
+                                if (!faceCommitted)
+                                {
+                                    created = previousCreated;
+                                    totalAreaM2 = previousArea;
+                                    _selectedFaces.Remove(faceKey);
+                                    if (_createdFormworkItems.Count > previousItemCount)
+                                        _createdFormworkItems.RemoveRange(previousItemCount, _createdFormworkItems.Count - previousItemCount);
+                                }
+                            }
                         }
-                        t.Commit();
+                        if (created == 0) t.RollBack();
+                        else if (t.Commit() != TransactionStatus.Committed)
+                            throw new InvalidOperationException("Revit 未成功提交面選模板變更。");
                     }
 
                     FormworkEngine.EndRun();
-                    tg.Assimilate();
+                    if (created == 0) tg.RollBack();
+                    else if (tg.Assimilate() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("Revit 未成功完成面選模板交易。");
                 }
+
+                // 未選取任何面即取消，不顯示幾何失敗提示。
+                if (!pickedAnyFace) return Result.Cancelled;
 
                 // ESC 完成任務後，顯示數量計算頁面
                 if (created > 0)
@@ -230,7 +275,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                     report.Show();
                 }
 
-                return Result.Succeeded;
+                return created > 0 ? Result.Succeeded : Result.Cancelled;
             }
             catch (Exception ex)
             {
@@ -282,7 +327,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             public PickFacePalette(Document doc)
             {
                 _doc = doc;
-                Title = "面生面（像油漆）";
+                Title = "HB_BIM｜面選模板";
                 Width = 380; Height = 160;
                 WindowStyle = System.Windows.WindowStyle.ToolWindow;
                 ResizeMode = System.Windows.ResizeMode.NoResize;
@@ -328,9 +373,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 ok.Click += (s, e) =>
                 {
-                    if (!double.TryParse(_tbThk.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out var mm) || mm <= 0)
+                    if (!double.TryParse(_tbThk.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out var mm)
+                        || double.IsNaN(mm) || double.IsInfinity(mm) || mm <= 0)
                     {
-                        System.Windows.MessageBox.Show("請輸入正確的厚度（mm）。", "面生面");
+                        System.Windows.MessageBox.Show("請輸入大於 0 的有限厚度數值（mm）。", "面選模板");
                         return;
                     }
                     ThicknessMm = mm;
@@ -1818,6 +1864,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                                $"每個片段都是獨立的元素，您可以手動選擇並刪除不需要的部分";
 
                 // 添加詳細項目信息
+                if (_generationFailures.Count > 0)
+                    summaryMsg += "\n\n部分處理發生錯誤（前 5 筆）：\n" + string.Join("\n", _generationFailures.Take(5));
                 if (_createdFormworkItems.Any())
                 {
                     summaryMsg += "\n\n📋 詳細項目:";

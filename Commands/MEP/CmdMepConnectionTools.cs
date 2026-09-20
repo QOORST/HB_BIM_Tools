@@ -36,7 +36,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var footer = new F.FlowLayoutPanel { Dock = F.DockStyle.Bottom, Height = 52,
                 FlowDirection = F.FlowDirection.RightToLeft, Padding = new F.Padding(8) };
             var ok = new F.Button { Text = "確定", DialogResult = F.DialogResult.OK, AutoSize = true,
-                FlatStyle = F.FlatStyle.Flat, BackColor = System.Drawing.Color.Teal, ForeColor = System.Drawing.Color.White };
+                FlatStyle = F.FlatStyle.Flat, BackColor = System.Drawing.Color.FromArgb(0, 105, 180), ForeColor = System.Drawing.Color.White };
             var cancel = new F.Button { Text = "取消", DialogResult = F.DialogResult.Cancel, AutoSize = true,
                 FlatStyle = F.FlatStyle.Flat, BackColor = System.Drawing.Color.White };
             footer.Controls.Add(ok); footer.Controls.Add(cancel);
@@ -149,7 +149,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 if (forceSettings || !validSaved || ambiguous)
                 {
                     using (var form = MepConnectionUi.Form("HB_BIM｜接點生成管", "未連接接點", portBox, "管線類型", typeBox, "長度（mm）", length))
+                    {
+                        ((F.Button)form.AcceptButton).Text = forceSettings ? "儲存設定" : "建立管段";
                         if (form.ShowDialog() != F.DialogResult.OK) return Result.Cancelled;
+                    }
                 }
                 if (typeBox.SelectedItem == null) throw new InvalidOperationException("專案沒有可用的管線類型。");
                 var source = (Connector)((MepConnectionUi.Choice)portBox.SelectedItem).Value;
@@ -219,8 +222,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 var selected = ui.Selection.GetElementIds().Select(doc.GetElement).ToList();
                 if (selected.Count == 0) selected = ui.Selection.PickObjects(ObjectType.Element, "選取要歸位的直線管段").Select(doc.GetElement).ToList();
                 var curves = selected.Where(MepConnectionUi.Supported).Cast<MEPCurve>().ToList();
+                if (curves.Count == 0) throw new InvalidOperationException("請選取至少一個可處理的直線管段。");
                 if (curves.Count != selected.Count || curves.Any(c => c.Pinned || c.GroupId != ElementId.InvalidElementId || !((c.Location as LocationCurve)?.Curve is Line)))
-                    throw new InvalidOperationException("V1 僅處理未釘住、非群組的本機直線管段；請排除其他元素。");
+                    throw new InvalidOperationException("僅處理未釘住、非群組的本機直線管段；請排除其他元素。");
                 var allLevels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l => l.ProjectElevation).ToList();
                 var filter = MepConnectionUi.Choices(new[] { "全部樓層", "建築樓層", "結構樓層" }.Select(s => new MepConnectionUi.Choice { Text = s, Value = s }));
                 var target = MepConnectionUi.Choices(new MepConnectionUi.Choice[0]);
@@ -233,7 +237,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 };
                 filter.SelectedIndexChanged += (_, __) => refresh(); refresh();
                 using (var form = MepConnectionUi.Form("HB_BIM｜MEP 樓層歸位", "樓層篩選", filter, "目標樓層", target))
+                {
+                    ((F.Button)form.AcceptButton).Text = "預覽歸位";
                     if (form.ShowDialog() != F.DialogResult.OK) return Result.Cancelled;
+                }
                 var eligible = target.Items.Cast<MepConnectionUi.Choice>().Select(x => x.Value).OfType<Level>().ToList();
                 var fixedLevel = ((MepConnectionUi.Choice)target.SelectedItem).Value as Level;
                 var plan = curves.Select(c => new { Curve = c, Level = fixedLevel ?? eligible.LastOrDefault(l => l.ProjectElevation <= ((LocationCurve)c.Location).Curve.Evaluate(.5, true).Z) }).ToList();

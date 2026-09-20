@@ -9,6 +9,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 {
     private readonly object _sync = new();
     private List<ElementId> _pendingIds;
+    private Document _document;
+    public void BindDocument(Document document)
+    {
+        lock (_sync) { _document = document; _pendingIds = null; }
+    }
 
     public void RequestShowElements(IList<ElementId> ids)
     {
@@ -38,11 +43,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         }
 
         var uiDoc = app.ActiveUIDocument;
-        if (uiDoc == null)
+        if (uiDoc == null || _document == null || !_document.IsValidObject || uiDoc.Document != _document)
         {
             return;
         }
 
+        ids = ids.Where(id => uiDoc.Document.GetElement(id) != null).ToList();
+        if (ids.Count == 0) return;
         var view3D = Find3DView(uiDoc.Document);
         if (view3D != null && uiDoc.ActiveView.Id != view3D.Id)
         {

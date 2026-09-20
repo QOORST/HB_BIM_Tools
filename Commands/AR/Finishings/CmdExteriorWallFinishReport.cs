@@ -95,11 +95,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                 ExportWorkbook(saveDialog.FileName, rows);
 
                 string viewName = null;
+                string viewFailure = null;
+                try
+                {
                 using (var t = new Transaction(doc, "建立外牆粉刷驗算視圖"))
                 {
                     t.Start();
                     viewName = CreateCheckView(doc, rows.Select(r => r.ElementId).Distinct().ToList());
-                    t.Commit();
+                    if (t.Commit() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("Revit 未成功提交驗算視圖。");
+                }
+                }
+                catch (Exception ex)
+                {
+                    viewName = null;
+                    viewFailure = ex.Message;
                 }
 
                 var total = rows.Sum(r => r.NetExteriorAreaM2);
@@ -110,7 +120,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     $"構件數：{elementCount}（明細面數：{rows.Count}）\n" +
                     $"外側面淨面積：{total:F2} ㎡\n" +
                     $"門窗/洞口參考扣除：{opening:F2} ㎡\n" +
-                    $"驗算視圖：{viewName ?? "未建立"}\n\n" +
+                    $"驗算視圖：{viewName ?? "未建立"}\n" +
+                    (viewFailure == null ? "\n" : $"視圖建立失敗（報表已匯出）：{viewFailure}\n\n") +
                     $"檔案：{saveDialog.FileName}");
 
                 return Result.Succeeded;

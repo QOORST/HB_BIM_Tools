@@ -81,7 +81,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                     {
                         t.Start();
                         doc.Delete(fallbackTargets);
-                        t.Commit();
+                        if (t.Commit() != TransactionStatus.Committed)
+                        {
+                            TaskDialog.Show("刪除未完成", "Revit 未成功提交刪除，請檢查失敗訊息。");
+                            return Result.Failed;
+                        }
                     }
 
                     TaskDialog.Show("刪除完成", $"已成功刪除 {fallbackTargets.Count} 個手動選取的裝修元素。");
@@ -149,7 +153,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
 
                 var confirmResult = TaskDialog.Show("確認刪除",
                     $"即將刪除 {targets.Count} 個裝修元素（{deleteMode}）。\n\n" +
-                    "此操作無法復原，是否繼續？",
+                    "請確認所選元素為要刪除的裝修層，是否繼續？",
                     TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No);
 
                 if (confirmResult != TaskDialogResult.Yes)
@@ -159,7 +163,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                 {
                     t.Start();
                     doc.Delete(targets);
-                    t.Commit();
+                    if (t.Commit() != TransactionStatus.Committed)
+                    {
+                        TaskDialog.Show("刪除未完成", "Revit 未成功提交刪除，請檢查失敗訊息。");
+                        return Result.Failed;
+                    }
                 }
 
                 TaskDialog.Show("刪除完成", $"已成功刪除 {targets.Count} 個裝修元素。");

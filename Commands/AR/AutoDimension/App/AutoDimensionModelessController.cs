@@ -82,6 +82,7 @@ internal static class AutoDimensionModelessController
                 RequestRefresh,
                 view.Scale);
 
+            _form.ApplyBubbleSettings(AutoDimensionSettingsStore.LoadBubbles(doc));
             _handler.Attach(_form, doc, view.Id);
             _form.FormClosed += (_, _) => DisposeWindow();
             _form.Show(new RevitWindow(commandData.Application.MainWindowHandle));
@@ -237,11 +238,6 @@ internal static class AutoDimensionModelessController
 
         public void RequestApply(DimensionOptions options)
         {
-            if (_sourceDocument is not null)
-            {
-                AutoDimensionSettingsStore.Save(_sourceDocument, options);
-            }
-
             _requestKind = RequestKind.Apply;
             _options = options;
         }
@@ -285,7 +281,7 @@ internal static class AutoDimensionModelessController
                     string summary = GridBubbleService.Apply(doc, view, options);
                     if (bubbleTx.Commit() != TransactionStatus.Committed)
                         throw new InvalidOperationException("標頭設定未成功提交。");
-                    Complete(summary);
+                    CompleteWithSavedSettings(doc, options, summary);
                     return;
                 }
                 if (options.ModeType == DimensionMode.ColumnSetout && options.Mode == PlacementMode.Manual)
@@ -297,6 +293,22 @@ internal static class AutoDimensionModelessController
                     }
                 }
 
+                if (options.ModeType == DimensionMode.BeamWidth && options.SelectedBeamsOnly)
+                {
+                    var filter = new BeamSelectionFilter();
+                    var ids = uiDoc.Selection.GetElementIds().Where(id => filter.AllowElement(doc.GetElement(id))).ToList();
+                    if (ids.Count == 0)
+                    {
+                        _form?.Hide();
+                        try
+                        {
+                            ids = uiDoc.Selection.PickObjects(Autodesk.Revit.UI.Selection.ObjectType.Element, filter, "請選取要標註的梁，完成後按完成。").Select(r => r.ElementId).Distinct().ToList();
+                        }
+                        finally { if (_form != null && !_form.IsDisposed) { _form.Show(); _form.Activate(); } }
+                    }
+                    if (ids.Count == 0) { Complete("未選取梁，未建立標註。"); return; }
+                    options.SelectedBeamIds = ids;
+                }
                 var service = new AutoDimensionService();
                 using var tx = new Transaction(doc, _windowTitle);
                 tx.Start();
@@ -308,8 +320,9 @@ internal static class AutoDimensionModelessController
                     return;
                 }
 
-                tx.Commit();
-                Complete($"已建立 {created} 條標註。");
+                if (tx.Commit() != TransactionStatus.Committed)
+                    throw new InvalidOperationException("標註未成功提交，請檢查 Revit 的失敗訊息後重試。");
+                CompleteWithSavedSettings(doc, options, $"已建立 {created} 條標註。");
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
@@ -333,10 +346,12 @@ internal static class AutoDimensionModelessController
 
         private void RefreshSources(Document doc, View view, string status)
         {
+            bool changedDocument = !IsSameDocument(doc, _sourceDocument);
             SourceData source = CollectSources(doc, view);
             _sourceDocument = doc;
             _sourceViewId = view.Id;
             _form?.UpdateSources(source.DimensionTypeNames, source.HorizontalGrids, source.VerticalGrids, view.Scale);
+            if (changedDocument) _form?.ApplyBubbleSettings(AutoDimensionSettingsStore.LoadBubbles(doc));
             Complete(status);
         }
 
@@ -411,6 +426,25 @@ internal static class AutoDimensionModelessController
                     _form.Show();
                     _form.Activate();
                 }
+            }
+        }
+
+        private sealed class BeamSelectionFilter : Autodesk.Revit.UI.Selection.ISelectionFilter
+        {
+            public bool AllowElement(Element element) => element is FamilyInstance && element.Category != null && ElementIdCompat.ToInt32(element.Category.Id) == (int)BuiltInCategory.OST_StructuralFraming;
+            public bool AllowReference(Reference reference, XYZ point) => false;
+        }
+
+        private void CompleteWithSavedSettings(Document doc, DimensionOptions options, string status)
+        {
+            try
+            {
+                AutoDimensionSettingsStore.Save(doc, options);
+                Complete(status);
+            }
+            catch (Exception ex)
+            {
+                Complete(status + " 但設定記憶未儲存：" + ex.Message, true);
             }
         }
 

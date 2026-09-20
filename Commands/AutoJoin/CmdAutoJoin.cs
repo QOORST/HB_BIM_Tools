@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text;
 using System.Windows.Forms;
 using Autodesk.Revit.Attributes;
@@ -27,26 +27,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             return Result.Failed;
         }
 
-        var settings = SettingsSerializer.LoadOrDefault(SettingsSerializer.DefaultPath);
+        AutoJoinModelessController.Show(commandData.Application);
+        return Result.Succeeded;
+    }
 
-        using var form = new AutoJoinForm(settings);
-        var dialogResult = form.ShowDialog();
-        if (dialogResult != DialogResult.OK || form.Action == ExecutionAction.None)
-        {
-            return Result.Cancelled;
-        }
-
-        settings = form.BuildSettings();
+    internal static string Run(UIDocument uiDoc, AutoJoinSettings settings, ExecutionAction action)
+    {
         SettingsSerializer.Save(SettingsSerializer.DefaultPath, settings);
-
         var scopedElements = ElementCollectorService.Collect(uiDoc, settings);
         if (scopedElements.Count == 0)
         {
-            TaskDialog.Show("自動接合", "在目前設定範圍內找不到可處理的元素。");
-            return Result.Succeeded;
+            return "在目前設定範圍內找不到可處理的元素。";
         }
 
-        if (RequiresLargeScopeConfirmation(form.Action, scopedElements.Count))
+        if (RequiresLargeScopeConfirmation(action, scopedElements.Count))
         {
             var confirm = new TaskDialog("自動接合")
             {
@@ -60,18 +54,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             confirm.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "繼續執行");
 
             if (confirm.Show() != TaskDialogResult.CommandLink1)
-                return Result.Cancelled;
+                return "已取消，未執行模型變更。";
         }
 
-        if (form.Action == ExecutionAction.AlignWallProfile)
+        if (action == ExecutionAction.AlignWallProfile)
         {
             var alignResult = WallProfileAligner.Run(uiDoc.Document, scopedElements);
-            TaskDialog.Show("牆輪廓對齊結果", BuildAlignSummary(alignResult));
-            return Result.Succeeded;
+            return BuildAlignSummary(alignResult);
         }
 
         JoinEngineResult result;
-        if (form.Action == ExecutionAction.AutoJoin)
+        if (action == ExecutionAction.AutoJoin)
         {
             result = JoinEngine.RunAutoJoin(uiDoc.Document, scopedElements, settings);
         }
@@ -80,18 +73,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             result = JoinEngine.RunUnjoin(uiDoc.Document, scopedElements, settings);
         }
 
-        var title = form.Action == ExecutionAction.AutoJoin ? "自動接合結果" : "解除接合結果";
         var summary = BuildSummary(result);
         if (result.FailureDetails.Count > 0)
-        {
-            ModelessReviewController.ShowOrUpdate(title, summary, result.FailureDetails);
-        }
-        else
-        {
-            TaskDialog.Show(title, summary);
-        }
-
-        return Result.Succeeded;
+            ModelessReviewController.ShowOrUpdate(action == ExecutionAction.AutoJoin ? "自動接合結果" : "解除接合結果",
+                summary, result.FailureDetails, uiDoc.Document);
+        return summary;
     }
 
     private static string BuildSummary(JoinEngineResult result)

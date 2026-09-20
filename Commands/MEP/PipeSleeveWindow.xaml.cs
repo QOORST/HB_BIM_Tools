@@ -502,7 +502,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                             LimitToActiveView = true,
                             ActiveViewId = _doc.ActiveView != null ? _doc.ActiveView.Id : ElementId.InvalidElementId
                         });
-                    trans.Commit();
+                    if (trans.Commit() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("Revit 未成功提交套管變更，請檢查失敗訊息後再試。");
 
                     progressExecution.IsIndeterminate = false;
                     progressExecution.Value = 100;
@@ -525,8 +526,15 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
             catch (Exception ex)
             {
+                progressExecution.Value = 0;
+                txtPreview.Text = "執行未完成：" + ex.Message;
                 MessageBox.Show($"執行失敗:\n{ex.Message}", "錯誤",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                progressExecution.IsIndeterminate = false;
+                btnExecute.IsEnabled = _pipes.Count > 0;
             }
         }
 

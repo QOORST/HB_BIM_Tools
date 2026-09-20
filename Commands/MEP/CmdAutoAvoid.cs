@@ -29,6 +29,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
             _uidoc = commandData.Application.ActiveUIDocument;
+            if (_uidoc == null)
+            {
+                TaskDialog.Show("管線避讓", "請先開啟模型，再執行管線避讓。");
+                return Result.Cancelled;
+            }
             _doc = _uidoc.Document;
 
             Logger.Info("=== 管線避讓工具啟動 ===");
@@ -356,7 +361,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             using (var okButton = new WinForms.Button())
             using (var cancelButton = new WinForms.Button())
             {
-                form.Text = "管線避讓";
+                form.Text = "HB_BIM 管線避讓";
                 form.ClientSize = new System.Drawing.Size(444, 430);
                 form.StartPosition = WinForms.FormStartPosition.CenterScreen;
                 form.FormBorderStyle = WinForms.FormBorderStyle.FixedDialog;
@@ -369,7 +374,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 headerPanel.Top = 0;
                 headerPanel.Width = 444;
                 headerPanel.Height = 76;
-                headerPanel.BackColor = System.Drawing.Color.FromArgb(0, 120, 215);
+                headerPanel.BackColor = System.Drawing.Color.FromArgb(0, 105, 180);
 
                 titleLabel.Text = "設定避讓方式";
                 titleLabel.Left = 22;
@@ -408,11 +413,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 angleBox.Height = 28;
                 angleBox.DropDownStyle = WinForms.ComboBoxStyle.DropDownList;
                 angleBox.Items.AddRange(new object[] { "22.5", "45", "90" });
-                angleBox.SelectedItem = _lastBendAngle.ToString("0.##");
+                angleBox.SelectedItem = _lastBendAngle.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
                 if (angleBox.SelectedIndex < 0)
                     angleBox.SelectedItem = "45";
 
-                offsetLabel.Text = "避讓高度";
+                offsetLabel.Text = "避讓高度 mm";
                 offsetLabel.Left = 18;
                 offsetLabel.Top = 68;
                 offsetLabel.Width = 90;
@@ -515,7 +520,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 okButton.Width = 96;
                 okButton.Height = 30;
                 okButton.FlatStyle = WinForms.FlatStyle.Flat;
-                okButton.BackColor = System.Drawing.Color.FromArgb(0, 120, 215);
+                okButton.BackColor = System.Drawing.Color.FromArgb(0, 105, 180);
                 okButton.ForeColor = System.Drawing.Color.White;
                 okButton.UseVisualStyleBackColor = false;
                 okButton.DialogResult = WinForms.DialogResult.OK;
@@ -559,7 +564,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     return false;
                 }
 
-                options.BendAngle = double.Parse(angleBox.SelectedItem?.ToString() ?? "45");
+                options.BendAngle = double.Parse(angleBox.SelectedItem?.ToString() ?? "45", System.Globalization.CultureInfo.InvariantCulture);
                 options.ExtraOffsetMm = (double)offsetBox.Value;
                 options.Direction = downRadio.Checked
                     ? DirectionMode.Down

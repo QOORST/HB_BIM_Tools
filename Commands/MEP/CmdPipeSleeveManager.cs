@@ -146,6 +146,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         private readonly WinForms.Label _summary = new WinForms.Label();
         private readonly WinForms.Label _detail = new WinForms.Label();
         private readonly WinForms.Label _scopeNote = new WinForms.Label();
+        private readonly List<WinForms.Button> _selectionButtons = new List<WinForms.Button>();
         private List<PipeSleeveManagerRow> _allRows = new List<PipeSleeveManagerRow>();
 
         public PipeSleeveManagerForm(UIApplication uiapp, UIDocument uidoc, PipeSleeveManagerRequestHandler handler, ExternalEvent externalEvent)
@@ -285,9 +286,14 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             bottom.Controls.Add(buttons, 0, 1);
 
             buttons.Controls.Add(MakeButton("關閉", 92, (s, e) => Close()));
-            buttons.Controls.Add(MakeButton("刪除", 92, (s, e) => Raise(PipeSleeveManagerAction.Delete)));
-            buttons.Controls.Add(MakeButton("更新", 92, (s, e) => Raise(PipeSleeveManagerAction.Update), true));
-            buttons.Controls.Add(MakeButton("定位", 92, (s, e) => Raise(PipeSleeveManagerAction.Focus)));
+            _selectionButtons.Add(MakeButton("刪除", 92, (s, e) => Raise(PipeSleeveManagerAction.Delete)));
+            _selectionButtons.Add(MakeButton("更新", 92, (s, e) => Raise(PipeSleeveManagerAction.Update), true));
+            _selectionButtons.Add(MakeButton("定位", 92, (s, e) => Raise(PipeSleeveManagerAction.Focus)));
+            foreach (var button in _selectionButtons)
+            {
+                button.Enabled = false;
+                buttons.Controls.Add(button);
+            }
             buttons.Controls.Add(MakeButton("整理", 92, (s, e) => Raise(PipeSleeveManagerAction.Reload)));
             root.SizeChanged += (s, e) => {
                 _scopeNote.MaximumSize = new Size(Math.Max(100, root.ClientSize.Width - 40), 0);
@@ -325,10 +331,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 Height = 38,
                 Margin = new WinForms.Padding(8, 0, 0, 0),
                 FlatStyle = WinForms.FlatStyle.Flat,
-                BackColor = primary ? System.Drawing.Color.FromArgb(0, 135, 145) : System.Drawing.Color.White,
+                BackColor = primary ? System.Drawing.Color.FromArgb(0, 105, 180) : System.Drawing.Color.White,
                 ForeColor = primary ? System.Drawing.Color.White : System.Drawing.Color.FromArgb(40, 48, 54)
             };
-            button.FlatAppearance.BorderColor = primary ? System.Drawing.Color.FromArgb(0, 135, 145) : System.Drawing.Color.FromArgb(200, 205, 210);
+            button.FlatAppearance.BorderColor = primary ? System.Drawing.Color.FromArgb(0, 105, 180) : System.Drawing.Color.FromArgb(200, 205, 210);
             if (primary)
             {
                 button.Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
@@ -438,9 +444,12 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         private void UpdateDetail()
         {
             List<PipeSleeveManagerRow> selected = GetSelectedRows();
+            foreach (var button in _selectionButtons) button.Enabled = selected.Count > 0;
             if (selected.Count == 0)
             {
-                _detail.Text = "選取一筆套管可查看長度、立面高程與類型。";
+                _detail.Text = _grid.Rows.Count == 0
+                    ? "目前範圍或篩選條件下沒有套管；請調整視圖或篩選條件後重新整理。"
+                    : "選取套管後可定位、更新或刪除，並查看長度、立面高程與類型。";
                 return;
             }
 
@@ -1013,7 +1022,6 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         }
     }
 }
-
 
 
 

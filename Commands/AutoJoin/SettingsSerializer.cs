@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Xml.Linq;
 using System.Xml.Serialization;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
@@ -25,9 +27,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             }
 
             using var stream = File.OpenRead(path);
+            var xml = XDocument.Load(stream);
             var serializer = new XmlSerializer(typeof(AutoJoinSettings));
-            if (serializer.Deserialize(stream) is AutoJoinSettings settings)
+            using var reader = xml.CreateReader();
+            if (serializer.Deserialize(reader) is AutoJoinSettings settings)
             {
+                // XmlSerializer appends to initialized lists. Replace with the saved
+                // collections so defaults cannot re-enable categories or reorder priority.
+                var enabled = xml.Root?.Element(nameof(AutoJoinSettings.EnabledCategoryKeys));
+                var priority = xml.Root?.Element(nameof(AutoJoinSettings.PriorityKeys));
+                if (enabled != null) settings.EnabledCategoryKeys = enabled.Elements("string").Select(x => x.Value).ToList();
+                if (priority != null) settings.PriorityKeys = priority.Elements("string").Select(x => x.Value).ToList();
                 settings.Normalize();
                 return settings;
             }

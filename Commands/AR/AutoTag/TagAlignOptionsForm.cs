@@ -15,9 +15,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         public TagAlignOptionsForm()
         {
-            Text = "標籤輔助對齊";
-            Width = 420;
-            Height = 260;
+            Text = "HB_BIM 標籤輔助對齊";
+            AutoScaleMode = Forms.AutoScaleMode.Dpi;
+            ClientSize = new Size(440, 260);
+            BackColor = Color.White;
             FormBorderStyle = Forms.FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -38,7 +39,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 ColumnCount = 2,
                 RowCount = 6
             };
-            root.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Absolute, 96));
+            root.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Absolute, 120));
             root.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 34));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 34));
@@ -60,7 +61,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             ConfigureCombo(_baseCombo, new[] { "平均位置", "第一個標籤" }, 0);
             root.Controls.Add(_baseCombo, 1, 2);
 
-            AddLabel(root, "間距 mm", 3);
+            AddLabel(root, "間距（模型 mm）", 3);
             _spacingText.Text = "300";
             _spacingText.Dock = Forms.DockStyle.Fill;
             root.Controls.Add(_spacingText, 1, 3);
@@ -86,17 +87,22 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 Height = 30,
                 DialogResult = Forms.DialogResult.Cancel
             };
-            buttons.Controls.Add(cancel);
 
             var ok = new Forms.Button
             {
-                Text = "執行",
+                Text = "執行對齊",
                 Width = 86,
                 Height = 30,
                 DialogResult = Forms.DialogResult.OK
             };
             ok.Click += OkClicked;
+            ok.FlatStyle = cancel.FlatStyle = Forms.FlatStyle.Flat;
+            ok.BackColor = Color.FromArgb(0, 105, 180);
+            ok.ForeColor = Color.White;
+            ok.FlatAppearance.BorderSize = 0;
+            cancel.FlatAppearance.BorderColor = Color.FromArgb(190, 196, 202);
             buttons.Controls.Add(ok);
+            buttons.Controls.Add(cancel);
 
             AcceptButton = ok;
             CancelButton = cancel;
@@ -104,9 +110,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private void OkClicked(object sender, EventArgs e)
         {
-            if (!double.TryParse(_spacingText.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double spacing) ||
-                spacing < 0 ||
-                spacing > 10000)
+            if (!TryParseSpacing(_spacingText.Text, out double spacing))
             {
                 Forms.MessageBox.Show("間距請輸入 0 到 10000 mm 之間的數值。", Text, Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Warning);
                 DialogResult = Forms.DialogResult.None;
@@ -121,6 +125,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 SpacingMillimeters = spacing,
                 AvoidOverlap = _avoidOverlapCheck.Checked
             };
+        }
+
+        internal static bool TryParseSpacing(string text, out double spacing)
+        {
+            return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out spacing) &&
+                !double.IsNaN(spacing) && !double.IsInfinity(spacing) && spacing >= 0 && spacing <= 10000;
         }
 
         private static TagAlignMode IndexToMode(int index)

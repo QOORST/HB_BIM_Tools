@@ -41,7 +41,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 var wallRefs = uiDoc.Selection.PickObjects(
                     ObjectType.Element,
                     new WallTargetFilter(),
-                    "【步驟 1/2】請選取要分割的牆，完成後按 Finish");
+                    "【步驟 1/2】請選取要分割的牆，選取後按「完成」");
 
                 var walls = wallRefs
                     .Select(r => doc.GetElement(r) as Wall)
@@ -58,7 +58,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 var cutterRefs = uiDoc.Selection.PickObjects(
                     ObjectType.Element,
                     new WallCutterFilter(),
-                    "【步驟 2/2】請選取切割構件（結構柱、梁、其他牆），完成後按 Finish");
+                    "【步驟 2/2】請選取切割構件（結構柱、梁、其他牆），選取後按「完成」");
 
                 var cutters = cutterRefs
                     .Select(r => doc.GetElement(r))

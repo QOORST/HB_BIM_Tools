@@ -224,6 +224,15 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 Font = new Font("Microsoft JhengHei UI", 9.5F);
 
                 BuildLayout();
+                Shown += (s, e) =>
+                {
+                    // Clamp after WinForms has applied font/DPI scaling.
+                    var area = Screen.FromHandle(Handle).WorkingArea;
+                    MinimumSize = new Size(Math.Min(1260, area.Width), Math.Min(740, area.Height));
+                    Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+                    Location = new SysPoint(area.Left + (area.Width - Width) / 2,
+                        area.Top + (area.Height - Height) / 2);
+                };
                 _filterDebounceTimer.Tick += (s, e) =>
                 {
                     _filterDebounceTimer.Stop();

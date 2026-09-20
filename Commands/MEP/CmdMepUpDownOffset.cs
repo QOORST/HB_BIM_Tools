@@ -127,7 +127,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         return Result.Cancelled;
                     }
 
-                    tx.Commit();
+                    if (tx.Commit() != TransactionStatus.Committed)
+                        throw new InvalidOperationException("Revit 未成功提交翻彎變更，請檢查失敗訊息。");
                 }
 
                 TaskDialog.Show(
@@ -933,14 +934,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     public sealed class CmdMepQuickUp : IExternalCommand
     {
         public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
-            => CmdMepUpDownOffset.ExecuteEndOffset(data, ref message, elements, true, true);
+        {
+            App.LastQuickRiseWasUp = true;
+            return CmdMepUpDownOffset.ExecuteEndOffset(data, ref message, elements, true, true);
+        }
     }
 
     [Transaction(TransactionMode.Manual)]
     public sealed class CmdMepQuickDown : IExternalCommand
     {
         public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
-            => CmdMepUpDownOffset.ExecuteEndOffset(data, ref message, elements, false, true);
+        {
+            App.LastQuickRiseWasUp = false;
+            return CmdMepUpDownOffset.ExecuteEndOffset(data, ref message, elements, false, true);
+        }
     }
 
     [Transaction(TransactionMode.Manual)]

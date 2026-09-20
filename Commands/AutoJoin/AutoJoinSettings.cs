@@ -34,32 +34,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             SchemaVersion = CurrentSchemaVersion;
         }
 
-        EnabledCategoryKeys = EnabledCategoryKeys
+        EnabledCategoryKeys = (EnabledCategoryKeys ?? CategoryCatalog.DefaultEnabledKeys.ToList())
             .Where(k => validKeys.Contains(k))
             .Distinct(StringComparer.Ordinal)
             .ToList();
-
-        if (EnabledCategoryKeys.SequenceEqual(CategoryCatalog.AllKeys, StringComparer.Ordinal))
-        {
-            EnabledCategoryKeys = CategoryCatalog.DefaultEnabledKeys.ToList();
-        }
 
         if (EnabledCategoryKeys.Count == 0)
         {
             EnabledCategoryKeys = CategoryCatalog.DefaultEnabledKeys.ToList();
         }
 
-        var normalizedPriority = PriorityKeys
+        var normalizedPriority = (PriorityKeys ?? CategoryCatalog.DefaultPriorityKeys.ToList())
             .Where(k => validKeys.Contains(k))
             .Distinct(StringComparer.Ordinal)
             .ToList();
-
-        if (normalizedPriority.SequenceEqual(CategoryCatalog.AllKeys, StringComparer.Ordinal) ||
-            normalizedPriority.SequenceEqual(CategoryCatalog.LegacyDefaultPriorityKeys, StringComparer.Ordinal) ||
-            normalizedPriority.SequenceEqual(CategoryCatalog.PreviousDefaultPriorityKeysV2, StringComparer.Ordinal))
-        {
-            normalizedPriority = CategoryCatalog.DefaultPriorityKeys.ToList();
-        }
 
         if (normalizedPriority.Count == 0)
         {

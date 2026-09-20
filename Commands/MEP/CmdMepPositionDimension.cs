@@ -134,6 +134,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 "尺寸線間距 (mm)", offset, "分組最大間距 (mm)", gap, "文字紙面偏移 (mm)", textGap))
             {
                 form.Width = 650;
+                ((System.Windows.Forms.Button)form.AcceptButton).Text = "套用設定";
                 form.Height = Math.Min(560, System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position).WorkingArea.Height - 40);
                 MepConnectionUi.CollapseAdvanced(form, 7);
                 if (form.ShowDialog() != System.Windows.Forms.DialogResult.OK) return null;
@@ -362,7 +363,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     if (batch.Assimilate() != TransactionStatus.Committed) throw new InvalidOperationException("批次未成功提交。");
                 }
                 if (notes.Count > 0) TaskDialog.Show("管排批次定位", $"建立 {created} 組。\n" + string.Join("\n", notes));
-                return Result.Succeeded;
+                return created > 0 ? Result.Succeeded : Result.Cancelled;
             }
             catch(Autodesk.Revit.Exceptions.OperationCanceledException){return Result.Cancelled;}
             catch(Exception ex){TaskDialog.Show("管線定位尺寸",ex.Message);return Result.Cancelled;}

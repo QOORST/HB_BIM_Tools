@@ -8,15 +8,15 @@
     <Grid>
         <StackPanel Margin="20,15,20,15">
             <!-- 標題說明 -->
-            <Border Background="#2196F3" CornerRadius="5" Padding="12" Margin="0,0,0,12">
+            <Border Background="#0069B4" CornerRadius="0" Padding="12" Margin="0,0,0,12">
                 <StackPanel>
-                    <TextBlock Text="管線翻彎工具" FontSize="16" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                    <TextBlock Text="管線避讓工具" FontSize="16" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
                     <TextBlock Text="設定完成後將進行管線點選" FontSize="11" Foreground="White" HorizontalAlignment="Center" Margin="0,4,0,0" Opacity="0.9"/>
                 </StackPanel>
             </Border>
 
             <!-- 翻彎參數設定 -->
-            <Border Background="White" CornerRadius="5" Padding="12" Margin="0,0,0,12" 
+            <Border Background="White" CornerRadius="0" Padding="12" Margin="0,0,0,12"
                     BorderBrush="#DDD" BorderThickness="1">
                 <StackPanel>
                     <TextBlock Text="翻彎參數" FontWeight="Bold" FontSize="13" Margin="0,0,0,12"/>
@@ -50,7 +50,7 @@
             </Border>
 
             <!-- 翻彎方向選擇 -->
-            <Border Background="White" CornerRadius="5" Padding="12" Margin="0,0,0,12" 
+            <Border Background="White" CornerRadius="0" Padding="12" Margin="0,0,0,12"
                     BorderBrush="#DDD" BorderThickness="1">
                 <StackPanel>
                     <TextBlock Text="翻彎方向" FontWeight="Bold" FontSize="13" Margin="0,0,0,6"/>
@@ -68,8 +68,8 @@
             </Border>
 
             <!-- 執行按鈕 -->
-            <Button Name="btnOk" Content="✓ 確定並開始點選" Height="48" 
-                    Background="#4CAF50" Foreground="White" FontWeight="Bold" FontSize="14" Click="Ok_Click"/>
+            <Button Name="btnOk" Content="開始點選管線" Height="48"
+                    Background="#0069B4" Foreground="White" FontWeight="Bold" FontSize="14" Click="Ok_Click"/>
         </StackPanel>
     </Grid>
 </Window>

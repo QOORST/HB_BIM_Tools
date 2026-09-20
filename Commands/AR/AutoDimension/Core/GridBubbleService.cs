@@ -23,15 +23,23 @@ namespace YDBIM.AutoDimension.Core
                         var grid = doc.GetElement(id) as Grid;
                         if (grid == null || !(grid.Curve is Line)) throw new InvalidOperationException("非可處理直線軸線");
                         if (!grid.CanBeVisibleInView(view)) throw new InvalidOperationException("軸線無法顯示於此視圖");
-                        var curves = grid.GetCurvesInView(DatumExtentType.ViewSpecific, view);
-                        var curve = curves.FirstOrDefault() ?? grid.Curve;
-                        XYZ delta = curve.GetEndPoint(1) - curve.GetEndPoint(0);
-                        // End0/End1 follow the model datum, not arbitrary curve enumeration order.
-                        if (delta.DotProduct(grid.Curve.GetEndPoint(1) - grid.Curve.GetEndPoint(0)) < 0) delta = delta.Negate();
-                        double x = delta.DotProduct(view.RightDirection), y = delta.DotProduct(view.UpDirection);
-                        bool end1 = Math.Abs(x) >= Math.Abs(y) ? (x > 0) == options.HorizontalBubbleRight : (y > 0) == options.VerticalBubbleTop;
-                        Set(grid, view, DatumEnds.End0, options.GridBubblesBothEnds || !end1);
-                        Set(grid, view, DatumEnds.End1, options.GridBubblesBothEnds || end1);
+                        XYZ axis = grid.Curve.GetEndPoint(1) - grid.Curve.GetEndPoint(0);
+                        bool horizontal = Math.Abs(axis.DotProduct(view.RightDirection)) >= Math.Abs(axis.DotProduct(view.UpDirection));
+                        bool positiveVisible = horizontal ? options.HorizontalBubbleRight : options.VerticalBubbleTop;
+                        bool negativeVisible = horizontal ? options.HorizontalBubbleLeft : options.VerticalBubbleBottom;
+                        // Equal settings do not require endpoint mapping (including hide both).
+                        bool positiveEnd1 = true;
+                        if (positiveVisible != negativeVisible)
+                        {
+                            XYZ delta = ReadDatumEndPosition(doc, grid, view, DatumEnds.End1)
+                                - ReadDatumEndPosition(doc, grid, view, DatumEnds.End0);
+                            double projected = delta.DotProduct(horizontal ? view.RightDirection : view.UpDirection);
+                            if (Math.Abs(projected) < 1e-6)
+                                throw new InvalidOperationException("無法辨識標頭端點方向，未修改此軸線。");
+                            positiveEnd1 = projected > 0;
+                        }
+                        Set(grid, view, DatumEnds.End0, positiveEnd1 ? negativeVisible : positiveVisible);
+                        Set(grid, view, DatumEnds.End1, positiveEnd1 ? positiveVisible : negativeVisible);
                         if (tx.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("未提交");
                         changed++;
                     }
@@ -45,6 +53,29 @@ namespace YDBIM.AutoDimension.Core
             return $"標頭設定完成：{changed} 條；未完成：{errors.Count} 條。" +
                 (errors.Count == 0 ? "" : "\n" + string.Join("\n", errors.Take(8)));
         }
+        private static XYZ ReadDatumEndPosition(Document doc, Grid grid, View view, DatumEnds end)
+        {
+            // Leader.End is on the datum curve and is explicitly associated with DatumEnds.
+            // Never infer this association from the order of Grid.Curve endpoints.
+            using (var probe = new SubTransaction(doc))
+            {
+                probe.Start();
+                try
+                {
+                    grid.ShowBubbleInView(end, view);
+                    doc.Regenerate();
+                    var leader = grid.GetLeader(end, view) ?? grid.AddLeader(end, view);
+                    doc.Regenerate();
+                    XYZ point = leader.End;
+                    return new XYZ(point.X, point.Y, point.Z);
+                }
+                finally
+                {
+                    if (probe.GetStatus() == TransactionStatus.Started) probe.RollBack();
+                }
+            }
+        }
+
         private static void Set(Grid grid, View view, DatumEnds end, bool visible)
         {
             if (visible) grid.ShowBubbleInView(end, view); else grid.HideBubbleInView(end, view);

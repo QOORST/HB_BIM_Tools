@@ -1857,14 +1857,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                 TaskDialog.Show(
                     title,
-                    $"完成批次支管對齊。\n\n" +
+                    (successCount > 0 ? "批次支管對齊已處理。\n\n" : "未完成任何支管對齊。\n\n") +
                     $"成功：{successCount}\n" +
                     $"接頭失敗但已對齊：{fittingFailCount}\n" +
                     $"失敗：{failCount}\n\n" +
                     (hasError ? "錯誤/警告項目：\n" : "處理項目：\n") +
                     detail);
 
-                return Result.Succeeded;
+                return successCount > 0 ? Result.Succeeded : Result.Cancelled;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {

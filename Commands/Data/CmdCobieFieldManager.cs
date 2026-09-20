@@ -537,7 +537,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                             if (result != TaskDialogResult.Yes) return;
                         }
                         
-                        SaveConfig(dlg.FileName); 
+                        if (!TrySaveConfig(dlg.FileName)) return;
                         TaskDialog.Show("成功", $"已匯出 {_fieldConfigs.Count} 個欄位設定至：\n{dlg.FileName}"); 
                     }
                 };
@@ -759,21 +759,21 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 
                 var btnSave = new Button() 
                 { 
-                    Content = "✓ 儲存", 
+                    Content = "儲存設定",
                     Width = 100, 
                     Height = 36,
                     Margin = new Thickness(10, 8, 5, 8),
                     FontSize = 14,
                     FontWeight = FontWeights.Bold,
                     Padding = new Thickness(10, 5, 10, 5),
-                    Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80)),
+                    Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 105, 180)),
                     Foreground = Brushes.White,
                     BorderThickness = new Thickness(0),
                     Cursor = System.Windows.Input.Cursors.Hand
                 };
                 btnSave.Click += (s, e) =>
                 {
-                    SaveConfig(CobieConfigIO.ConfigPath);
+                    if (!TrySaveConfig(CobieConfigIO.ConfigPath)) return;
                     MessageBox.Show("設定已儲存。", "COBie 欄位設定", MessageBoxButton.OK, MessageBoxImage.Information);
                 };
                 
@@ -804,6 +804,15 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 var filteredData = (string.IsNullOrEmpty(cat) || cat == "全部")
                     ? _fieldConfigs.ToList()
                     : _fieldConfigs.Where(f => f.Category == cat).ToList();
+                var search = _searchBox.Text?.Trim();
+                if (!string.IsNullOrEmpty(search))
+                {
+                    filteredData = filteredData.Where(f => new[]
+                    {
+                        f.DisplayName, f.CobieName, f.SharedParameterName,
+                        f.Category, f.SharedParameterGuid, f.BuiltInParam?.ToString()
+                    }.Any(value => value?.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
+                }
                 
                 _grid.ItemsSource = null; // 先清空
                 _grid.ItemsSource = filteredData; // 重新設定
@@ -822,7 +831,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 var required = _fieldConfigs.Count(f => f.IsRequired);
                 var requiredUnbound = _fieldConfigs.Count(f => f.IsRequired && string.IsNullOrEmpty(f.SharedParameterGuid) && !f.IsBuiltIn);
                 
-                var msg = $"總欄位：{total}  |  已綁定：{bound}  |  未設定：{unset}  |  必填：{required}";
+                var msg = $"顯示：{_grid.Items.Count}／{total}  |  已綁定：{bound}  |  未設定：{unset}  |  必填：{required}";
                 if (requiredUnbound > 0)
                 {
                     msg += $"  |  ⚠ 必填未綁定：{requiredUnbound}";
@@ -1871,6 +1880,23 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 }
 
                 return defaults;
+            }
+
+            private bool TrySaveConfig(string path)
+            {
+                if (!_grid.CommitEdit(DataGridEditingUnit.Cell, true) ||
+                    !_grid.CommitEdit(DataGridEditingUnit.Row, true)) return false;
+                try
+                {
+                    SaveConfig(path);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "無法儲存欄位設定，請確認檔案權限與路徑。\n" + ex.Message,
+                        "COBie 欄位設定", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return false;
+                }
             }
 
             private void SaveConfig(string path)

@@ -39,7 +39,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 var refs = uiDoc.Selection.PickObjects(
                     ObjectType.Element,
                     new FloorAndFramingFilter(),
-                    "請選取要分割的樓板及梁（結構構架），完成後按 Finish");
+                    "請選取要分割的樓板及梁（結構構架），選取後按「完成」");
 
                 var floors = refs
                     .Select(r => doc.GetElement(r) as Floor)

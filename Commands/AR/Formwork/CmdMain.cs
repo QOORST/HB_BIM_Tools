@@ -50,7 +50,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
 
                 FormworkEngine.Debug.Enable(true);
 
-                var doc = commandData.Application.ActiveUIDocument.Document;
+                var doc = commandData.Application.ActiveUIDocument?.Document;
+                if (doc == null)
+                {
+                    message = "請先開啟 Revit 模型，再執行模板生成。";
+                    return Result.Cancelled;
+                }
                 if (!_sessionCleanupRegistered)
                 {
                     commandData.Application.Application.DocumentClosed += OnDocumentClosed;
@@ -1314,7 +1319,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
             public UiMain(UiVm vm, ExternalEvent pickEvt, ExternalEvent runEvt)
             {
                 _vm = vm; _pickEvt = pickEvt; _runEvt = runEvt;
-                Title = "模板生成";
+                Title = "HB_BIM｜模板生成";
                 Width = 540; Height = 690;
                 MinWidth = 460; MinHeight = 440;
                 MaxHeight = System.Windows.SystemParameters.WorkArea.Height;
@@ -1491,9 +1496,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Formwork
                 {
                     Content = text, MinWidth = 100, Height = 36, Padding = new WpfThickness(16, 0, 16, 0),
                     FontWeight = primary ? WpfFontWeights.SemiBold : WpfFontWeights.Normal,
-                    Background = Brush(primary ? "#087F8C" : "#FFFFFF"),
+                    Background = Brush(primary ? "#0069B4" : "#FFFFFF"),
                     Foreground = Brush(primary ? "#FFFFFF" : "#303B47"),
-                    BorderBrush = Brush(primary ? "#087F8C" : "#C7CED6"),
+                    BorderBrush = Brush(primary ? "#0069B4" : "#C7CED6"),
                     BorderThickness = new WpfThickness(1)
                 };
 

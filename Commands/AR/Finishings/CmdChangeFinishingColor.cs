@@ -85,7 +85,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings
                         }
                     }
 
-                    trans.Commit();
+                    if (trans.Commit() != TransactionStatus.Committed)
+                    {
+                        TaskDialog.Show("更換顏色未完成", "Revit 未成功提交材質與顏色變更，請檢查失敗訊息。");
+                        return Result.Failed;
+                    }
                 }
 
                 // 4. 顯示結果

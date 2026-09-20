@@ -12,6 +12,10 @@ namespace YDBIM.AutoDimension.Core
 
 internal sealed class AutoDimensionSavedSettings
 {
+    public bool IncludeBeamWidth { get; set; }
+    public bool IncludeBeamSpacing { get; set; } = true;
+    public bool SelectedBeamsOnly { get; set; } = true;
+
     public DimensionMode ModeType { get; set; } = DimensionMode.ColumnSetout;
 
     public PlacementMode Mode { get; set; } = PlacementMode.Auto;
@@ -21,6 +25,8 @@ internal sealed class AutoDimensionSavedSettings
     public LeftRightSide ColumnLeftRightSide { get; set; } = LeftRightSide.None;
 
     public FrontBackSide ColumnFrontBackSide { get; set; } = FrontBackSide.Front;
+
+    public double? BeamSpacingOffsetMm { get; set; }
 
     public double OffsetMm { get; set; } = 900.0;
 
@@ -40,11 +46,15 @@ internal sealed class AutoDimensionSavedSettings
     {
         return new AutoDimensionSavedSettings
         {
+            IncludeBeamWidth = options.IncludeBeamWidth,
+            IncludeBeamSpacing = options.IncludeBeamSpacing,
+            SelectedBeamsOnly = options.SelectedBeamsOnly,
             ModeType = options.ModeType,
             Mode = options.Mode,
             Direction = options.Direction,
             ColumnLeftRightSide = options.ColumnLeftRightSide,
             ColumnFrontBackSide = options.ColumnFrontBackSide,
+            BeamSpacingOffsetMm = options.BeamSpacingOffsetInternal.HasValue ? UnitUtils.ConvertFromInternalUnits(options.BeamSpacingOffsetInternal.Value, UnitTypeId.Millimeters) : (double?)null,
             OffsetMm = UnitUtils.ConvertFromInternalUnits(options.OffsetInternal, UnitTypeId.Millimeters),
             GridOffsetsInPaperSpace = options.GridOffsetsInPaperSpace,
             GridPrimaryOffsetMm = UnitUtils.ConvertFromInternalUnits(options.GridPrimaryOffsetInternal, UnitTypeId.Millimeters),
@@ -54,6 +64,14 @@ internal sealed class AutoDimensionSavedSettings
             SelectedVerticalGridIds = options.SelectedVerticalGridIds.Select(ElementIdCompat.ToInt32).ToList()
         };
     }
+}
+
+internal sealed class GridBubbleSavedSettings
+{
+    public bool Left { get; set; }
+    public bool Right { get; set; } = true;
+    public bool Top { get; set; } = true;
+    public bool Bottom { get; set; }
 }
 
 internal static class AutoDimensionSettingsStore
@@ -93,6 +111,17 @@ internal static class AutoDimensionSettingsStore
         return result;
     }
 
+    public static GridBubbleSavedSettings LoadBubbles(Document doc)
+    {
+        try
+        {
+            var data = ReadData();
+            return data.BubbleSettings.TryGetValue(GetProjectKey(doc, DimensionMode.BeamGrid), out var settings)
+                ? settings : new GridBubbleSavedSettings();
+        }
+        catch { return new GridBubbleSavedSettings(); }
+    }
+
     public static void Save(Document doc, DimensionOptions options)
     {
         if (doc is null || options is null)
@@ -101,7 +130,17 @@ internal static class AutoDimensionSettingsStore
         }
 
         AutoDimensionSettingsData data = ReadData();
-        data.ProjectSettings[GetProjectKey(doc, options.ModeType)] = AutoDimensionSavedSettings.FromOptions(options);
+        if (options.GridBubblesOnly)
+        {
+            data.BubbleSettings[GetProjectKey(doc, DimensionMode.BeamGrid)] = new GridBubbleSavedSettings {
+                Left = options.HorizontalBubbleLeft, Right = options.HorizontalBubbleRight,
+                Top = options.VerticalBubbleTop, Bottom = options.VerticalBubbleBottom
+            };
+        }
+        else
+        {
+            data.ProjectSettings[GetProjectKey(doc, options.ModeType)] = AutoDimensionSavedSettings.FromOptions(options);
+        }
 
         string path = GetSettingsPath();
         string? folder = Path.GetDirectoryName(path);
@@ -200,6 +239,9 @@ internal static class AutoDimensionSettingsStore
 
     private sealed class AutoDimensionSettingsData
     {
+        public Dictionary<string, GridBubbleSavedSettings> BubbleSettings { get; set; } =
+            new Dictionary<string, GridBubbleSavedSettings>(StringComparer.OrdinalIgnoreCase);
+
         public Dictionary<string, AutoDimensionSavedSettings> ProjectSettings { get; set; } =
             new Dictionary<string, AutoDimensionSavedSettings>(StringComparer.OrdinalIgnoreCase);
     }

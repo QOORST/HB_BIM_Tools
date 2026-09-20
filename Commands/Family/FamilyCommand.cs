@@ -18,17 +18,15 @@ namespace YD_RevitTools.LicenseManager.Commands.Family
                 var licenseManager = LicenseManager.Instance;
                 if (!licenseManager.HasFeatureAccess("Family.ParameterSlider"))
                 {
-                    TaskDialog.Show("License Restriction",
-                        "Your license does not support Family Parameter Slider feature.\n\n" +
-                        "Please upgrade to Standard or Professional version to use this feature.\n\n" +
-                        "Click 'License Management' button to view or update your license.");
+                    TaskDialog.Show("授權限制", "您的授權不包含族參數滑桿，請於「授權管理」查看授權。 ");
                     return Result.Cancelled;
                 }
 
-                Document doc = commandData.Application.ActiveUIDocument.Document;
+                Document doc = commandData.Application.ActiveUIDocument?.Document;
+                if (doc == null) { TaskDialog.Show("族參數滑桿", "請先開啟族群文件。 "); return Result.Cancelled; }
                 if (!doc.IsFamilyDocument)
                 {
-                    TaskDialog.Show("Error", "Please use this feature in Family Editor.");
+                    TaskDialog.Show("族參數滑桿", "請在族群編輯器中使用此工具。 ");
                     return Result.Failed;
                 }
 
@@ -51,7 +49,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Family
             catch (Exception ex)
             {
                 message = ex.Message;
-                TaskDialog.Show("Error", $"Execution failed: {ex.Message}");
+                TaskDialog.Show("族參數滑桿", $"執行失敗：{ex.Message}");
                 return Result.Failed;
             }
         }

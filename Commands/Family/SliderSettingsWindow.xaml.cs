@@ -21,19 +21,19 @@ namespace YD_RevitTools.LicenseManager.Commands.Family
         {
             try
             {
-                if (!double.TryParse(MinBox.Text, out double min))
+                if (!TryParseFinite(MinBox.Text, out double min))
                 {
                     MessageBox.Show("最小值必須是有效數值。", "輸入錯誤", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
-                if (!double.TryParse(MaxBox.Text, out double max))
+                if (!TryParseFinite(MaxBox.Text, out double max))
                 {
                     MessageBox.Show("最大值必須是有效數值。", "輸入錯誤", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
-                if (!double.TryParse(StepBox.Text, out double step))
+                if (!TryParseFinite(StepBox.Text, out double step))
                 {
                     MessageBox.Show("步進單位必須是有效數值。", "輸入錯誤", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
@@ -81,6 +81,11 @@ namespace YD_RevitTools.LicenseManager.Commands.Family
             {
                 MessageBox.Show($"設定失敗：{ex.Message}", "錯誤", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        internal static bool TryParseFinite(string text, out double value)
+        {
+            return double.TryParse(text, out value) && !double.IsNaN(value) && !double.IsInfinity(value);
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)

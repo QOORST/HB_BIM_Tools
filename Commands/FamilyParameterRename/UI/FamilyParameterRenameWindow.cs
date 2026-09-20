@@ -30,11 +30,13 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
         {
             _service = service;
 
-            Title = TitleText;
+            Title = "HB_BIM｜" + TitleText;
             Width = 760;
-            Height = 920;
+            Height = Math.Min(760, SystemParameters.WorkArea.Height);
             MinWidth = 640;
-            MinHeight = 620;
+            MinHeight = Math.Min(480, SystemParameters.WorkArea.Height);
+            FontFamily = new FontFamily("Microsoft JhengHei UI");
+            FontSize = 13;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
             Content = BuildLayout();
@@ -65,17 +67,25 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
             var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
             _summary.VerticalAlignment = VerticalAlignment.Center;
             _summary.TextWrapping = TextWrapping.Wrap;
-            bottom.Children.Add(_summary);
 
             _updateButton.Content = UpdateText;
             _updateButton.Width = 126;
             _updateButton.Height = 38;
             _updateButton.HorizontalAlignment = HorizontalAlignment.Right;
-            _updateButton.Background = new SolidColorBrush(Color.FromRgb(37, 99, 235));
+            _updateButton.Background = new SolidColorBrush(Color.FromRgb(0, 105, 180));
             _updateButton.Foreground = Brushes.White;
             _updateButton.Click += (_, __) => UpdateNames();
             DockPanel.SetDock(_updateButton, Dock.Right);
             bottom.Children.Add(_updateButton);
+            var closeButton = new Button
+            {
+                Content = "關閉", Width = 80, Height = 38,
+                Margin = new Thickness(0, 0, 10, 0), IsCancel = true
+            };
+            closeButton.Click += (_, __) => Close();
+            DockPanel.SetDock(closeButton, Dock.Right);
+            bottom.Children.Add(closeButton);
+            bottom.Children.Add(_summary);
 
             DockPanel.SetDock(bottom, Dock.Bottom);
             root.Children.Add(bottom);
@@ -88,6 +98,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
         {
             _grid.AutoGenerateColumns = false;
             _grid.CanUserAddRows = false;
+            _grid.CanUserDeleteRows = false;
             _grid.IsReadOnly = false;
             _grid.HeadersVisibility = DataGridHeadersVisibility.Column;
             _grid.GridLinesVisibility = DataGridGridLinesVisibility.Horizontal;
@@ -96,6 +107,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
             _grid.Columns.Add(new DataGridTextColumn
             {
                 Header = OldNameText,
+                MinWidth = 180,
                 Binding = new Binding(nameof(ParameterRenameRow.OldName)),
                 IsReadOnly = true,
                 Width = new DataGridLength(1, DataGridLengthUnitType.Star)
@@ -104,7 +116,16 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
             _grid.Columns.Add(new DataGridTextColumn
             {
                 Header = NewNameText,
+                MinWidth = 180,
                 Binding = new Binding(nameof(ParameterRenameRow.NewName)) { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                Width = new DataGridLength(1, DataGridLengthUnitType.Star)
+            });
+            _grid.Columns.Add(new DataGridTextColumn
+            {
+                Header = "檢查訊息",
+                MinWidth = 220,
+                Binding = new Binding(nameof(ParameterRenameRow.Message)),
+                IsReadOnly = true,
                 Width = new DataGridLength(1, DataGridLengthUnitType.Star)
             });
         }
@@ -113,7 +134,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
         {
             if (_service.IsFamilyDocument)
             {
-                _familyCombo.ItemsSource = new[] { new { DisplayName = "Family Editor" } };
+                _familyCombo.ItemsSource = new[] { new { DisplayName = "目前族群（族群編輯器）" } };
                 _familyCombo.SelectedIndex = 0;
                 _familyCombo.IsEnabled = false;
                 LoadRows(_service.BuildRowsForCurrentFamily());
@@ -128,7 +149,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
             }
             else
             {
-                _summary.Text = "No editable loaded families found.";
+                _summary.Text = "目前沒有可編輯的已載入族群。";
             }
         }
 
@@ -182,17 +203,19 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
 
         private void UpdateNames()
         {
+            if (!_grid.CommitEdit(DataGridEditingUnit.Cell, true) ||
+                !_grid.CommitEdit(DataGridEditingUnit.Row, true)) return;
             _service.ValidateRows(_rows.ToList());
             var readyCount = _rows.Count(x => x.Status == "Ready");
             if (readyCount == 0)
             {
-                MessageBox.Show(this, "No parameter names to update.", TitleText, MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, "沒有可更新的參數名稱，請檢查新名稱與檢查訊息。", TitleText, MessageBoxButton.OK, MessageBoxImage.Information);
                 RefreshSummary();
                 RefreshButtons();
                 return;
             }
 
-            var confirm = MessageBox.Show(this, "Update " + readyCount + " parameter names?", TitleText, MessageBoxButton.OKCancel, MessageBoxImage.Question);
+            var confirm = MessageBox.Show(this, "確定更新 " + readyCount + " 個參數名稱？", TitleText, MessageBoxButton.OKCancel, MessageBoxImage.Question);
             if (confirm != MessageBoxResult.OK)
             {
                 return;
@@ -204,7 +227,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
                     ? _service.RenameCurrentFamilyParameters(_rows.ToList())
                     : _service.RenameProjectFamilyParameters((_familyCombo.SelectedItem as FamilyRenameOption)?.Family, _rows.ToList());
 
-                MessageBox.Show(this, "Updated " + renamed + " parameter names.", TitleText, MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, "已更新 " + renamed + " 個參數名稱。", TitleText, MessageBoxButton.OK, MessageBoxImage.Information);
                 RefreshSummary();
                 RefreshButtons();
             }
@@ -218,11 +241,11 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename.UI
         {
             if (_rows.Count == 0)
             {
-                _summary.Text = FamilyText + ": 0";
+                _summary.Text = "目前沒有可修改的參數。";
                 return;
             }
 
-            _summary.Text = _rows.Count + " parameters";
+            _summary.Text = "共 " + _rows.Count + " 個參數";
         }
 
         private void RefreshButtons()

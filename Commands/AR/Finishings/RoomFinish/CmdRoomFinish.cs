@@ -49,7 +49,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish
 
                 var uiApp = commandData.Application;
                 var uiDoc = uiApp.ActiveUIDocument;
-                var doc = uiDoc.Document;
+                var doc = uiDoc?.Document;
 
                 if (uiDoc == null || doc == null)
                 {

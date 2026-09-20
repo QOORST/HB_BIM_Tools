@@ -44,8 +44,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AI
         private static readonly Color BorderColor = Color.FromArgb(39, 54, 82);
         private static readonly Color TextColorMain = Color.FromArgb(230, 235, 245);
         private static readonly Color TextColorMuted = Color.FromArgb(150, 163, 184);
-        private static readonly Color AccentColor = Color.FromArgb(16, 185, 129);
-        private static readonly Color ButtonColor = Color.FromArgb(6, 95, 70);
+        private static readonly Color AccentColor = Color.FromArgb(45, 132, 247);
+        private static readonly Color ButtonColor = Color.FromArgb(0, 105, 180);
 
         public AiAssistantForm(Autodesk.Revit.UI.ExternalCommandData commandData, string modelSummary)
         {

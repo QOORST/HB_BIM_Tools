@@ -108,20 +108,17 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 else if (fileExt == ".csv")
                 {
                     // 讀取 CSV 檔案
-                    var rawLines = File.ReadAllLines(ofd.FileName, Encoding.UTF8);
-                    var lines = rawLines.Where(l => !string.IsNullOrWhiteSpace(l))
-                                        .Where(l => !l.TrimStart().StartsWith("#"))
-                                        .ToList();
-                    if (lines.Count == 0)
+                    List<List<string>> records;
+                    using (var reader = new StreamReader(ofd.FileName, Encoding.UTF8, true))
+                        records = CsvRecordReader.Read(reader);
+                    if (records.Count == 0)
                     {
                         TaskDialog.Show("COBie 匯入", "CSV 無內容");
                         return Result.Cancelled;
                     }
 
-                    headers = SplitCsv(lines[0]).Select(h => h.Trim()).ToList();
-                    rows = lines.Skip(1)
-                        .Select(SplitCsv)
-                        .Where(r => r.Any(v => !string.IsNullOrWhiteSpace(v)))
+                    headers = records[0].Select(h => h.Trim()).ToList();
+                    rows = records.Skip(1)
                         .Select(r => NormalizeRow(r, headers.Count))
                         .ToList();
                 }
@@ -239,7 +236,11 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                         }
                     }
 
-                    tx.Commit();
+                    if (tx.Commit() != TransactionStatus.Committed)
+                    {
+                        TaskDialog.Show("COBie 匯入未完成", "Revit 未成功提交資料更新，請檢查失敗訊息；本次更新數量不列為成功。");
+                        return Result.Failed;
+                    }
                 }
 
                 TaskDialog.Show("COBie 匯入", $"更新成功：{updated}\n略過：{skipped}\n失敗：{fails.Count}\n\n可另存失敗清單 CSV 以利後續查核。");
@@ -250,7 +251,14 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     if (ask == DialogResult.Yes)
                     {
                         var sfd = new SaveFileDialog { Filter = "CSV (逗號分隔)|*.csv", FileName = $"COBie_Import_Fail_{DateTime.Now:yyyyMMdd_HHmm}.csv" };
-                        if (sfd.ShowDialog() == DialogResult.OK) SaveFailCsv(sfd.FileName, fails);
+                        if (sfd.ShowDialog() == DialogResult.OK)
+                        {
+                            try { SaveFailCsv(sfd.FileName, fails); }
+                            catch (Exception ex)
+                            {
+                                TaskDialog.Show("失敗清單未儲存", "模型匯入已提交，但無法儲存失敗清單：\n" + ex.Message);
+                            }
+                        }
                     }
                 }
 
@@ -373,30 +381,6 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
         private static string TryGetStringParam(Element e, BuiltInParameter bip)
         { var p = e.get_Parameter(bip); return p?.AsString() ?? p?.AsValueString(); }
-
-        private static List<string> SplitCsv(string line)
-        {
-            var list = new List<string>(); if (line == null) return list;
-            bool inQ = false; var sb = new StringBuilder();
-            for (int i = 0; i < line.Length; i++)
-            {
-                char c = line[i];
-                if (inQ)
-                {
-                    if (c == '"' && i + 1 < line.Length && line[i + 1] == '"') { sb.Append('"'); i++; }
-                    else if (c == '"') inQ = false;
-                    else sb.Append(c);
-                }
-                else
-                {
-                    if (c == ',') { list.Add(sb.ToString()); sb.Clear(); }
-                    else if (c == '"') inQ = true;
-                    else sb.Append(c);
-                }
-            }
-            list.Add(sb.ToString());
-            return list;
-        }
 
         private static List<string> NormalizeRow(List<string> row, int headerCount)
         {

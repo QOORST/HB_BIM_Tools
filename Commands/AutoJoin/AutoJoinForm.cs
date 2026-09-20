@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -29,26 +29,78 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     private static readonly Dictionary<string, string> CategoryTextMap = new(StringComparer.Ordinal)
     {
-        ["Ceiling"] = "天花板 (Ceiling)",
-        ["Column"] = "柱 (Column)",
-        ["Floor"] = "樓板 (Floor)",
-        ["GenericModel"] = "一般模型 (Generic Model)",
-        ["Roof"] = "屋頂 (Roof)",
-        ["Wall"] = "牆 (Wall)",
-        ["StructuralColumn"] = "結構柱 (Structural Column)",
-        ["StructuralFloor"] = "結構樓板 (Structural Floor)",
-        ["StructuralFoundation"] = "結構基礎 (Structural Foundation)",
-        ["StructuralFraming"] = "結構構架 (Structural Framing)",
-        ["StructuralWall"] = "結構牆 (Structural Wall)",
+        ["Ceiling"] = "天花板",
+        ["Column"] = "柱",
+        ["Floor"] = "樓板",
+        ["GenericModel"] = "一般模型",
+        ["Roof"] = "屋頂",
+        ["Wall"] = "牆",
+        ["StructuralColumn"] = "結構柱",
+        ["StructuralFloor"] = "結構樓板",
+        ["StructuralFoundation"] = "結構基礎",
+        ["StructuralFraming"] = "結構構架",
+        ["StructuralWall"] = "結構牆",
     };
 
     private readonly ComboBox _scopeCombo = new();
-    private readonly CheckedListBox _categoryChecklist = new();
+    private readonly FlowLayoutPanel _categoryChecklist = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+    private readonly List<CheckBox> _categoryBoxes = new();
+    private readonly Label _categoryCount = new() { AutoSize = true, Margin = new Padding(10, 8, 0, 0), ForeColor = Color.DimGray };
     private readonly ListBox _priorityList = new();
     private readonly CheckBox _sameCategoryCheckbox = new();
     private readonly CheckBox _structuralBridgeCheckbox = new();
     private readonly CheckBox _detailCheckbox = new();
     private readonly bool _alignOnlyMode;
+    private bool _modeless;
+    private bool _busy;
+    private TableLayoutPanel _root;
+    private readonly FlowLayoutPanel _selectionBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36, Visible = false, WrapContents = false };
+    private readonly Panel _resultPanel = new Panel { Dock = DockStyle.Fill, Visible = false, Padding = new Padding(12, 28, 12, 8), BackColor = Color.FromArgb(245, 248, 251) };
+    private readonly TextBox _modelessStatus = new TextBox { Dock = DockStyle.Bottom, Height = 105, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.WhiteSmoke };
+    public event System.Action RunRequested;
+    public event System.Action PickRequested;
+    public event System.Action SelectionRequested;
+
+    public void EnableModeless()
+    {
+        _modeless = true;
+        MinimumSize = new Size(840, 760);
+        if (CancelButton is Button closeButton) closeButton.Text = "關閉";
+        Height = Math.Min(820, Screen.PrimaryScreen.WorkingArea.Height);
+        var current = new Button { Text = "使用目前選取", Width = 125, Height = 30 };
+        var pick = new Button { Text = "重新選取", Width = 100, Height = 30 };
+        current.Click += (_, _) => SelectionRequested?.Invoke();
+        pick.Click += (_, _) => PickRequested?.Invoke();
+        StyleButton(current);
+        StyleButton(pick);
+        _selectionBar.Controls.Add(current);
+        _selectionBar.Controls.Add(pick);
+        _selectionBar.Visible = true;
+        _resultPanel.Visible = true;
+        _root.RowStyles[5].Height = 108;
+        FormClosing += (_, e) => { if (_busy) e.Cancel = true; };
+        SetStatus("可保持視窗開啟並操作模型；執行前會重新讀取所選範圍。");
+    }
+
+    public void SetStatus(string text) => _modelessStatus.Text = text;
+    public void SetBusy(bool busy)
+    {
+        _busy = busy;
+        foreach (Control control in Controls) control.Enabled = !busy;
+        _modelessStatus.Enabled = true;
+    }
+    public void UseSelectedScope()
+    {
+        _scopeCombo.SelectedItem = _scopeCombo.Items.Cast<ScopeOption>().First(x => x.Value == AutoJoinScope.SelectedElements);
+    }
+
+    private void RequestRun(ExecutionAction action)
+    {
+        if (_busy || !ValidateBeforeRun()) return;
+        Action = action;
+        if (_modeless) RunRequested?.Invoke();
+        else { DialogResult = DialogResult.OK; Close(); }
+    }
 
     public AutoJoinForm(AutoJoinSettings settings)
         : this(settings, false)
@@ -68,7 +120,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         MinimizeBox = true;
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Microsoft JhengHei UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        BackColor = Color.WhiteSmoke;
+        BackColor = Color.FromArgb(244, 246, 248);
         ShowIcon = true;
         Icon = CreateBrandIcon();
 
@@ -98,7 +150,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     private void BuildUi()
     {
-        var accentColor = Color.FromArgb(0, 120, 215);
+        var accentColor = Color.FromArgb(0, 105, 180);
 
         var root = new TableLayoutPanel
         {
@@ -120,7 +172,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         var guideLabel = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "操作流程：1. 選範圍 → 2. 選類別 → 3. 調整優先序 → 4. 執行「自動接合」、「解除接合」或「對齊牆輪廓」",
+            Text = _alignOnlyMode
+                ? "操作流程：1. 選範圍 → 2. 選類別 → 3. 執行對齊牆輪廓"
+                : "操作流程：1. 選範圍 → 2. 選類別 → 3. 調整優先序 → 4. 執行接合或解除接合",
             ForeColor = Color.DimGray,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleLeft
@@ -141,7 +195,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
         var categoryGroup = new GroupBox { Text = "類別選擇", Dock = DockStyle.Fill, Padding = new Padding(8, 22, 8, 8) };
         var categoryLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-        categoryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
+        categoryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
         categoryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         var categoryQuickPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
 
@@ -151,13 +205,33 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         clearAllButton.Click += (_, _) => SetAllCategoriesChecked(false);
         categoryQuickPanel.Controls.Add(selectAllButton);
         categoryQuickPanel.Controls.Add(clearAllButton);
+        categoryQuickPanel.Controls.Add(_categoryCount);
 
         _categoryChecklist.Dock = DockStyle.Fill;
-        _categoryChecklist.CheckOnClick = true;
         foreach (var spec in CategoryCatalog.Specs)
         {
-            _categoryChecklist.Items.Add(new LabeledItem { Key = spec.Key, Text = LocalizeCategoryText(spec.Key, spec.DisplayName) }, true);
+            var row = new CheckBox
+            {
+                Text = LocalizeCategoryText(spec.Key, spec.DisplayName),
+                Tag = spec.Key, Checked = true, AutoSize = false, Height = 32,
+                Padding = new Padding(8, 0, 8, 0), Margin = new Padding(0, 0, 0, 3),
+                BackColor = Color.FromArgb(232, 242, 252), Cursor = Cursors.Hand,
+                AccessibleName = LocalizeCategoryText(spec.Key, spec.DisplayName)
+            };
+            row.CheckedChanged += (_, _) =>
+            {
+                row.BackColor = row.Checked ? Color.FromArgb(232, 242, 252) : Color.White;
+                UpdateCategoryCount();
+            };
+            _categoryBoxes.Add(row);
+            _categoryChecklist.Controls.Add(row);
         }
+        _categoryChecklist.SizeChanged += (_, _) =>
+        {
+            foreach (var row in _categoryBoxes)
+                row.Width = Math.Max(100, _categoryChecklist.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4);
+        };
+        UpdateCategoryCount();
 
         categoryLayout.Controls.Add(categoryQuickPanel, 0, 0);
         categoryLayout.Controls.Add(_categoryChecklist, 0, 1);
@@ -221,6 +295,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         var exportButton = new Button { Text = "匯出設定", Width = 100, Height = 32 };
         importButton.Click += (_, _) => ImportSettings();
         exportButton.Click += (_, _) => ExportSettings();
+        ioPanel.WrapContents = false;
         ioPanel.Controls.Add(importButton);
         ioPanel.Controls.Add(exportButton);
 
@@ -256,26 +331,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
         unjoinButton.Click += (_, _) =>
         {
-            if (!ValidateBeforeRun()) return;
-            Action = ExecutionAction.Unjoin;
-            DialogResult = DialogResult.OK;
-            Close();
+            RequestRun(ExecutionAction.Unjoin);
         };
 
         alignWallButton.Click += (_, _) =>
         {
-            if (!ValidateBeforeRun()) return;
-            Action = ExecutionAction.AlignWallProfile;
-            DialogResult = DialogResult.OK;
-            Close();
+            RequestRun(ExecutionAction.AlignWallProfile);
         };
 
         joinButton.Click += (_, _) =>
         {
-            if (!ValidateBeforeRun()) return;
-            Action = ExecutionAction.AutoJoin;
-            DialogResult = DialogResult.OK;
-            Close();
+            RequestRun(ExecutionAction.AutoJoin);
         };
 
         AcceptButton = _alignOnlyMode ? alignWallButton : joinButton;
@@ -289,20 +355,80 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             actionPanel.Controls.Add(joinButton);
         }
 
-        root.Controls.Add(guideLabel, 0, 0);
-        root.SetColumnSpan(guideLabel, 2);
-        root.Controls.Add(scopeGroup, 0, 1);
-        root.SetColumnSpan(scopeGroup, 2);
-        root.Controls.Add(categoryGroup, 0, 2);
-        root.Controls.Add(priorityGroup, 1, 2);
-        root.Controls.Add(detailGroup, 0, 3);
-        root.SetColumnSpan(detailGroup, 2);
-        root.Controls.Add(ioPanel, 0, 4);
-        root.SetColumnSpan(ioPanel, 2);
-        root.Controls.Add(actionPanel, 0, 5);
-        root.SetColumnSpan(actionPanel, 2);
+        _root = root;
+        root.Padding = new Padding(16);
+        root.RowStyles.Clear();
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 106));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
+
+        var header = new Panel { Dock = DockStyle.Fill };
+        header.Controls.Add(new Label { Text = _alignOnlyMode ? "對齊牆輪廓" : "自動接合", Font = new Font(Font.FontFamily, 17, FontStyle.Bold), AutoSize = true, ForeColor = Color.FromArgb(28, 44, 60), Location = new Point(0, 0) });
+        header.Controls.Add(new Label { Text = _alignOnlyMode ? "選擇範圍與類別，調整牆輪廓。" : "選擇構件與接合順序，執行後可繼續檢查模型。", AutoSize = true, ForeColor = Color.FromArgb(96, 109, 123), Location = new Point(1, 34) });
+        root.Controls.Add(header, 0, 0);
+        root.SetColumnSpan(header, 2);
+        scopeGroup.Controls.Add(_selectionBar);
+        root.Controls.Add(FlatSection(scopeGroup, "01  處理範圍"), 0, 1);
+        root.SetColumnSpan(root.GetControlFromPosition(0, 1), 2);
+        root.Controls.Add(FlatSection(categoryGroup, "02  處理類別"), 0, 2);
+        root.Controls.Add(FlatSection(priorityGroup, "03  接合優先序 · 上方優先"), 1, 2);
+        root.Controls.Add(FlatSection(detailGroup, "接合選項"), 0, 3);
+        root.SetColumnSpan(root.GetControlFromPosition(0, 3), 2);
+        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.Controls.Add(ioPanel, 0, 0);
+        footer.Controls.Add(actionPanel, 1, 0);
+        root.Controls.Add(footer, 0, 4);
+        root.SetColumnSpan(footer, 2);
+        _modelessStatus.Dock = DockStyle.Fill;
+        _modelessStatus.BorderStyle = BorderStyle.None;
+        _modelessStatus.BackColor = _resultPanel.BackColor;
+        _resultPanel.Controls.Add(_modelessStatus);
+        _resultPanel.Controls.Add(new Label { Text = "執行狀態", AutoSize = true, Location = new Point(12, 8), ForeColor = Color.FromArgb(67, 87, 107) });
+        root.Controls.Add(_resultPanel, 0, 5);
+        root.SetColumnSpan(_resultPanel, 2);
+
+        _categoryChecklist.BorderStyle = BorderStyle.None;
+        _priorityList.BorderStyle = BorderStyle.None;
+        _priorityList.IntegralHeight = false;
+        _scopeCombo.FlatStyle = FlatStyle.Flat;
+        foreach (var button in AllControls(root).OfType<Button>()) StyleButton(button);
+        var primary = _alignOnlyMode ? alignWallButton : joinButton;
+        primary.BackColor = accentColor;
+        primary.ForeColor = Color.White;
+        primary.FlatAppearance.BorderSize = 0;
+        actionPanel.Controls.Clear();
+        actionPanel.WrapContents = false;
+        actionPanel.Controls.Add(primary);
+        actionPanel.Controls.Add(cancelButton);
+        if (!_alignOnlyMode) { actionPanel.Controls.Add(unjoinButton); actionPanel.Controls.Add(alignWallButton); }
 
         Controls.Add(root);
+    }
+
+    private static IEnumerable<Control> AllControls(Control parent) => parent.Controls.Cast<Control>().SelectMany(c => new[] { c }.Concat(AllControls(c)));
+
+    private static void StyleButton(Button button)
+    {
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderColor = Color.FromArgb(217, 224, 231);
+        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(232, 241, 249);
+        button.BackColor = Color.White;
+        button.ForeColor = Color.FromArgb(47, 64, 80);
+        button.Cursor = Cursors.Hand;
+    }
+
+    private static Panel FlatSection(GroupBox source, string title)
+    {
+        var panel = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(12, 32, 12, 10), Margin = new Padding(0, 0, 8, 10) };
+        foreach (Control child in source.Controls.Cast<Control>().ToArray()) panel.Controls.Add(child);
+        panel.Controls.Add(new Label { Text = title, AutoSize = true, Location = new Point(12, 10), ForeColor = Color.FromArgb(67, 87, 107) });
+        source.Dispose();
+        return panel;
     }
 
     private void LoadSettings(AutoJoinSettings settings)
@@ -321,12 +447,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         }
 
         var enabled = new HashSet<string>(settings.EnabledCategoryKeys);
-        for (var i = 0; i < _categoryChecklist.Items.Count; i++)
+        foreach (var row in _categoryBoxes)
         {
-            if (_categoryChecklist.Items[i] is LabeledItem item)
-            {
-                _categoryChecklist.SetItemChecked(i, enabled.Contains(item.Key));
-            }
+            row.Checked = enabled.Contains((string)row.Tag);
         }
 
         _priorityList.Items.Clear();
@@ -343,12 +466,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     private List<string> GetCheckedCategoryKeys()
     {
         var keys = new List<string>();
-        foreach (var item in _categoryChecklist.CheckedItems)
+        foreach (var row in _categoryBoxes.Where(row => row.Checked))
         {
-            if (item is LabeledItem labeled && !string.IsNullOrWhiteSpace(labeled.Key))
-            {
-                keys.Add(labeled.Key);
-            }
+            keys.Add((string)row.Tag);
         }
 
         return keys;
@@ -403,11 +523,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     private void SetAllCategoriesChecked(bool isChecked)
     {
-        for (var i = 0; i < _categoryChecklist.Items.Count; i++)
-        {
-            _categoryChecklist.SetItemChecked(i, isChecked);
-        }
+        foreach (var row in _categoryBoxes) row.Checked = isChecked;
     }
+
+    private void UpdateCategoryCount() => _categoryCount.Text = $"已選 {_categoryBoxes.Count(row => row.Checked)}／{_categoryBoxes.Count}";
 
     private void ImportSettings()
     {

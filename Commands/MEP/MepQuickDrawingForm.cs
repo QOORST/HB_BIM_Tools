@@ -10,7 +10,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 {
     internal sealed class MepQuickDrawingForm : Form
     {
-        private static readonly Color Accent=Color.FromArgb(0,135,145);
+        private static readonly Color Accent=Color.FromArgb(0,105,180);
         private static readonly Color Muted=Color.FromArgb(92,102,113);
         private readonly RadioButton relative=Segment("相對高度"), target=Segment("目標樓層");
         private readonly RadioButton ninety=Segment("90°"), fortyFive=Segment("45°"), custom=Segment("自訂");

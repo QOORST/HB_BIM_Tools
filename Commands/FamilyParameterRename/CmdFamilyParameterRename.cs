@@ -17,7 +17,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename
                 var uiDocument = commandData.Application.ActiveUIDocument;
                 if (uiDocument == null)
                 {
-                    message = "No active Revit document.";
+                    message = "目前沒有開啟的 Revit 模型。";
                     return Result.Failed;
                 }
 
@@ -33,7 +33,7 @@ namespace YD_RevitTools.LicenseManager.Commands.FamilyParameterRename
             catch (Exception ex)
             {
                 message = ex.Message;
-                TaskDialog.Show("Family Parameter Rename", ex.ToString());
+                TaskDialog.Show("族參數名稱修改", ex.Message);
                 return Result.Failed;
             }
         }
