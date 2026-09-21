@@ -957,6 +957,26 @@ namespace YD_RevitTools.LicenseManager
                 pipeSleeveManagerData.LongDescription = "檢視、篩選、定位、刪除與更新自動生成的管線套管。";
                 SetButtonIcon(pipeSleeveManagerData, "pipe_sleeve");
                 sleeveMenu?.AddPushButton(pipeSleeveManagerData);
+                var sleeveGl = new PushButtonData("SleeveGlSettings", "套管 GL\n基準", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdSleeveGlSettings");
+                SetButtonIcon(sleeveGl, "pipe_sleeve");
+                sleeveGl.ToolTip = "指定本專案自動套管共同約束樓層；不直接搬移既有套管。";
+                sleeveMenu?.AddPushButton(sleeveGl);
+                var sleeveRebase = new PushButtonData("SleeveGlRebase", "套管 GL\n歸位", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdSleeveGlRebase");
+                SetButtonIcon(sleeveRebase, "pipe_sleeve");
+                sleeveRebase.ToolTip = "保留套管實例與位置，同步 GL 約束及立面高程；不需來源管線。";
+                sleeveMenu?.AddPushButton(sleeveRebase);
+                var parameterCopy = new PushButtonData("ParameterCopy", "參數\n複製", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdParameterCopy");
+                SetButtonIcon(parameterCopy, "pipe_sleeve");
+                parameterCopy.ToolTip = "批次複製實例長度參數，預覽後寫入；幾何檢核失敗則回復。";
+                sleeveMenu?.AddPushButton(parameterCopy);
+                var raftCad = new PushButtonData("RaftCadSleeve", "筏基 CAD\n定位", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdRaftCadSleeve");
+                raftCad.ToolTip = "依 CAD 點選位置，以套管外頂或外底高程建立連通、通氣與溢水管。";
+                SetButtonIcon(raftCad, "pipe_sleeve");
+                sleeveMenu?.AddPushButton(raftCad);
                 PushButtonData architecturalOpeningData = new PushButtonData(
                     "ArchitecturalOpeningFromSleeves",
                     "建築\n開孔",

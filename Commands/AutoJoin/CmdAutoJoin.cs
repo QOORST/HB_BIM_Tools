@@ -27,8 +27,18 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             return Result.Failed;
         }
 
-        AutoJoinModelessController.Show(commandData.Application);
-        return Result.Succeeded;
+        try
+        {
+            AutoJoinModelessController.Show(commandData.Application);
+            return Result.Succeeded;
+        }
+        catch (System.Exception ex)
+        {
+            AutoJoinModelessController.Log("Startup failed: " + ex);
+            message = "自動接合介面啟動失敗：" + ex.Message;
+            TaskDialog.Show("自動接合", message + "\n診斷紀錄（若可寫入）：\n" + AutoJoinModelessController.DiagnosticPath);
+            return Result.Failed;
+        }
     }
 
     internal static string Run(UIDocument uiDoc, AutoJoinSettings settings, ExecutionAction action)

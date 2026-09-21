@@ -60,7 +60,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             Text = _windowTitle;
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = Forms.AutoScaleMode.Dpi;
-            Width = 780;
+            Width = 920;
             Height = 800;
             MinimizeBox = false;
             MaximizeBox = true;
@@ -165,9 +165,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             var root = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, Padding = new Forms.Padding(8),
                 ColumnCount = 1, RowCount = 4 };
             root.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
-            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 98));
-            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 280));
-            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 102));
+            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
+            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
+            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             scroll.Controls.Add(root);
 
@@ -179,10 +179,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             AddLabel(source, "連結實例", 0, 1); source.Controls.Add(_linkCombo, 1, 1); source.SetColumnSpan(_linkCombo, 3);
             root.Controls.Add(Section("來源與範圍", source), 0, 0);
 
-            var rules = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
-            rules.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 66));
-            rules.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 100));
-            var toolbar = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Fill, WrapContents = true };
+            var rules = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, RowCount = 2, ColumnCount = 1 };
+            rules.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
+            rules.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
+            rules.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 220));
+            var toolbar = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, WrapContents = true };
             toolbar.Controls.Add(new Forms.Label { Text = "套用分類預設", AutoSize = true, Margin = new Forms.Padding(0, 7, 8, 0) });
             _templateCombo.Dock = Forms.DockStyle.None; _templateCombo.Width = 110;
             toolbar.Controls.Add(_templateCombo);
@@ -202,6 +203,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             toolbar.Controls.Add(_presentOnly);
             toolbar.SetFlowBreak(_presentOnly, true);
             _categoryHint.AutoSize = true;
+            toolbar.SizeChanged += (_, __) => _categoryHint.MaximumSize = new Size(Math.Max(100, toolbar.ClientSize.Width - 16), 0);
             _categoryHint.ForeColor = Color.FromArgb(75, 88, 105);
             toolbar.Controls.Add(_categoryHint);
             rules.Controls.Add(toolbar, 0, 0);
@@ -262,20 +264,23 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             shell.Controls.Add(_statusLabel, 0, 1);
             shell.Controls.Add(BuildButtons(), 0, 2);
             _statusLabel.Dock = Forms.DockStyle.Fill;
-            _statusLabel.AutoSize = false;
-            _statusLabel.Height = 42;
+            _statusLabel.AutoSize = true;
+            shell.SizeChanged += (_, __) => {
+                _statusLabel.MaximumSize = new Size(Math.Max(100, shell.ClientSize.Width - 32), 0);
+                _summaryLabel.MaximumSize = new Size(Math.Max(100, shell.ClientSize.Width - 32), 0);
+            };
             oldTop.Dispose(); oldFlags.Dispose();
         }
 
         private static Forms.TableLayoutPanel SettingsGrid()
         {
-            var grid = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Fill, ColumnCount = 4, RowCount = 2 };
+            var grid = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, ColumnCount = 4, RowCount = 2, Padding = new Forms.Padding(0, 6, 0, 6) };
             grid.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Absolute, 90));
             grid.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 50));
             grid.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Absolute, 90));
             grid.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 50));
-            grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 50));
-            grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 50));
+            grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
+            grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             return grid;
         }
 
@@ -283,16 +288,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         {
             var section = new Forms.TableLayoutPanel
             {
-                Dock = Forms.DockStyle.Fill, ColumnCount = 1, RowCount = 3,
+                Dock = Forms.DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 3,
                 BackColor = Color.White, Padding = new Forms.Padding(12, 0, 12, 6),
                 Margin = new Forms.Padding(0, 0, 0, 8)
             };
-            section.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 24));
+            section.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
+            section.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             section.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 1));
-            section.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 100));
+            section.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             section.Controls.Add(new Forms.Label
             {
-                Text = title, Dock = Forms.DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
+                Text = title, AutoSize = true, Padding = new Forms.Padding(0, 6, 0, 6), Dock = Forms.DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
                 Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(38, 54, 72), Margin = new Forms.Padding(0)
             }, 0, 0);
@@ -455,23 +461,24 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 ColumnCount = 2,
                 RowCount = AutoTagService.CategoryRules.Length + 1
             };
-            grid.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Absolute, 140));
+            grid.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.AutoSize));
             grid.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
             panel.Controls.Add(grid);
 
-            grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 32));
-            AddHeader(grid, "支援的元素分類", 0, 0);
+            grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
+            AddHeader(grid, "元素分類", 0, 0);
             AddHeader(grid, "標籤族型", 1, 0);
 
             for (int i = 0; i < AutoTagService.CategoryRules.Length; i++)
             {
                 AutoTagCategoryRule rule = AutoTagService.CategoryRules[i];
                 int row = i + 1;
-                grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 32));
+                grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
 
                 var checkBox = new Forms.CheckBox
                 {
                     Text = rule.Name,
+                    AutoSize = true,
                     Dock = Forms.DockStyle.Fill,
                     TextAlign = ContentAlignment.MiddleLeft
                 };
@@ -485,6 +492,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     DropDownStyle = Forms.ComboBoxStyle.DropDownList
                 };
                 comboBox.SelectedIndexChanged += (sender, args) => UpdateSummary();
+                comboBox.DropDown += (_, __) => {
+                    int textWidth = comboBox.Items.Cast<object>().Select(x => Forms.TextRenderer.MeasureText(x.ToString(), comboBox.Font).Width + 32).DefaultIfEmpty(comboBox.Width).Max();
+                    comboBox.DropDownWidth = Math.Max(comboBox.Width, Math.Min(textWidth, Forms.Screen.FromControl(comboBox).WorkingArea.Width - 24));
+                };
                 grid.Controls.Add(comboBox, 1, row);
 
                 _rows.Add(new RowBinding(rule, checkBox, comboBox));
@@ -798,8 +809,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 {
                     int index = grid.GetRow(row.CheckBox);
                     while (grid.RowStyles.Count <= index) grid.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 32));
-                    grid.RowStyles[index].SizeType = Forms.SizeType.Absolute;
-                    grid.RowStyles[index].Height = visible ? 32 : 0;
+                    grid.RowStyles[index].SizeType = visible ? Forms.SizeType.AutoSize : Forms.SizeType.Absolute;
+                    grid.RowStyles[index].Height = 0;
                 }
             }
         }
@@ -942,6 +953,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             grid.Controls.Add(new Forms.Label
             {
                 Text = text,
+                AutoSize = true,
+                Margin = new Forms.Padding(3, 6, 3, 6),
                 Dock = Forms.DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold, GraphicsUnit.Point)

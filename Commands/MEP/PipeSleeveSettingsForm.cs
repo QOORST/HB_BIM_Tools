@@ -49,6 +49,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             sizes.Columns.Add(new DataGridViewComboBoxColumn { Name="SymbolId",DataPropertyName="SymbolId",HeaderText="套管類型",FillWeight=230,MinimumWidth=260,
                 DisplayMember="Name",ValueMember="Id",DataSource=new[]{new SymbolChoice { Id="",Name="待指定" }}.Concat(symbols).ToList() });
             var saved=settings ?? PipeSleeveSettingsStore.Load();
+            rows = PipeSleeveNominalRules.GetSizes(saved).Select(x => new SizeRow { DN = x }).ToList();
             foreach(var entry in saved.SizeMappings ?? new List<PipeSleeveSizeSetting>())
                 if(!rows.Any(r=>r.DN==entry.NominalDiameterMm)) rows.Add(new SizeRow { DN=entry.NominalDiameterMm });
             SizeRows=rows.OrderBy(r=>r.DN).ToList(); rows=SizeRows; sizes.DataSource=SizeRows;
@@ -73,12 +74,15 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         internal bool ValidateSizes(out string error)
         {
             if(!sizes.EndEdit()) { error="請完成族型選擇。"; return false; }
+            error = PipeSleeveNominalRules.Validate(SizeRows.Select(r => r.DN));
+            if (error != null) return false;
             RefreshSummary(); error=null; return true;
         }
         internal void SaveSettings()
         {
             if(!ValidateSizes(out var error)) throw new InvalidOperationException(error);
             PipeSleeveSettingsStore.Save(new PipeSleeveSettings {
+                HasExplicitSizeList=true,
                 DefaultWallSleeveDisplayName=FindName(WallSymbolId),DefaultFloorSleeveDisplayName=FindName(FloorSymbolId),
                 ClearanceMm=ClearanceMm,IncludeCurrentModel=IncludeCurrentModel,IncludeLinks=IncludeLinks,ExcludeAdditionElements=ExcludeAdditionElements,
                 UseDiameterMap=UseDiameterMap,AutoNumber=AutoNumber,UpdateExisting=!SkipExisting,
@@ -111,15 +115,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         {
             this.selectedCount=selectedCount;
             Text="HB_BIM｜自動套管設定"; Font=new Font("Microsoft JhengHei UI",10);
-            ClientSize=new Size(1240,760); MinimumSize=new Size(1120,700); BackColor=Color.FromArgb(246,247,249);
+            ClientSize=new Size(1240,760); MinimumSize=new Size(800,560); BackColor=Color.FromArgb(246,247,249);
+            AutoScaleMode=AutoScaleMode.Dpi;
             StartPosition=FormStartPosition.CenterParent; MinimizeBox=false;
             var root=new TableLayoutPanel { Dock=DockStyle.Fill,Padding=new Padding(24),ColumnCount=1,RowCount=3 };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute,66)); root.RowStyles.Add(new RowStyle(SizeType.Percent,100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute,62));
-            var header=new FlowLayoutPanel { Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false };
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Percent,100)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var header=new FlowLayoutPanel { Dock=DockStyle.Top,AutoSize=true,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(0,0,0,12) };
             header.Controls.Add(new Label { Text="建立套管",AutoSize=true,Font=new Font(Font.FontFamily,17,FontStyle.Bold) });
-            header.Controls.Add(Caption("先確認尺寸與族型，再檢查處理範圍。")); root.Controls.Add(header,0,0);
+            root.Controls.Add(header,0,0);
             var tabs=new TabControl { Dock=DockStyle.Fill,Padding=new Point(22,9) };
-            var mappingPage=new TabPage("尺寸與族型") { BackColor=BackColor,Padding=new Padding(16) };
+            var mappingPage=new TabPage("尺寸與族型") { BackColor=BackColor,Padding=new Padding(16),AutoScroll=true };
             var optionsPage=new TabPage("處理設定") { BackColor=BackColor,Padding=new Padding(16),AutoScroll=true };
             tabs.TabPages.AddRange(new[]{mappingPage,optionsPage});
             var body=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Margin=Padding.Empty };
@@ -133,26 +138,62 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 Dock=DockStyle.Fill,BackColor=Color.White,ScrollBars=ScrollBars.Vertical,
                 Text="穿梁複核重點（沿用 2024）\r\n\r\n• 梁端／柱邊 2H 範圍需複核。\r\n• 孔徑 ≥ 100 mm：提醒。\r\n• 孔徑 ≥ 200 mm 或 > 梁深 H/3：需結構確認。\r\n• 孔距 < 3D 或 300 mm：需複核。\r\n\r\n既有流程可能仍生成套管並標示風險；生成成功不代表結構核可。\r\n本圖為複核參考，不能取代專案結構設計要求；實際孔距定義與允許位置須依核定圖說確認。" },0,1);
             body.Controls.Add(referenceLayout,1,0);
-            var mapping=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=4 };
-            mapping.RowStyles.Add(new RowStyle(SizeType.Absolute,142)); mapping.RowStyles.Add(new RowStyle(SizeType.Absolute,36));
+            var referencePage=new TabPage("穿梁參考") { BackColor=Color.White };
+            bool compactReference=false;
+            body.SizeChanged+=(sender,e)=> {
+                bool compact=body.ClientSize.Width < 1050 * DeviceDpi / 96.0;
+                if(compact==compactReference) return;
+                compactReference=compact;
+                if(compact) {
+                    body.Controls.Remove(referenceLayout); referencePage.Controls.Add(referenceLayout); tabs.TabPages.Add(referencePage);
+                    body.ColumnStyles[0].Width=100; body.ColumnStyles[1].Width=0;
+                } else {
+                    if(tabs.SelectedTab==referencePage) tabs.SelectedTab=mappingPage;
+                    referencePage.Controls.Remove(referenceLayout); tabs.TabPages.Remove(referencePage); body.Controls.Add(referenceLayout,1,0);
+                    body.ColumnStyles[0].Width=60; body.ColumnStyles[1].Width=40;
+                }
+            };
+            var mapping=new TableLayoutPanel { Dock=DockStyle.Top,Height=520,MinimumSize=new Size(0,520),ColumnCount=1,RowCount=4 };
+            mapping.RowStyles.Add(new RowStyle(SizeType.AutoSize)); mapping.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             mapping.RowStyles.Add(new RowStyle(SizeType.Percent,100)); mapping.RowStyles.Add(new RowStyle(SizeType.Absolute,52));
-            var family=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=2,RowCount=3,Padding=new Padding(12),BackColor=Color.White };
+            var family=new TableLayoutPanel { Dock=DockStyle.Top,AutoSize=true,ColumnCount=2,RowCount=3,Padding=new Padding(12),BackColor=Color.White };
             family.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,125)); family.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            family.RowStyles.Add(new RowStyle(SizeType.Absolute,30)); family.RowStyles.Add(new RowStyle(SizeType.Absolute,40)); family.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
+            family.RowStyles.Add(new RowStyle(SizeType.AutoSize)); family.RowStyles.Add(new RowStyle(SizeType.AutoSize)); family.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             family.Controls.Add(Caption("01  共用套管族型"),0,0); family.SetColumnSpan(family.GetControlFromPosition(0,0),2);
             family.Controls.Add(Caption("穿牆預設類型"),0,1); wall.Dock=DockStyle.Fill; family.Controls.Add(wall,1,1);
             family.Controls.Add(Caption("樓板／樑預設類型"),0,2); floor.Dock=DockStyle.Fill; family.Controls.Add(floor,1,2);
             wall.DropDownWidth=700; floor.DropDownWidth=700; mapping.Controls.Add(family,0,0);
-            mapping.Controls.Add(Caption("02  進階尺寸對應 · 依公稱尺寸選用既有套管類型"),0,1);
+            var sizeTools = new FlowLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, WrapContents=true };
+            var dnInput = new NumericUpDown { Minimum=1, Maximum=10000, Value=15, Width=90 };
+            var addSize = new Button { Text="＋", Width=38, Height=30, FlatStyle=FlatStyle.Flat };
+            var removeSize = new Button { Text="−", Width=38, Height=30, FlatStyle=FlatStyle.Flat };
+            var tips = new ToolTip(); tips.SetToolTip(addSize,"新增標稱管徑"); tips.SetToolTip(removeSize,"移除選取的管徑對應");
+            Disposed += (sender,e) => tips.Dispose();
+            sizeTools.Controls.Add(Caption("管徑 DN")); sizeTools.Controls.Add(dnInput); sizeTools.Controls.Add(addSize); sizeTools.Controls.Add(removeSize);
+            mapping.RowStyles[1].SizeType=SizeType.AutoSize;
+            mapping.Controls.Add(sizeTools,0,1);
+            addSize.Click += (sender,e) => {
+                if (!ValidateSizes(out var error)) { MessageBox.Show(this,error,Text); return; }
+                int dn=(int)dnInput.Value;
+                if(SizeRows.Any(r=>r.DN==dn)) { MessageBox.Show(this,"此 DN 已存在。",Text); return; }
+                SizeRows.Add(new SizeRow { DN=dn }); RebindSizes();
+            };
+            removeSize.Click += (sender,e) => {
+                if (!ValidateSizes(out var error)) { MessageBox.Show(this,error,Text); return; }
+                var row=sizes.CurrentRow?.DataBoundItem as SizeRow;
+                if(row==null) return;
+                if(MessageBox.Show(this,$"移除 DN{row.DN} 對應？不會刪除模型中的套管。",Text,MessageBoxButtons.OKCancel,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.OK) return;
+                SizeRows.Remove(row); RebindSizes();
+            };
             sizes.BorderStyle=BorderStyle.None; sizes.CellBorderStyle=DataGridViewCellBorderStyle.SingleHorizontal;
             sizes.GridColor=Color.FromArgb(226,231,235); sizes.EnableHeadersVisualStyles=false;
             sizes.ColumnHeadersDefaultCellStyle.BackColor=Color.FromArgb(234,239,243);
             sizes.ColumnHeadersDefaultCellStyle.ForeColor=Color.FromArgb(45,55,65);
-            sizes.ColumnHeadersHeight=38; sizes.ColumnHeadersHeightSizeMode=DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            sizes.ColumnHeadersHeight=38; sizes.ColumnHeadersHeightSizeMode=DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             sizes.RowTemplate.Height=36; sizes.DefaultCellStyle.Padding=new Padding(6,2,6,2);
             sizes.DefaultCellStyle.SelectionBackColor=Color.FromArgb(222,237,251); sizes.DefaultCellStyle.SelectionForeColor=Color.Black;
             sizes.AlternatingRowsDefaultCellStyle.BackColor=Color.FromArgb(248,250,252);
-            sizes.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName="DN", HeaderText="管徑 DN", ReadOnly=true,FillWeight=55,MinimumWidth=70 });
+            sizes.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName="DN", HeaderText="管徑 DN", ReadOnly=true,FillWeight=55,MinimumWidth=100 });
             sizes.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName="Target",HeaderText="預設公稱尺寸",ReadOnly=true,FillWeight=90 });
             sizes.Columns.Add(new DataGridViewTextBoxColumn { Name="State",HeaderText="對應狀態",ReadOnly=true,FillWeight=85 });
             sizes.CellFormatting+=(sender,e)=> {
@@ -177,11 +218,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 sections[i].Dock=DockStyle.Top; container.Controls.Add(sections[i]); options.Controls.Add(container,0,i);
             }
             optionsPage.Controls.Add(options);
-            var footer=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Padding=new Padding(0,8,0,0) };
-            footer.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            var footer=new TableLayoutPanel { Dock=DockStyle.Top,AutoSize=true,ColumnCount=2,RowCount=1,Padding=new Padding(0,8,0,0) };
+            footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,370));
             footer.Controls.Add(summary,0,0);
-            var actions=new FlowLayoutPanel { Dock=DockStyle.Fill,FlowDirection=FlowDirection.RightToLeft,Margin=Padding.Empty };
+            var actions=new FlowLayoutPanel { Dock=DockStyle.Top,AutoSize=true,FlowDirection=FlowDirection.RightToLeft,Margin=Padding.Empty };
             var run=new Button { Text="檢查並建立",Size=new Size(140,36),FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(32,113,206),ForeColor=Color.White };
             var cancel=new Button { Text="取消",Size=new Size(94,36),FlatStyle=FlatStyle.Flat,DialogResult=DialogResult.Cancel };
             run.Click+=(sender,e)=> {
@@ -195,6 +236,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             save.Click+=(sender,e)=> { try { SaveSettings(); MessageBox.Show(this,"已儲存，與 2024 共用設定。",Text); } catch(Exception ex) { MessageBox.Show(this,ex.Message,Text); } };
             actions.Controls.Add(run); actions.Controls.Add(save); actions.Controls.Add(cancel); footer.Controls.Add(actions,1,0); root.Controls.Add(footer,0,2);
             Controls.Add(root); AcceptButton=run; CancelButton=cancel; RefreshSummary();
+            Shown+=(sender,e)=> {
+                var area=Screen.FromControl(this).WorkingArea;
+                MinimumSize=new Size(Math.Min(MinimumSize.Width,area.Width-24),Math.Min(MinimumSize.Height,area.Height-24));
+                Size=new Size(Math.Min(Width,area.Width-24),Math.Min(Height,area.Height-24));
+            };
+        }
+        private void RebindSizes()
+        {
+            SizeRows=SizeRows.OrderBy(r=>r.DN).ToList();
+            sizes.DataSource=null; sizes.DataSource=SizeRows; RefreshSummary();
         }
     }
 }

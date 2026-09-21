@@ -221,10 +221,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             {
                 var selected = ui.Selection.GetElementIds().Select(doc.GetElement).ToList();
                 if (selected.Count == 0) selected = ui.Selection.PickObjects(ObjectType.Element, "選取要歸位的直線管段").Select(doc.GetElement).ToList();
-                var curves = selected.Where(MepConnectionUi.Supported).Cast<MEPCurve>().ToList();
-                if (curves.Count == 0) throw new InvalidOperationException("請選取至少一個可處理的直線管段。");
-                if (curves.Count != selected.Count || curves.Any(c => c.Pinned || c.GroupId != ElementId.InvalidElementId || !((c.Location as LocationCurve)?.Curve is Line)))
-                    throw new InvalidOperationException("僅處理未釘住、非群組的本機直線管段；請排除其他元素。");
+                var curves = new List<MEPCurve>();
+                var skipped = new List<string>();
+                foreach (var element in selected)
+                {
+                    string reason = element == null ? "無法取得元素" :
+                        !MepConnectionUi.Supported(element) ? "非支援管段（管件、設備或連結等）" :
+                        element.Pinned ? "元素已釘住" :
+                        element.GroupId != ElementId.InvalidElementId ? "群組成員" :
+                        !((element.Location as LocationCurve)?.Curve is Line) ? "非直線管段" : null;
+                    if (reason == null) curves.Add((MEPCurve)element);
+                    else skipped.Add($"{element?.Id}：{reason}");
+                }
+                if (curves.Count == 0)
+                    throw new InvalidOperationException("沒有可處理的直線管段。\n" + string.Join("\n", skipped.Take(20)));
                 var allLevels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l => l.ProjectElevation).ToList();
                 var filter = MepConnectionUi.Choices(new[] { "全部樓層", "建築樓層", "結構樓層" }.Select(s => new MepConnectionUi.Choice { Text = s, Value = s }));
                 var target = MepConnectionUi.Choices(new MepConnectionUi.Choice[0]);
@@ -246,8 +256,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 var plan = curves.Select(c => new { Curve = c, Level = fixedLevel ?? eligible.LastOrDefault(l => l.ProjectElevation <= ((LocationCurve)c.Location).Curve.Evaluate(.5, true).Z) }).ToList();
                 if (plan.Any(p => p.Level == null || p.Curve.get_Parameter(BuiltInParameter.RBS_START_LEVEL_PARAM) == null || p.Curve.get_Parameter(BuiltInParameter.RBS_START_LEVEL_PARAM).IsReadOnly))
                     throw new InvalidOperationException("部分管段找不到適用樓層，或參考樓層不可寫入；未進行修改。");
-                var preview = new TaskDialog("樓層歸位預覽") { MainInstruction = $"確認歸位 {plan.Count} 個管段？", MainContent = "維持實際位置與坡度；驗證不符時整批回復。",
-                    ExpandedContent = string.Join("\n", plan.Select(p => $"{p.Curve.Id}：{p.Curve.ReferenceLevel?.Name ?? "未指定"} → {p.Level.Name}")),
+                var preview = new TaskDialog("樓層歸位預覽") { MainInstruction = $"確認歸位 {plan.Count} 個管段？", MainContent = $"略過 {skipped.Count} 個不支援或受保護元素。\n維持實際位置與坡度；驗證不符時整批回復。",
+                    ExpandedContent = string.Join("\n", plan.Select(p => $"{p.Curve.Id}：{p.Curve.ReferenceLevel?.Name ?? "未指定"} → {p.Level.Name}")) +
+                        (skipped.Count == 0 ? string.Empty : "\n\n略過元素：\n" + string.Join("\n", skipped)),
                     CommonButtons = TaskDialogCommonButtons.Ok | TaskDialogCommonButtons.Cancel, DefaultButton = TaskDialogResult.Cancel };
                 if (preview.Show() != TaskDialogResult.Ok) return Result.Cancelled;
                 // Snapshot the connected network too: Revit can propagate a level edit to neighbours.

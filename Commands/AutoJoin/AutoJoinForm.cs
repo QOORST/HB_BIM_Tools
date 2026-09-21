@@ -67,8 +67,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         MinimumSize = new Size(840, 800);
         if (CancelButton is Button closeButton) closeButton.Text = "關閉";
         Height = Math.Min(820, Screen.PrimaryScreen.WorkingArea.Height);
-        var current = new Button { Text = "使用目前選取", Width = 125, Height = 30 };
-        var pick = new Button { Text = "重新選取", Width = 100, Height = 30 };
+        var current = new Button { Text = "使用目前選取", AutoSize=true, MinimumSize=new Size(125,30) };
+        var pick = new Button { Text = "重新選取", AutoSize=true, MinimumSize=new Size(100,30) };
         current.Click += (_, _) => SelectionRequested?.Invoke();
         pick.Click += (_, _) => PickRequested?.Invoke();
         StyleButton(current);
@@ -361,16 +361,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         _root = root;
         root.Padding = new Padding(16);
         root.RowStyles.Clear();
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 106));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
 
-        var header = new Panel { Dock = DockStyle.Fill };
-        header.Controls.Add(new Label { Text = _alignOnlyMode ? "對齊牆輪廓" : "自動接合", Font = new Font(Font.FontFamily, 17, FontStyle.Bold), AutoSize = true, ForeColor = Color.FromArgb(28, 44, 60), Location = new Point(0, 0) });
-        header.Controls.Add(new Label { Text = _alignOnlyMode ? "選擇範圍與類別，調整牆輪廓。" : "選擇構件與接合順序，執行後可繼續檢查模型。", AutoSize = true, ForeColor = Color.FromArgb(96, 109, 123), Location = new Point(1, 34) });
+        var header = new FlowLayoutPanel { Dock=DockStyle.Top, AutoSize=true, FlowDirection=FlowDirection.TopDown, WrapContents=false, Padding=new Padding(0,0,0,8) };
+        header.Controls.Add(new Label { Text = _alignOnlyMode ? "對齊牆輪廓" : "自動接合", Font = new Font(Font.FontFamily, 17, FontStyle.Bold), AutoSize = true, ForeColor = Color.FromArgb(28, 44, 60) });
         root.Controls.Add(header, 0, 0);
         root.SetColumnSpan(header, 2);
         scopeGroup.Controls.Add(_selectionBar);
@@ -384,7 +383,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         root.Controls.Add(detailSection, 0, 3);
         root.SetColumnSpan(root.GetControlFromPosition(0, 3), 2);
         var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
-        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        ioPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        actionPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        footer.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         footer.Controls.Add(ioPanel, 0, 0);
         footer.Controls.Add(actionPanel, 1, 0);
@@ -408,7 +410,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         primary.ForeColor = Color.White;
         primary.FlatAppearance.BorderSize = 0;
         actionPanel.Controls.Clear();
-        actionPanel.WrapContents = false;
+        actionPanel.WrapContents = true;
         actionPanel.Controls.Add(primary);
         actionPanel.Controls.Add(cancelButton);
         if (!_alignOnlyMode) { actionPanel.Controls.Add(unjoinButton); actionPanel.Controls.Add(alignWallButton); }

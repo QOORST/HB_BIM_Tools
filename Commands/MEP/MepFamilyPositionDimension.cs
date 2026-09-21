@@ -59,6 +59,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         {
             axis = null;
             var ports = MepConnectionUi.Ports(instance);
+            if (ports.Count == 0) return TryAccessorySolidAxis(instance, out axis);
             if (ports.Count != 2) return false;
             XYZ delta = ports[1].Origin - ports[0].Origin;
             if (delta.GetLength() < 1 / 304.8) return false;
@@ -66,6 +67,52 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             XYZ direction = axis;
             // Use physical end connectors, not a family's arbitrary local X/Y/Z convention.
             return ports.All(p => Math.Abs(p.CoordinateSystem.BasisZ.Normalize().DotProduct(direction)) > .999999);
+        }
+
+        private sealed class SleeveCylinderAxis
+        {
+            internal XYZ Origin, Direction;
+        }
+
+        private static bool TryAccessorySolidAxis(FamilyInstance instance, out XYZ axis)
+        {
+            axis = null;
+            var cylinders = new List<SleeveCylinderAxis>();
+            using (var options = new Options { DetailLevel = ViewDetailLevel.Fine, IncludeNonVisibleObjects = false })
+                CollectSleeveCylinderAxes(instance.get_Geometry(options), Transform.Identity, cylinders);
+            if (cylinders.Count == 0) return false;
+            var first = cylinders[0];
+            // Inner/outer bore and end collars must agree on a single physical axis.
+            // Parallel but displaced cylinders (or multiple branches) remain ambiguous.
+            foreach (var candidate in cylinders)
+            {
+                if (Math.Abs(first.Direction.DotProduct(candidate.Direction)) < .999999) return false;
+                XYZ delta = candidate.Origin - first.Origin;
+                if ((delta - first.Direction * delta.DotProduct(first.Direction)).GetLength() > 1 / 304.8) return false;
+            }
+            axis = first.Direction;
+            return true;
+        }
+
+        private static void CollectSleeveCylinderAxes(GeometryElement geometry, Transform transform, List<SleeveCylinderAxis> axes)
+        {
+            if (geometry == null) return;
+            foreach (GeometryObject item in geometry)
+            {
+                if (item is GeometryInstance nested)
+                {
+                    CollectSleeveCylinderAxes(nested.GetSymbolGeometry(), transform.Multiply(nested.Transform), axes);
+                }
+                else if (item is Solid solid && solid.Volume > 1e-9)
+                {
+                    foreach (Face face in solid.Faces)
+                        if (face is CylindricalFace cylinder && cylinder.Area > 1e-9)
+                            axes.Add(new SleeveCylinderAxis {
+                                Origin = transform.OfPoint(cylinder.Origin),
+                                Direction = transform.OfVector(cylinder.Axis).Normalize()
+                            });
+                }
+            }
         }
 
         private static bool IsAccessorySpacingReference(XYZ axis, XYZ viewNormal, XYZ referenceNormal)
@@ -144,7 +191,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     {
                         if (!TryAccessoryAxis(instance, out accessoryAxis))
                         {
-                            notes.Add($"{instance.Id} {instance.Name}：無法由兩個同軸端點確認套管方向，略過自動定位。");
+                            notes.Add($"{instance.Id} {instance.Name}：接點或實體幾何無法確認唯一套管軸線，略過自動定位。");
                             continue;
                         }
                     }

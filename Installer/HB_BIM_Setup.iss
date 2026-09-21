@@ -1,6 +1,6 @@
 ; HB_BIM Tools 安裝腳本 - Inno Setup
 ; 版本: 2.5.17
-; 日期: 2026-09-18 / Test_20260918_MepDimension
+; 日期: 2026-09-21 / Test_20260921_AutoJoinClose
 ; 支援: Revit 2022, 2024, 2025, 2026
 
 #define MyAppName "HB_BIM Tools"
@@ -31,7 +31,7 @@ DisableDirPage=yes
 
 ; 輸出設定
 OutputDir=..\Output
-OutputBaseFilename=HB_BIM_Tools_v{#MyAppVersion}_Test_20260920_AutoJoinUi_Setup
+OutputBaseFilename=HB_BIM_Tools_v{#MyAppVersion}_Test_20260921_AutoJoinClose_Setup
 ; SetupIconFile=..\Resources\Icons\license_32.png  ; PNG 不支援，需要 ICO 檔案
 
 ; 壓縮設定

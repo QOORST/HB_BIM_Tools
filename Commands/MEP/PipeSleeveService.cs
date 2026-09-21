@@ -81,11 +81,53 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     {
         private const double MmToFeet = 1.0 / 304.8;
 
+        public static PipeSleeveResult UpdateSelectedInPlace(Document doc, IList<Element> pipes,
+            IList<FamilyInstance> sleeves, PipeSleeveOptions options)
+        {
+            var diagnostics = new List<string>();
+            var candidates = SuppressWallSleevesCoveredByBeams(Analyze(doc, pipes, options, diagnostics)).ToList();
+            if (diagnostics.Count > 0)
+                throw new InvalidOperationException("穿越檢查尚有待確認項目：\n" + string.Join("\n", diagnostics.Take(8)));
+            var pairs = new List<Tuple<FamilyInstance, PipeSleeveCandidate, FamilySymbol>>();
+            var wall = FindSleeveSymbol(doc, true);
+            var floor = FindSleeveSymbol(doc, false);
+            var opening = FindOpeningSymbol(doc);
+            foreach (var sleeve in sleeves)
+            {
+                var matches = candidates.Where(candidate =>
+                    FindExistingSleeveForUpdate(doc, candidate, null, new List<FamilyInstance> { sleeve }) != null).ToList();
+                if (matches.Count != 1)
+                    throw new InvalidOperationException($"套管 {sleeve.Id} 有 {matches.Count} 個可能穿越點，未搬移或重建，請確認來源與位置。");
+                var candidate = matches[0];
+                if (pairs.Any(pair => ReferenceEquals(pair.Item2, candidate)))
+                    throw new InvalidOperationException("多支套管對應同一穿越點，未自動更新。");
+                var symbol = ResolveSleeveSymbol(doc, candidate, options, wall, floor, opening);
+                if (symbol == null || symbol.Id != sleeve.Symbol.Id)
+                    throw new InvalidOperationException($"套管 {sleeve.Id} 缺少對應族型或需要換型，請先確認族型及標註參考。");
+                pairs.Add(Tuple.Create(sleeve, candidate, symbol));
+            }
+            var result = new PipeSleeveResult { PipeCount = pipes.Count, CandidateCount = pairs.Count };
+            EvaluateBeamOpeningPrinciples(pairs.Select(pair => pair.Item2).ToList(), options.ClearanceMm * MmToFeet, result);
+            foreach (var pair in pairs)
+            {
+                string uniqueId = pair.Item1.UniqueId;
+                UpdateExistingSleeve(doc, pair.Item1, pair.Item2, pair.Item3, options.ClearanceMm * MmToFeet, options);
+                doc.Regenerate();
+                if (!pair.Item1.IsValidObject || pair.Item1.UniqueId != uniqueId)
+                    throw new InvalidOperationException("套管身分已變更，無法安全保留原標註。");
+                ValidateCustomClearance(pair.Item1, pair.Item2, options);
+                result.UpdatedCount++;
+            }
+            return result;
+        }
+
         public static PipeSleeveResult CreateSleeves(Document doc, IList<Element> pipes, PipeSleeveOptions options)
         {
             if (doc == null) throw new ArgumentNullException(nameof(doc));
             if (pipes == null) throw new ArgumentNullException(nameof(pipes));
             options = options ?? new PipeSleeveOptions();
+
+            if (SleeveGlLevel.Read(doc) == null) SleeveGlLevel.Select(doc);
 
             EnsureDefaultFamiliesLoaded(doc);
             doc.Regenerate();
@@ -133,13 +175,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 .Cast<FamilyInstance>().Where(IsSleeveInstance).ToList();
             foreach (PipeSleeveCandidate candidate in candidates)
             {
+                using (var candidateTx = new SubTransaction(doc))
+                {
                 try
                 {
+                    candidateTx.Start();
                     FamilyInstance matchedSleeve = FindExistingSleeveForUpdate(doc, candidate, updatedSleeveIds, existingSleeves);
                     if (options.SkipExisting && matchedSleeve != null)
                     {
                         updatedSleeveIds.Add(matchedSleeve.Id.GetIdValue());
                         result.SkippedExistingCount++;
+                        candidateTx.Commit();
                         continue;
                     }
 
@@ -148,7 +194,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     if (symbol == null)
                     {
                         result.FailedCount++;
-                        result.Messages.Add($"缺少 {candidate.HostType} 可用套管族型，略過管線 {candidate.Pipe.Id}。");
+                        result.Messages.Add(candidate.IsRectangularDuct
+                            ? $"缺少 {candidate.HostType} 可用套管族型，略過管線 {candidate.Pipe.Id}。"
+                            : $"DN{candidate.PipeNominalDiameterMm} 缺少可用套管族型，請檢查設定頁管徑對應；略過管線 {candidate.Pipe.Id}。");
                         continue;
                     }
 
@@ -159,8 +207,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         if (existingSleeve != null)
                         {
                             UpdateExistingSleeve(doc, existingSleeve, candidate, symbol, options.ClearanceMm * MmToFeet, options);
+                            doc.Regenerate();
+                            ValidateCustomClearance(existingSleeve, candidate, options);
                             updatedSleeveIds.Add(existingSleeve.Id.GetIdValue());
                             result.UpdatedCount++;
+                            candidateTx.Commit();
                             continue;
                         }
                     }
@@ -181,13 +232,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     MoveSleeveToPoint(doc, sleeve, candidate.Point);
                     MoveSleeveGeometryCenterToPoint(doc, sleeve, candidate.Point);
                     ApplyBeamRiskViewOverride(doc, sleeve, candidate, options);
+                    doc.Regenerate();
+                    ValidateCustomClearance(sleeve, candidate, options);
                     result.CreatedCount++;
                     sleeveNumber++;
+                    candidateTx.Commit();
                 }
                 catch (Exception ex)
                 {
                     result.FailedCount++;
                     result.Messages.Add($"管線 {candidate.Pipe.Id}: {ex.Message}");
+                }
                 }
             }
 
@@ -332,7 +387,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 double ductHeight;
                 bool isRectangularDuct = TryGetRectangularDuctSizeFeet(pipe, out ductWidth, out ductHeight);
                 double diameter = isRectangularDuct ? Math.Sqrt(ductWidth * ductHeight) : GetPipeDiameterFeet(pipe);
-                int nominalDiameterMm = ToNominalDiameterMm(diameter);
+                int nominalDiameterMm = options.UseDiameterSymbolMap
+                    ? PipeSleeveNominalRules.Resolve(diameter / MmToFeet, (IEnumerable<int>)options.SleeveSymbolByDiameterMm?.Keys ?? Enumerable.Empty<int>())
+                    : ToNominalDiameterMm(diameter);
+                if (!isRectangularDuct && options.UseDiameterSymbolMap && nominalDiameterMm == 0)
+                {
+                    diagnostics.Add($"管線 {pipe.Id}：管徑 {diameter / MmToFeet:0.###} mm 未明確匹配，請新增並指定對應族型。");
+                    continue;
+                }
 
                 foreach (Element host in hosts)
                 {
@@ -1813,6 +1875,40 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return nextLarger > 0 ? nextLarger : measured;
         }
 
+        private static void ValidateCustomClearance(FamilyInstance sleeve, PipeSleeveCandidate candidate, PipeSleeveOptions options)
+        {
+            if (!options.UseDiameterSymbolMap || candidate.IsRectangularDuct || PipeSleeveNominalRules.ConfigurableSizes.Contains(candidate.PipeNominalDiameterMm)) return;
+            double Read(Element element, params string[] names)
+            {
+                foreach (string name in names)
+                {
+                    var matches = element.GetParameters(name);
+                    if (matches.Count != 1) continue;
+                    var p = matches[0];
+                    if (p.HasValue && p.StorageType == StorageType.Double && p.Definition.GetDataType() == SpecTypeId.Length && p.AsDouble() > 0) return p.AsDouble();
+                }
+                return 0;
+            }
+            double Value(params string[] names)
+            {
+                double v = Read(sleeve, names);
+                return v > 0 ? v : Read(sleeve.Symbol, names);
+            }
+            var outerParameter = candidate.Pipe.get_Parameter(BuiltInParameter.RBS_PIPE_OUTER_DIAMETER);
+            double outer = outerParameter != null && outerParameter.HasValue && outerParameter.StorageType == StorageType.Double ? outerParameter.AsDouble() : 0;
+            double inner = Value("有效內徑", "套管內徑", "內徑", "Clear Inside Diameter", "Inside Diameter", "Inner Diameter");
+            if (inner <= 0)
+            {
+                double sleeveOuter = Value("管外直徑", "Outer Diameter", "Outside Diameter");
+                double wall = Value("厚度", "壁厚", "Wall Thickness");
+                if (sleeveOuter > 0 && wall > 0) inner = sleeveOuter - 2 * wall;
+            }
+            if (inner <= 0 || outer <= 0)
+                throw new InvalidOperationException($"自訂 DN{candidate.PipeNominalDiameterMm} 無法確認套管內徑或管線外徑，已略過；請檢查族參數。");
+            if (inner <= outer)
+                throw new InvalidOperationException($"自訂 DN{candidate.PipeNominalDiameterMm} 套管內徑 {inner / MmToFeet:0.##} mm 不大於管外徑 {outer / MmToFeet:0.##} mm，已略過。");
+        }
+
         private static double EstimateHostThicknessFeet(Element host, string hostType, XYZ pipeDirection)
         {
             if (host == null)
@@ -2034,7 +2130,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         private static FamilyInstance PlaceSleeve(Document doc, PipeSleeveCandidate candidate, FamilySymbol symbol)
         {
-            Level level = GetBaseLevelAtOrBelow(doc, candidate.Point) ?? GetNearestLevel(doc, candidate.Point);
+            Level level = SleeveGlLevel.Require(doc);
             if (level != null)
             {
                 try
@@ -2513,6 +2609,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         private static bool IsSleeveInstance(FamilyInstance instance)
         {
+            if (instance != null && RaftCadRecord.IsManaged(instance)) return false;
             if (instance == null || !IsSleeveCategory(instance.Category))
             {
                 return false;
@@ -2568,6 +2665,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         private static string GetSleeveLevelName(Document doc, FamilyInstance sleeve)
         {
+            var actual = SleeveGlLevel.Actual(doc, sleeve);
+            if (actual != null) return actual.Name;
             string value = ReadString(sleeve, "套管樓層", "樓層名稱", "Level Name", "Reference Level Name", "參考樓層名稱", "所屬樓層名稱", "樓層", "Level");
             if (!string.IsNullOrWhiteSpace(value)) return value;
 
@@ -2784,22 +2883,24 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return;
             }
 
-            Level level = GetBaseLevelAtOrBelow(doc, point) ?? GetNearestLevel(doc, point);
+            Level level = SleeveGlLevel.Require(doc);
             if (level == null)
             {
                 return;
             }
 
-            double offset = point.Z - level.Elevation;
-            bool levelSet = SetElementId(sleeve, level.Id,
+            double offset = point.Z - level.ProjectElevation;
+            SetElementId(sleeve, level.Id,
                 new[]
                 {
                     BuiltInParameter.FAMILY_LEVEL_PARAM,
-                    BuiltInParameter.INSTANCE_REFERENCE_LEVEL_PARAM,
-                    BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM,
-                    BuiltInParameter.SCHEDULE_LEVEL_PARAM
+                    BuiltInParameter.INSTANCE_REFERENCE_LEVEL_PARAM
                 },
-                "樓層", "參考樓層", "Schedule Level", "Level", "Reference Level");
+                "樓層", "參考樓層", "Level", "Reference Level");
+
+            doc.Regenerate();
+            if (SleeveGlLevel.Actual(doc, sleeve)?.Id != level.Id)
+                throw new InvalidOperationException("套管族無法約束至指定 GL 樓層，本支變更已取消。");
 
             SetDouble(sleeve, offset,
                 new[] { BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM, BuiltInParameter.INSTANCE_ELEVATION_PARAM },
@@ -2808,7 +2909,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             // Tags read this family parameter, so keep it aligned with the level-relative offset.
             SetDouble(sleeve, offset, "立面高程", "Elevation");
             SetString(sleeve, level.Name, "套管樓層", "樓層名稱", "Level Name", "Reference Level Name", "參考樓層名稱", "所屬樓層名稱");
-            SetString(sleeve, levelSet ? "當層基準" : "當層高程", "套管高程模式", "Elevation Mode");
+            SetString(sleeve, "指定 GL 基準", "套管高程模式", "Elevation Mode");
         }
 
         private static bool SetElementId(FamilyInstance instance, ElementId value, BuiltInParameter[] builtIns, params string[] names)

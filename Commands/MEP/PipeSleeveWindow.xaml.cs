@@ -325,7 +325,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private void LoadDefaultSizeRows()
         {
             SleeveSizeRows.Clear();
-            int[] sizes = PipeSleeveNominalRules.Mapping.Keys.Concat((_settings.SizeMappings ?? new List<PipeSleeveSizeSetting>()).Select(x=>x.NominalDiameterMm)).Distinct().OrderBy(x=>x).ToArray();
+            int[] sizes = PipeSleeveNominalRules.GetSizes(_settings).ToArray();
 
             foreach (int size in sizes)
             {
@@ -347,6 +347,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
 
             int sleeveDiameterMm = GetNextSleeveDiameterMm(nominalDiameterMm);
+            if (sleeveDiameterMm <= 0) return null;
             SleeveSymbolChoice named = FindSleeveChoiceByDiameter(sleeveDiameterMm);
             if (named != null)
             {
@@ -439,9 +440,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 SaveSettings(false);
 
                 var symbolMap = new Dictionary<int, ElementId>();
-                foreach (PipeSleeveSizeRow row in SleeveSizeRows.Where(r => r.SymbolIdValue > 0))
+                foreach (PipeSleeveSizeRow row in SleeveSizeRows)
                 {
-                    symbolMap[row.NominalDiameterMm] = new ElementId(row.SymbolIdValue);
+                    symbolMap[row.NominalDiameterMm] = row.SymbolIdValue > 0 ? new ElementId(row.SymbolIdValue) : ElementId.InvalidElementId;
                 }
 
                 btnExecute.IsEnabled = false;
@@ -550,10 +551,30 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
         }
 
+        private void AddNominalSize_Click(object sender, RoutedEventArgs e)
+        {
+            if (!int.TryParse(txtNewNominalDn.Text, out int dn) || dn < 1 || dn > 10000)
+            { MessageBox.Show("DN 必須為 1 至 10000 的整數。", "管徑對應"); return; }
+            if (SleeveSizeRows.Any(r => r.NominalDiameterMm == dn))
+            { MessageBox.Show("此 DN 已存在。", "管徑對應"); return; }
+            int index = SleeveSizeRows.Count(r => r.NominalDiameterMm < dn);
+            var row = new PipeSleeveSizeRow { NominalDiameterMm=dn, NominalName=$"DN{dn}", SymbolIdValue=0 };
+            SleeveSizeRows.Insert(index,row); gridSleeveSizes.SelectedItem=row; gridSleeveSizes.ScrollIntoView(row);
+        }
+
+        private void RemoveNominalSize_Click(object sender, RoutedEventArgs e)
+        {
+            var row=gridSleeveSizes.SelectedItem as PipeSleeveSizeRow;
+            if(row==null) return;
+            if(MessageBox.Show($"移除 DN{row.NominalDiameterMm} 對應？不會刪除模型中的套管。", "管徑對應", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel)==MessageBoxResult.OK)
+                SleeveSizeRows.Remove(row);
+        }
+
         private PipeSleeveSettings BuildSettings()
         {
             var settings = new PipeSleeveSettings
             {
+                HasExplicitSizeList = true,
                 DefaultWallSleeveDisplayName = GetSelectedDisplayName(cmbWallSleeveFamily),
                 DefaultFloorSleeveDisplayName = GetSelectedDisplayName(cmbFloorSleeveFamily),
                 ClearanceMm = ReadMillimeterTextBox(txtClearance, "間隙距離"),
@@ -568,11 +589,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             foreach (PipeSleeveSizeRow row in SleeveSizeRows)
             {
                 SleeveSymbolChoice choice = SleeveSymbolChoices.FirstOrDefault(c => c.IdValue == row.SymbolIdValue);
-                if (choice == null) continue;
                 settings.SizeMappings.Add(new PipeSleeveSizeSetting
                 {
                     NominalDiameterMm = row.NominalDiameterMm,
-                    SleeveDisplayName = choice.DisplayName
+                    SleeveDisplayName = choice?.DisplayName ?? string.Empty
                 });
             }
 

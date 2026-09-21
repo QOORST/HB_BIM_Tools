@@ -165,6 +165,13 @@
                     </Border>
                     <StackPanel x:Name="advancedPanel" Grid.Row="1">
                     <Expander Header="進階尺寸對應" IsExpanded="False" Margin="0,0,0,14">
+                        <StackPanel>
+                        <WrapPanel Margin="0,8,0,0">
+                            <TextBlock Text="管徑 DN" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="txtNewNominalDn" Text="15" Width="90" VerticalContentAlignment="Center"/>
+                            <Button Content="＋" Width="36" Height="30" Margin="8,0,0,0" ToolTip="新增標稱管徑" Click="AddNominalSize_Click"/>
+                            <Button Content="−" Width="36" Height="30" Margin="8,0,0,0" ToolTip="移除選取的管徑對應" Click="RemoveNominalSize_Click"/>
+                        </WrapPanel>
                         <DataGrid x:Name="gridSleeveSizes"
                                   ItemsSource="{Binding SleeveSizeRows}"
                                   AutoGenerateColumns="False"
@@ -188,6 +195,7 @@
                                 </DataGridTemplateColumn>
                             </DataGrid.Columns>
                         </DataGrid>
+                        </StackPanel>
                     </Expander>
 
                     </StackPanel>

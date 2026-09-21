@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -18,6 +19,28 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         private AutoJoinSettings _settings;
         private ExecutionAction _action;
         private bool _busy;
+        private bool _closeRequested;
+        private bool _subscribed;
+        private bool _released;
+
+        // Revit may return different managed wrappers for the same open document.
+        internal static bool SameDocument(Document expected, Document actual) =>
+            expected != null && actual != null && expected.IsValidObject && actual.IsValidObject && expected.Equals(actual);
+
+        internal static string DiagnosticPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "HB_BIM", "AutoJoin", "startup.log");
+
+        internal static void Log(string text)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(DiagnosticPath));
+                if (File.Exists(DiagnosticPath) && new FileInfo(DiagnosticPath).Length > 1024 * 1024)
+                    File.Move(DiagnosticPath, DiagnosticPath + "." + DateTime.Now.ToString("yyyyMMddHHmmssfff"));
+                File.AppendAllText(DiagnosticPath, DateTime.Now.ToString("O") + " " + text + Environment.NewLine);
+            }
+            catch { /* Diagnostics must not interrupt Revit. */ }
+        }
 
         private sealed class Owner : System.Windows.Forms.IWin32Window
         {
@@ -37,22 +60,57 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             _form.PickRequested += () => Queue("pick");
             _form.FormClosed += (_, __) =>
             {
-                _app.Idling -= CheckDocument;
-                _event.Dispose();
-                if (_current == this) _current = null;
+                // WinForms callbacks are outside Revit API context. Defer API cleanup.
+                _closeRequested = true;
+                Log("Window closed; API cleanup queued.");
             };
-            _app.Idling += CheckDocument;
-            _form.Show(new Owner(app.MainWindowHandle));
+        }
+
+        private void ReleaseInApiContext()
+        {
+            if (_released) return;
+            if (_subscribed)
+            {
+                _app.Idling -= CheckDocument;
+                _subscribed = false;
+            }
+            _event.Dispose();
+            _released = true;
+            _request = null;
+            if (_current == this) _current = null;
+            Log("API cleanup completed.");
         }
 
         internal static void Show(UIApplication app)
         {
-            if (_current != null && _current._document != app.ActiveUIDocument.Document)
+            if (_current != null && (_current._closeRequested || _current._form.IsDisposed))
+                _current.ReleaseInApiContext();
+            if (_current != null && !SameDocument(_current._document, app.ActiveUIDocument?.Document))
             {
                 if (_current._busy) return;
-                _current._form.Close();
+                Log("Close: active document changed before reopening.");
+                var previous = _current;
+                previous._form.Close();
+                previous.ReleaseInApiContext();
             }
-            if (_current == null) _current = new AutoJoinModelessController(app);
+            if (_current == null)
+            {
+                var controller = new AutoJoinModelessController(app);
+                _current = controller;
+                try
+                {
+                    controller._form.Show(new Owner(app.MainWindowHandle));
+                    app.Idling += controller.CheckDocument;
+                    controller._subscribed = true;
+                    Log("Opened: Revit " + app.Application.VersionNumber);
+                }
+                catch
+                {
+                    controller._form.Dispose();
+                    controller.ReleaseInApiContext();
+                    throw;
+                }
+            }
             if (_current._form.WindowState == System.Windows.Forms.FormWindowState.Minimized)
                 _current._form.WindowState = System.Windows.Forms.FormWindowState.Normal;
             _current._form.BringToFront();
@@ -61,13 +119,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         internal static void Shutdown()
         {
             if (_current == null) return;
-            _current._form.SetBusy(false);
-            _current._form.Close();
+            var controller = _current;
+            controller._form.SetBusy(false);
+            controller._form.Close();
+            controller.ReleaseInApiContext();
         }
 
         private void Queue(string request)
         {
-            if (_busy) return;
+            if (_busy || _closeRequested || _released) return;
             try
             {
                 _settings = _form.BuildSettings();
@@ -90,19 +150,42 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
         private void CheckDocument(object sender, IdlingEventArgs e)
         {
-            if (!_busy && (!_document.IsValidObject || _app.ActiveUIDocument?.Document != _document))
-                _form.Close(); // 文件切換即關閉；重新開啟會使用新文件，絕不沿用舊選取。
+            try
+            {
+                if (_closeRequested || _form.IsDisposed)
+                {
+                    ReleaseInApiContext();
+                    return;
+                }
+                if (_busy) return;
+                if (!SameDocument(_document, _app.ActiveUIDocument?.Document))
+                {
+                    Log("Close: source document closed or active document changed (Idling).");
+                    _form.Close();
+                    ReleaseInApiContext();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Document check failed: " + ex);
+                if (!_form.IsDisposed) _form.SetStatus("模型檢查未完成，請關閉工具後重新開啟。");
+            }
         }
 
         public void Execute(UIApplication app)
         {
+            if (_closeRequested || _released || _form.IsDisposed)
+            {
+                ReleaseInApiContext();
+                return;
+            }
             var request = _request;
             _request = null;
             try
             {
                 if (request == null) return;
                 var uiDoc = app.ActiveUIDocument;
-                if (!_document.IsValidObject || uiDoc?.Document != _document)
+                if (!SameDocument(_document, uiDoc?.Document))
                     throw new InvalidOperationException("模型已切換或關閉，未執行。請在目前模型重新開啟自動接合。");
                 if (!LicenseManager.Instance.HasFeatureAccess("AutoJoin"))
                     throw new InvalidOperationException("目前授權不包含自動接合功能。");
@@ -128,13 +211,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             }
             catch (Exception ex)
             {
+                Log("Execute failed: " + ex);
                 _form.SetStatus("操作未完成：" + ex.Message);
             }
             finally
             {
                 _busy = false;
-                _form.SetBusy(false);
-                if (!_form.Visible) _form.Show(new Owner(app.MainWindowHandle));
+                if (!_closeRequested && !_form.IsDisposed)
+                {
+                    _form.SetBusy(false);
+                    if (!_form.Visible) _form.Show(new Owner(app.MainWindowHandle));
+                }
             }
         }
 

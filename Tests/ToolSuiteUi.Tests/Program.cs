@@ -68,8 +68,10 @@ internal static class Program {
                 new() { Id="2",Name="測試套管: 125A",Family="測試套管",Type="125A" }
             },savedSleeves);
             ShowForPreview(sleeves);
-            Check(sleeves.SizeRows[0].SymbolId=="1","saved 2024 mapping overrides default");
-            Check(sleeves.SizeRows[1].SymbolId=="2","nominal default matches exact 125A type");
+            sleeves.Size = new Size(1800,1000);
+            Application.DoEvents();
+            Check(sleeves.SizeRows.Single(r=>r.DN==50).SymbolId=="1","saved 2024 mapping overrides default");
+            Check(sleeves.SizeRows.Single(r=>r.DN==100).SymbolId=="2","nominal default matches exact 125A type");
             Check(sleeves.WallSymbolId=="1","2024 common family restored by name");
             Check(YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveNominalRules.Mapping[40]==50 && YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveNominalRules.Mapping[65]==80,"company grouped nominal defaults");
             Check(!YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveNominalRules.Matches("1000A",100),"nominal type match excludes partial sizes");
@@ -89,6 +91,7 @@ internal static class Program {
             Render(sleeves,Path.Combine(output,"pipe-sleeve-beam-reference-compact.png"));
             sleeveTabs.SelectedIndex=0; sleeves.Size=sleeves.MinimumSize;
             Render(sleeves,Path.Combine(output,"pipe-sleeve-compact.png"));
+            Check(sleeveTabs.TabPages.Count==3,"compact sleeve window retains beam reference as a tab");
             Check(Descendants(sleeves).OfType<Button>().Where(b=>b.Visible).All(b=>b.Parent.ClientRectangle.Contains(b.Bounds)),"sleeve footer buttons fit compact window");
             sleeves.Close();
         }

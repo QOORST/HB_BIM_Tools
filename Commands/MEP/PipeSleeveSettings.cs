@@ -15,6 +15,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         public bool UseDiameterMap { get; set; } = true;
         public bool AutoNumber { get; set; } = true;
         public bool UpdateExisting { get; set; } = false;
+        public bool HasExplicitSizeList { get; set; } = false;
         public List<PipeSleeveSizeSetting> SizeMappings { get; set; } = new List<PipeSleeveSizeSetting>();
     }
 
@@ -59,6 +60,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         public static void Save(PipeSleeveSettings settings)
         {
+            string error = PipeSleeveNominalRules.Validate((settings?.SizeMappings ?? new List<PipeSleeveSizeSetting>()).ConvertAll(x => x.NominalDiameterMm));
+            if (error != null) throw new InvalidOperationException(error);
             string directory = Path.GetDirectoryName(DefaultPath);
             if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
             {

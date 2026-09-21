@@ -143,6 +143,9 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         private readonly WinForms.ComboBox _hostFilter = new WinForms.ComboBox();
         private readonly WinForms.ComboBox _statusFilter = new WinForms.ComboBox();
         private readonly WinForms.TextBox _searchBox = new WinForms.TextBox();
+        private readonly WinForms.CheckBox _actionOnly = new WinForms.CheckBox { Text = "僅顯示待處理", AutoSize = true };
+        private readonly WinForms.CheckBox _actionFirst = new WinForms.CheckBox { Text = "待處理優先", AutoSize = true, Checked = true };
+        private bool _loadingFilters;
         private readonly WinForms.Label _summary = new WinForms.Label();
         private readonly WinForms.Label _detail = new WinForms.Label();
         private readonly WinForms.Label _scopeNote = new WinForms.Label();
@@ -181,7 +184,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Percent, 100));
-            root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Absolute, 120));
+            root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Absolute, 170));
             Controls.Add(root);
 
             var title = new WinForms.Label
@@ -193,7 +196,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             };
             var hint = new WinForms.Label
             {
-                Text = "只列出目前視圖範圍內、自動生成且含來源管線 ID 的套管；雙擊清單定位，選取多筆可批次更新或刪除。",
+                Text = "目前視圖範圍：管線來源套管與筏基 CAD 定位構件。",
                 AutoSize = true,
                 ForeColor = System.Drawing.Color.DimGray,
                 Margin = new WinForms.Padding(0, 0, 0, 10)
@@ -241,6 +244,13 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _searchBox.TextChanged += (s, e) => ApplyFilters();
             filters.Controls.Add(_searchBox, 1, 1);
             filters.SetColumnSpan(_searchBox, 7);
+            var quickFilters = new WinForms.FlowLayoutPanel { Dock = WinForms.DockStyle.Top, AutoSize = true, WrapContents = true };
+            quickFilters.Controls.Add(_actionOnly);
+            quickFilters.Controls.Add(_actionFirst);
+            _actionOnly.CheckedChanged += (s, e) => ApplyFilters();
+            _actionFirst.CheckedChanged += (s, e) => ApplyFilters();
+            filters.Controls.Add(quickFilters, 0, 2);
+            filters.SetColumnSpan(quickFilters, 8);
 
             ConfigureGrid();
             root.Controls.Add(_grid, 0, 2);
@@ -255,15 +265,16 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             bottom.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 100));
             bottom.RowCount = 2;
             bottom.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Percent, 100));
-            bottom.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Absolute, 52));
+            bottom.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             root.Controls.Add(bottom, 0, 3);
 
             var infoStack = new WinForms.FlowLayoutPanel
             {
-                AutoSize = true,
+                AutoSize = false,
+                AutoScroll = true,
+                Dock = WinForms.DockStyle.Fill,
                 FlowDirection = WinForms.FlowDirection.TopDown,
-                WrapContents = false,
-                Anchor = WinForms.AnchorStyles.Left
+                WrapContents = false
             };
             _summary.AutoSize = true;
             _summary.Font = new Font(Font.FontFamily, 10F, FontStyle.Bold);
@@ -294,7 +305,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 button.Enabled = false;
                 buttons.Controls.Add(button);
             }
-            buttons.Controls.Add(MakeButton("整理", 92, (s, e) => Raise(PipeSleeveManagerAction.Reload)));
+            buttons.Controls.Add(MakeButton("重新檢查", 110, (s, e) => Raise(PipeSleeveManagerAction.Reload)));
             root.SizeChanged += (s, e) => {
                 _scopeNote.MaximumSize = new Size(Math.Max(100, root.ClientSize.Width - 40), 0);
                 _detail.MaximumSize = new Size(Math.Max(100, root.ClientSize.Width - 40), 0);
@@ -359,7 +370,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _grid.BackgroundColor = System.Drawing.Color.White;
             _grid.GridColor = System.Drawing.Color.Gainsboro;
             _grid.EnableHeadersVisualStyles = false;
-            _grid.ColumnHeadersHeight = 34;
+            _grid.ColumnHeadersHeightSizeMode = WinForms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            _grid.ScrollBars = WinForms.ScrollBars.Both;
             _grid.RowTemplate.Height = 31;
             _grid.AutoSizeRowsMode = WinForms.DataGridViewAutoSizeRowsMode.DisplayedCellsExceptHeaders;
             _grid.DefaultCellStyle.WrapMode = WinForms.DataGridViewTriState.False;
@@ -396,16 +408,16 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             if (propertyName == "Status")
             {
                 string status = Convert.ToString(e.Value);
-                if (status == "正常")
+                if (status == "正常" || status == "偏心可容納")
                 {
                     e.CellStyle.ForeColor = System.Drawing.Color.SeaGreen;
                 }
-                else if (status == "需更新" || status == "提醒")
+                else if (status == "需更新" || status == "提醒" || status == "待確認")
                 {
                     e.CellStyle.ForeColor = System.Drawing.Color.DarkOrange;
                     e.CellStyle.Font = new Font(_grid.Font, FontStyle.Bold);
                 }
-                else if (status == "來源遺失" || status == "需檢查" || status == "需結構確認")
+                else if (status == "來源遺失" || status == "需檢查" || status == "需結構確認" || status == "需處理")
                 {
                     e.CellStyle.ForeColor = System.Drawing.Color.Firebrick;
                     e.CellStyle.Font = new Font(_grid.Font, FontStyle.Bold);
@@ -455,7 +467,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
 
             PipeSleeveManagerRow row = selected[0];
             string multi = selected.Count > 1 ? $"，已選 {selected.Count} 筆" : string.Empty;
-            _detail.Text = $"長度 {Blank(row.LengthMm)} mm，立面 {Blank(row.ElevationMm)}，類型 {row.TypeName}{multi}";
+            _detail.Text = $"長度 {Blank(row.LengthMm)} mm，立面 {Blank(row.ElevationMm)}，類型 {row.TypeName}{multi}\n{row.CheckDetails}";
         }
 
         private static string Blank(string value)
@@ -475,8 +487,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 DataPropertyName = property,
                 HeaderText = header,
                 Width = width,
-                MinimumWidth = Math.Min(width, 90),
-                AutoSizeMode = fill ? WinForms.DataGridViewAutoSizeColumnMode.Fill : WinForms.DataGridViewAutoSizeColumnMode.None,
+                MinimumWidth = fill ? 220 : 60,
+                AutoSizeMode = fill ? WinForms.DataGridViewAutoSizeColumnMode.Fill : WinForms.DataGridViewAutoSizeColumnMode.AllCells,
                 SortMode = WinForms.DataGridViewColumnSortMode.Automatic
             };
             if (wrap)
@@ -488,12 +500,16 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
 
         internal void ReloadRowsInternal()
         {
+            _loadingFilters = true;
+            try {
             _allRows = CollectSleeves(_doc, _doc.ActiveView);
-            _scopeNote.Text = BuildScopeNote(_doc.ActiveView, _allRows.Count);
+            _scopeNote.Text = BuildScopeNote(_doc.ActiveView, _allRows.Count) +
+                "　檢查時間：" + DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture) + "（非即時監控）";
             LoadFilter(_levelFilter, _allRows.Select(r => r.Level));
             LoadFilter(_systemFilter, _allRows.Select(r => r.SystemName));
             LoadFilter(_hostFilter, _allRows.Select(r => r.HostType));
             LoadFilter(_statusFilter, _allRows.Select(r => r.Status));
+            } finally { _loadingFilters = false; }
             ApplyFilters();
         }
 
@@ -512,6 +528,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
 
         private void ApplyFilters()
         {
+            if (_loadingFilters) return;
+            var selectedIds = new HashSet<long>(GetSelectedRows().Select(r => r.ElementIdValue));
             string level = SelectedFilter(_levelFilter);
             string system = SelectedFilter(_systemFilter);
             string host = SelectedFilter(_hostFilter);
@@ -519,17 +537,27 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             string search = _searchBox.Text?.Trim() ?? string.Empty;
 
             IEnumerable<PipeSleeveManagerRow> rows = _allRows;
+            if (_actionOnly.Checked) rows = rows.Where(NeedsAttention);
             if (!string.IsNullOrEmpty(level)) rows = rows.Where(r => r.Level == level);
             if (!string.IsNullOrEmpty(system)) rows = rows.Where(r => r.SystemName == system);
             if (!string.IsNullOrEmpty(host)) rows = rows.Where(r => r.HostType == host);
             if (!string.IsNullOrEmpty(status)) rows = rows.Where(r => r.Status == status);
             if (!string.IsNullOrEmpty(search)) rows = rows.Where(r => r.SearchText.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0);
 
+            if (_actionFirst.Checked) rows = rows.OrderByDescending(NeedsAttention);
             List<PipeSleeveManagerRow> visible = rows.ToList();
             _grid.DataSource = visible;
-            int needAction = visible.Count(r => r.Status != "正常");
-            _summary.Text = $"{visible.Count} / {_allRows.Count} 個套管，需處理 {needAction} 個";
+            _grid.ClearSelection();
+            foreach (WinForms.DataGridViewRow gridRow in _grid.Rows)
+                if (gridRow.DataBoundItem is PipeSleeveManagerRow item && selectedIds.Contains(item.ElementIdValue)) gridRow.Selected = true;
+            int needAction = visible.Count(NeedsAttention);
+            _summary.Text = $"顯示 {visible.Count} / {_allRows.Count} 個｜待處理 {needAction} 個（全部 {_allRows.Count(NeedsAttention)} 個）";
             UpdateDetail();
+        }
+
+        private static bool NeedsAttention(PipeSleeveManagerRow row)
+        {
+            return row.Status != "正常" && row.Status != "偏心可容納";
         }
 
         private static string SelectedFilter(WinForms.ComboBox combo)
@@ -593,6 +621,11 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 return;
             }
 
+            if (selected.Any(row => RaftCadRecord.IsManaged(_doc.GetElement(RevitApiCompatibility.CreateElementId(row.ElementIdValue)))))
+            {
+                WinForms.MessageBox.Show(this, "CAD 定位構件不使用管線更新。請先取消選取 CAD 定位列；其位置與高程需人工確認調整。", "套管管理");
+                return;
+            }
             List<long> sourceIds = selected
                 .Select(row => row.SourcePipeIdValue)
                 .Where(id => id > 0)
@@ -610,39 +643,140 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 return;
             }
 
-            List<ElementId> staleSleeveIds = _allRows
-                .Where(row => sourceIds.Contains(row.SourcePipeIdValue))
+            List<ElementId> staleSleeveIds = selected
                 .Select(row => RevitApiCompatibility.CreateElementId(row.ElementIdValue))
                 .Where(id => _doc.GetElement(id) != null)
                 .Distinct(new ElementIdComparer())
                 .ToList();
 
+            var annotationChecks = new List<Func<bool>>();
+            try
+            {
+                var protectedIds = new HashSet<long>(staleSleeveIds.Select(id => id.GetIdValue()));
+                var annotations = new List<Element>();
+                foreach (Dimension dimension in new FilteredElementCollector(_doc).OfClass(typeof(Dimension)))
+                {
+                    ReferenceArray references = dimension.References;
+                    if (references != null && references.Cast<Reference>().Any(reference =>
+                        reference.ElementId != null && protectedIds.Contains(reference.ElementId.GetIdValue())))
+                        annotations.Add(dimension);
+                }
+                foreach (IndependentTag tag in new FilteredElementCollector(_doc).OfClass(typeof(IndependentTag)))
+                    if (tag.GetTaggedLocalElementIds().Any(id => protectedIds.Contains(id.GetIdValue())))
+                        annotations.Add(tag);
+                foreach (var annotation in annotations)
+                {
+                    var id = annotation.Id;
+                    if (annotation is Dimension dimension)
+                    {
+                        var references = dimension.References.Cast<Reference>().Select(reference => reference.ConvertToStableRepresentation(_doc)).ToArray();
+                        annotationChecks.Add(() => _doc.GetElement(id) is Dimension current && current.AreReferencesAvailable &&
+                            current.References.Cast<Reference>().Select(reference => reference.ConvertToStableRepresentation(_doc)).SequenceEqual(references));
+                    }
+                    else if (annotation is IndependentTag tag)
+                    {
+                        var targets = new HashSet<long>(tag.GetTaggedLocalElementIds().Select(target => target.GetIdValue()));
+                        annotationChecks.Add(() => _doc.GetElement(id) is IndependentTag current && !current.IsOrphaned &&
+                            targets.SetEquals(current.GetTaggedLocalElementIds().Select(target => target.GetIdValue())));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                WinForms.MessageBox.Show(this, "無法完成既有標註檢查，已停止更新，模型未變更。\n" + ex.Message,
+                    "套管更新檢查", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
+                return;
+            }
+
+            string updateNotice = $"已選取 {selected.Count} 支套管，涉及 {pipes.Count} 條有效來源管線。\n" +
+                $"僅更新選取的 {staleSleeveIds.Count} 支套管，保留原構件，不新增或刪除其他套管。\n\n" +
+                "配對不明、需要換型或既有標註參考失效時，會回復本次更新。偏心可容納不代表必須更新。\n\n確定繼續？";
+            if (WinForms.MessageBox.Show(this, updateNotice, "確認套管更新範圍",
+                WinForms.MessageBoxButtons.OKCancel, WinForms.MessageBoxIcon.Warning,
+                WinForms.MessageBoxDefaultButton.Button2) != WinForms.DialogResult.OK) return;
+            PipeSleeveOptions updateOptions = BuildUpdateOptions();
             PipeSleeveResult result;
+            try
+            {
+            using (TransactionGroup group = new TransactionGroup(_doc, "保留套管與標註更新"))
+            {
+            group.Start();
             using (Transaction tx = new Transaction(_doc, "更新選取套管"))
             {
                 tx.Start();
-                if (staleSleeveIds.Count > 0)
+                result = PipeSleeveService.UpdateSelectedInPlace(_doc, pipes,
+                    staleSleeveIds.Select(id => _doc.GetElement(id)).Cast<FamilyInstance>().ToList(), updateOptions);
+                // Replacement must be atomic: unresolved mappings must not remove old sleeves.
+                if (result.FailedCount > 0 || result.CandidateCount == 0 ||
+                    result.CreatedCount + result.UpdatedCount != result.CandidateCount)
                 {
-                    _doc.Delete(staleSleeveIds);
+                    tx.RollBack();
+                    WinForms.MessageBox.Show(this, "更新未完成，已還原原有套管。請確認建立套管的尺寸對應與模型範圍設定。\n\n以下為未提交的處理結果：\n" + result.ToTaskDialogText(), "套管更新", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
+                    return;
                 }
-
-                result = PipeSleeveService.CreateSleeves(_doc, pipes, new PipeSleeveOptions
+                if (tx.Commit() != TransactionStatus.Committed)
                 {
-                    ClearanceMm = 50.0,
-                    IncludeCurrentModel = true,
-                    IncludeLinks = true,
-                    ExcludeAdditionElements = true,
-                    UseDiameterSymbolMap = true,
-                    AutoNumber = false,
-                    SkipExisting = false,
-                    LimitToActiveView = true,
-                    ActiveViewId = _doc.ActiveView != null ? _doc.ActiveView.Id : ElementId.InvalidElementId
-                });
-                tx.Commit();
+                    WinForms.MessageBox.Show(this, "Revit 未成功提交套管更新，請檢查模型警告。", "套管更新", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
+                    return;
+                }
             }
 
+            if (annotationChecks.Any(check => !check()))
+                throw new InvalidOperationException("既有尺寸或標籤參考失效，需確認後修復。");
+            if (group.Assimilate() != TransactionStatus.Committed)
+                throw new InvalidOperationException("Revit 未完成更新交易群組。");
+            }
+            }
+            catch (Exception ex)
+            {
+                WinForms.MessageBox.Show(this, "更新未完成，已回復本次變更。\n" + ex.Message,
+                    "套管更新", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
+                ReloadRowsInternal();
+                return;
+            }
             ReloadRowsInternal();
-            WinForms.MessageBox.Show(this, "已清理舊套管: " + staleSleeveIds.Count.ToString(CultureInfo.InvariantCulture) + " 個\n" + result.ToTaskDialogText(), "套管更新", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+            WinForms.MessageBox.Show(this, "已保留原套管更新，既有標註參考檢查通過。\n" + result.ToTaskDialogText(), "套管更新", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+        }
+
+        private PipeSleeveOptions BuildUpdateOptions()
+        {
+            PipeSleeveSettings saved = PipeSleeveSettingsStore.Load();
+            var symbols = new FilteredElementCollector(_doc).OfClass(typeof(FamilySymbol))
+                .Cast<FamilySymbol>()
+                .Where(s => IsElementOfCategory(s, BuiltInCategory.OST_GenericModel) ||
+                    IsElementOfCategory(s, BuiltInCategory.OST_PipeAccessory))
+                .ToList();
+            ElementId Resolve(string name)
+            {
+                if (string.IsNullOrWhiteSpace(name)) return ElementId.InvalidElementId;
+                var matches = symbols.Where(s => string.Equals(s.FamilyName + ": " + s.Name,
+                    name, StringComparison.OrdinalIgnoreCase)).ToList();
+                return matches.Count == 1 ? matches[0].Id : ElementId.InvalidElementId;
+            }
+
+            var map = new Dictionary<int, ElementId>();
+            foreach (PipeSleeveSizeSetting entry in saved.SizeMappings ?? new List<PipeSleeveSizeSetting>())
+            {
+                ElementId id = Resolve(entry.SleeveDisplayName);
+                map[entry.NominalDiameterMm] = id;
+            }
+            return new PipeSleeveOptions
+            {
+                PreserveNominalTypeDimensions = true,
+                ClearanceMm = double.IsNaN(saved.ClearanceMm) || double.IsInfinity(saved.ClearanceMm)
+                    ? 50.0 : Math.Max(0, Math.Min(1000, saved.ClearanceMm)),
+                IncludeCurrentModel = saved.IncludeCurrentModel,
+                IncludeLinks = saved.IncludeLinks,
+                ExcludeAdditionElements = saved.ExcludeAdditionElements,
+                UseDiameterSymbolMap = saved.UseDiameterMap,
+                SleeveSymbolByDiameterMm = map,
+                DefaultWallSleeveSymbolId = Resolve(saved.DefaultWallSleeveDisplayName),
+                DefaultFloorSleeveSymbolId = Resolve(saved.DefaultFloorSleeveDisplayName),
+                AutoNumber = false,
+                SkipExisting = false,
+                LimitToActiveView = true,
+                ActiveViewId = _doc.ActiveView != null ? _doc.ActiveView.Id : ElementId.InvalidElementId
+            };
         }
 
         internal void OrganizeSleevesInternal()
@@ -757,6 +891,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         }
         private static bool IsSleeveInstance(FamilyInstance instance)
         {
+            if (instance != null && RaftCadRecord.IsManaged(instance)) return true;
             if (instance?.Category == null) return false;
             long categoryId = instance.Category.Id.GetIdValue();
             bool categoryMatches = categoryId == (long)BuiltInCategory.OST_GenericModel || categoryId == (long)BuiltInCategory.OST_PipeAccessory;
@@ -803,6 +938,12 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         }
 
         private static string GetSleeveLevelName(Document doc, FamilyInstance sleeve)
+        {
+            var actual = SleeveGlLevel.Actual(doc, sleeve);
+            return actual?.Name ?? "約束樓層未確認";
+        }
+
+        private static string GetLegacySleeveLevelName(Document doc, FamilyInstance sleeve)
         {
             string value = ReadString(sleeve, "套管樓層", "樓層名稱", "Level Name", "Reference Level Name", "參考樓層名稱", "所屬樓層名稱", "樓層", "Level");
             if (!string.IsNullOrWhiteSpace(value)) return value;
@@ -935,23 +1076,44 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             public string ElevationMm { get; set; }
             public string Status { get; set; }
             public string CheckInfo { get; set; }
+            public string CheckDetails { get; set; }
             public string TypeName { get; set; }
-            public string SearchText => string.Join(" ", ElementId, Mark, Level, SystemName, HostType, NominalDiameter, Status, CheckInfo, TypeName);
+            public string SearchText => string.Join(" ", ElementId, Mark, Level, SystemName, HostType, NominalDiameter, Status, CheckInfo, CheckDetails, TypeName);
 
             public static PipeSleeveManagerRow From(Document doc, FamilyInstance sleeve)
             {
                 string sourceIdText = ReadString(sleeve, "來源管線Id", "Pipe Id", "Source Pipe Id");
                 long sourceId = ReadLong(sleeve, "來源管線Id", "Pipe Id", "Source Pipe Id");
                 Element source = sourceId > 0 ? doc.GetElement(RevitApiCompatibility.CreateElementId(sourceId)) : null;
-                string status = GetStatus(sleeve, source);
-                string checkInfo = ReadString(sleeve, "套管檢核資訊", "Sleeve Check", "Check Info", "穿梁檢核", "Beam Opening Check", "結構檢核", "Structural Check");
-                if (status == "正常")
+                string status = GetStatus(sleeve, source, out string positionInfo, out string brief);
+                if (RaftCadRecord.IsManaged(sleeve))
                 {
-                    status = GetBeamRiskStatus(checkInfo);
+                    status = RaftCadRecord.Inspect(sleeve, out positionInfo);
+                    brief = "CAD 定位：" + status;
                 }
-                if (status == "來源遺失")
+                string checkInfo = ReadString(sleeve, "套管檢核資訊", "Sleeve Check", "Check Info", "穿梁檢核", "Beam Opening Check", "結構檢核", "Structural Check");
+                if (status == "正常" || status == "偏心可容納")
+                {
+                    string risk = GetBeamRiskStatus(checkInfo);
+                    if (risk != "正常") status = risk;
+                }
+                if (status == "來源遺失" && !RaftCadRecord.IsManaged(sleeve))
                 {
                     checkInfo = GetSourceMissingReason(sourceIdText, sourceId);
+                }
+                if (!string.IsNullOrWhiteSpace(positionInfo))
+                    checkInfo = positionInfo + (string.IsNullOrWhiteSpace(checkInfo) ? string.Empty : "；" + checkInfo);
+                if (!RaftCadRecord.IsManaged(sleeve))
+                {
+                    var gl = SleeveGlLevel.Read(doc);
+                    var actual = SleeveGlLevel.Actual(doc, sleeve);
+                    if (gl == null || actual?.Id != gl.Id)
+                    {
+                        string reason = gl == null ? "尚未指定 GL 約束樓層" : "約束樓層不符 GL：" + (actual?.Name ?? "未確認") + " → " + gl.Name;
+                        brief = reason;
+                        checkInfo = reason + "；" + checkInfo;
+                        if (status == "正常" || status == "偏心可容納" || status == "待確認") status = gl == null ? "待確認" : "需更新";
+                    }
                 }
 
                 double length = ReadDoubleMm(sleeve, "套管長度", "長度", "Length", "Sleeve Length", "深度", "Depth");
@@ -969,7 +1131,9 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     LengthMm = length > 0 ? length.ToString("0.#", CultureInfo.InvariantCulture) : string.Empty,
                     ElevationMm = Math.Abs(elevation) > 0.0001 ? elevation.ToString("0.#", CultureInfo.InvariantCulture) : string.Empty,
                     Status = status,
-                    CheckInfo = checkInfo,
+                    CheckInfo = status == "需結構確認" || status == "提醒" ? status :
+                        !string.IsNullOrWhiteSpace(brief) ? brief : status,
+                    CheckDetails = checkInfo,
                     TypeName = (sleeve.Symbol?.FamilyName ?? string.Empty) + ": " + (sleeve.Symbol?.Name ?? string.Empty)
                 };
             }
@@ -1000,8 +1164,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 if (!string.IsNullOrWhiteSpace(value)) return value;
                 return ReadString(sleeve, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS, "備註", "Comments");
             }
-            private static string GetStatus(FamilyInstance sleeve, Element source)
+            private static string GetStatus(FamilyInstance sleeve, Element source, out string positionInfo, out string brief)
             {
+                brief = string.Empty;
+                positionInfo = string.Empty;
                 if (source == null) return "來源遺失";
                 LocationPoint sleevePoint = sleeve.Location as LocationPoint;
                 LocationCurve sourceCurve = source.Location as LocationCurve;
@@ -1009,15 +1175,96 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
 
                 try
                 {
-                    IntersectionResult projected = sourceCurve.Curve.Project(sleevePoint.Point);
+                    if (source is Pipe pipe)
+                        return GetRoundPipeStatus(sleeve, pipe, out positionInfo, out brief);
+                    Curve curve = sourceCurve.Curve;
+                    IntersectionResult projected = curve.Project(sleevePoint.Point);
                     if (projected == null) return "需檢查";
-                    double distanceMm = projected.Distance * 304.8;
-                    return distanceMm > 100.0 ? "需更新" : "正常";
+                    XYZ nearest = projected.XYZPoint;
+                    // Project may return a point on the unbounded extension of the curve.
+                    if (curve.IsBound && (projected.Parameter < curve.GetEndParameter(0) ||
+                        projected.Parameter > curve.GetEndParameter(1)))
+                    {
+                        XYZ start = curve.GetEndPoint(0);
+                        XYZ end = curve.GetEndPoint(1);
+                        nearest = start.DistanceTo(sleevePoint.Point) <= end.DistanceTo(sleevePoint.Point) ? start : end;
+                    }
+                    double distanceMm = nearest.DistanceTo(sleevePoint.Point) * 304.8;
+                    if (distanceMm > 1.0)
+                    {
+                        positionInfo = "套管定位點偏離來源管段 " + distanceMm.ToString("0.##", CultureInfo.InvariantCulture) + " mm（容差 1 mm）";
+                        return "需更新";
+                    }
+                    return "正常";
                 }
                 catch
                 {
                     return "需檢查";
                 }
+            }
+
+            private static string GetRoundPipeStatus(FamilyInstance sleeve, Pipe pipe, out string info, out string brief)
+            {
+                brief = "尺寸或接點資料待確認";
+                info = "圓管淨空待確認：需明確內徑、兩端圓形接點及直線來源管段。";
+                var line = (pipe.Location as LocationCurve)?.Curve as Line;
+                var ports = sleeve.MEPModel?.ConnectorManager?.Connectors.Cast<Connector>()
+                    .Where(c => c.ConnectorType == ConnectorType.End).ToList();
+                if (line == null || ports == null || ports.Count != 2 ||
+                    ports.Any(c => c.Shape != ConnectorProfileType.Round)) return "待確認";
+                XYZ axis = ports[1].Origin - ports[0].Origin;
+                if (axis.GetLength() < 1e-6) return "待確認";
+                if (Math.Abs(axis.Normalize().DotProduct(line.Direction)) < 0.999999)
+                {
+                    info = "管線與套管不同向，斜穿淨空需人工確認。";
+                    brief = "斜穿，待確認";
+                    return "待確認";
+                }
+                if (InsulationLiningBase.GetInsulationIds(pipe.Document, pipe.Id).Count > 0)
+                {
+                    info = "來源管線有保溫，需確認含保溫外徑與封堵間隙。";
+                    brief = "有保溫，待確認";
+                    return "待確認";
+                }
+                // Nominal sizes and connector radii do not establish the clear bore.
+                double inner = ReadDoubleMm(sleeve, "有效內徑", "套管內徑", "內徑", "Clear Inside Diameter", "Inside Diameter", "Inner Diameter");
+                if (inner <= 0) inner = ReadDoubleMm(sleeve.Symbol, "有效內徑", "套管內徑", "內徑", "Clear Inside Diameter", "Inside Diameter", "Inner Diameter");
+                bool derivedInner = false;
+                if (inner <= 0)
+                {
+                    double sleeveOuter = ReadDoubleMm(sleeve, "管外直徑", "Outer Diameter", "Outside Diameter");
+                    if (sleeveOuter <= 0) sleeveOuter = ReadDoubleMm(sleeve.Symbol, "管外直徑", "Outer Diameter", "Outside Diameter");
+                    double wall = ReadDoubleMm(sleeve, "厚度", "壁厚", "Wall Thickness");
+                    if (wall <= 0) wall = ReadDoubleMm(sleeve.Symbol, "厚度", "壁厚", "Wall Thickness");
+                    // Wall thickness is radial, so both sides reduce the clear diameter.
+                    if (sleeveOuter > 0 && wall > 0 && sleeveOuter > 2 * wall)
+                    {
+                        inner = sleeveOuter - 2 * wall;
+                        derivedInner = true;
+                    }
+                }
+                double outer = pipe.get_Parameter(BuiltInParameter.RBS_PIPE_OUTER_DIAMETER)?.AsDouble() * 304.8 ?? 0;
+                if (inner <= 0 || outer <= 0 || double.IsNaN(inner) || double.IsNaN(outer) ||
+                    double.IsInfinity(inner) || double.IsInfinity(outer)) return "待確認";
+                double offset = 0;
+                foreach (var port in ports)
+                {
+                    double along = (port.Origin - line.GetEndPoint(0)).DotProduct(line.Direction);
+                    if (along < -1.0 / 304.8 || along > line.Length + 1.0 / 304.8)
+                    {
+                        info = "來源管段未涵蓋套管兩端，請確認管線是否縮短或移離。";
+                        brief = "管段未涵蓋套管兩端";
+                        return "需處理";
+                    }
+                    offset = Math.Max(offset, line.Project(port.Origin).Distance * 304.8);
+                }
+                double remaining = (inner - outer) / 2.0 - offset;
+                info = $"有效內徑 {inner:0.##}／管外徑 {outer:0.##}／偏心 {offset:0.##}／最小淨空 {remaining:0.##} mm；未含防火、防水封堵要求。";
+                if (derivedInner) info += " 內徑依套管外徑減兩倍單側壁厚推算。";
+                brief = remaining < 0 ? $"淨空不足 {-remaining:0.##} mm" :
+                    $"偏心 {offset:0.##} mm，剩餘淨空 {remaining:0.##} mm";
+                if (remaining < 0) return "需處理";
+                return offset > 1.0 ? "偏心可容納" : "正常";
             }
         }
     }

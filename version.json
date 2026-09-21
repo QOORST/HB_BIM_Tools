@@ -1,8 +1,8 @@
 {
   "version": "2.5.17",
   "downloadUrl": "",
-  "releaseNotes": "Test_20260920_AutoJoinUi: 01a0c0c 加自動接合裁切修正。最小視窗 840×800，低螢幕與高 DPI 待驗收。四版本編譯、工具介面 141 項及自動標註 195 項離線檢查通過。Revit 實機與安裝驗證待完成；詳見 README.txt。",
-  "releaseDate": "2026-09-20T00:00:00+08:00",
+  "releaseNotes": "Test_20260921_AutoJoinClose: 修正自動接合關窗 API context 例外與清理流程，新增自訂 DN 對應、防呆及保守尺寸匹配。四版本編譯、9 項生命週期與 32 項尺寸設定離線檢查通過；安裝及 Revit 實機驗收未完成，詳見 README.txt。",
+  "releaseDate": "2026-09-21T00:00:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0"
 }
