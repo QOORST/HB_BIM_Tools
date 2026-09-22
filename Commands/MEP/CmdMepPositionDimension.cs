@@ -61,6 +61,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private sealed class Item
         {
             internal Reference Reference;
+            internal Line GeometryLine;
             internal double Station;
             internal double Start, End;
             internal string Id;
@@ -71,6 +72,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private static Document savedDocument;
         private static bool automaticBeam = true;
         private static string sourceLink;
+        private static string objectLink;
         private static decimal searchDistance = 3000;
         private static decimal heightDistance = 1000;
         private static int objectMode = 4;
@@ -82,13 +84,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private static DimensionType Settings(Document doc, bool force)
         {
             if (savedDocument == null || !savedDocument.IsValidObject || !savedDocument.Equals(doc))
-            { savedDocument = doc; savedType = null; sourceLink = null; openingFamily = null; }
+            { savedDocument = doc; savedType = null; sourceLink = null; objectLink = null; openingFamily = null; }
             var types = new FilteredElementCollector(doc).OfClass(typeof(DimensionType)).Cast<DimensionType>()
                 .Where(t => t.StyleType == DimensionStyleType.Linear).OrderBy(t => t.Name).ToList();
             var current = types.FirstOrDefault(t => t.UniqueId == savedType);
             bool sourceAvailable = sourceLink == null || (doc.GetElement(sourceLink) as RevitLinkInstance)?.GetLinkDocument() != null;
-            if (!force && current != null && (!automaticBeam || sourceAvailable) &&
-                (objectMode != 2 || (openingFamily != null && doc.GetElement(openingFamily) is Autodesk.Revit.DB.Family))) return current;
+            var objectDocument = objectLink == null ? doc : (doc.GetElement(objectLink) as RevitLinkInstance)?.GetLinkDocument();
+            if (!force && current != null && objectDocument != null && (!automaticBeam || sourceAvailable) &&
+                (objectMode != 2 || (openingFamily != null && objectDocument.GetElement(openingFamily) is Autodesk.Revit.DB.Family))) return current;
             if (types.Count == 0) throw new InvalidOperationException("找不到線性尺寸類型。");
             var typeBox = MepConnectionUi.Choices(types.Select(t => new MepConnectionUi.Choice { Text = t.Name, Value = t }));
             foreach (MepConnectionUi.Choice choice in typeBox.Items)
@@ -106,6 +109,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var sourceBox = MepConnectionUi.Choices(sources);
             if (!sourceAvailable) sourceBox.SelectedIndex = -1;
             else sourceBox.SelectedIndex = Math.Max(0, sources.FindIndex(s => (string)s.Value == sourceLink));
+            var objectSourceBox = MepConnectionUi.Choices(sources.Select(s => new MepConnectionUi.Choice { Text = s.Text, Value = s.Value }));
+            objectSourceBox.SelectedIndex = objectDocument == null ? -1 : sources.FindIndex(s => (string)s.Value == objectLink);
             var distance = new System.Windows.Forms.NumericUpDown { Minimum = 100, Maximum = 20000, Increment = 100, Value = searchDistance, Dock = System.Windows.Forms.DockStyle.Fill };
             var height = new System.Windows.Forms.NumericUpDown { Minimum = 0, Maximum = 5000, Increment = 100, Value = heightDistance, Dock = System.Windows.Forms.DockStyle.Fill };
             var expanded = new System.Windows.Forms.NumericUpDown { Minimum = 100, Maximum = 30000, Increment = 100, Value = expandedDistance, Dock = System.Windows.Forms.DockStyle.Fill };
@@ -116,28 +121,38 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var objects = MepConnectionUi.Choices(new[] { "管線", "套管／管附件", "開孔族", "設備", "自動辨識" }
                 .Select((name,i) => new MepConnectionUi.Choice { Text = name, Value = i }));
             objects.SelectedIndex = objectMode;
-            var openingChoices = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
+            Func<Document, List<MepConnectionUi.Choice>> collectOpenings = model => model == null ? new List<MepConnectionUi.Choice>() : new FilteredElementCollector(model).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
                 .Where(s => s.Category != null && (s.Category.Id == new ElementId(BuiltInCategory.OST_GenericModel) || s.Category.Id == new ElementId(BuiltInCategory.OST_PipeAccessory)))
                 .Select(s => s.Family).GroupBy(f => f.UniqueId).Select(g => g.First()).OrderBy(f => f.Name)
                 .Select(f => new MepConnectionUi.Choice { Text = f.Name, Value = f.UniqueId }).ToList();
+            var openingChoices = collectOpenings(objectDocument);
             var openingBox = MepConnectionUi.Choices(openingChoices);
             openingBox.SelectedIndex = openingChoices.FindIndex(c => (string)c.Value == openingFamily);
+            objectSourceBox.SelectedIndexChanged += (s,e) => {
+                string key = (objectSourceBox.SelectedItem as MepConnectionUi.Choice)?.Value as string;
+                var model = objectSourceBox.SelectedItem == null ? null : key == null ? doc : (doc.GetElement(key) as RevitLinkInstance)?.GetLinkDocument();
+                openingBox.Items.Clear();
+                foreach (var choice in collectOpenings(model)) openingBox.Items.Add(choice);
+                openingBox.SelectedIndex = -1;
+            };
             Action objectChanged = () => { openingBox.Enabled = objects.SelectedIndex == 2 || objects.SelectedIndex == 4;
                 if (objects.SelectedIndex != 0) mode.SelectedIndex = 0; mode.Enabled = objects.SelectedIndex == 0; };
             objects.SelectedIndexChanged += (s,e) => objectChanged(); objectChanged();
             Action enable = () => { bool on = mode.SelectedIndex == 0; sourceBox.Enabled = distance.Enabled = height.Enabled = expanded.Enabled = on; };
             mode.SelectedIndexChanged += (s,e) => enable(); enable();
             using (var form = MepConnectionUi.Form("HB_BIM｜管排定位設定", "尺寸類型", typeBox,
-                "標註物件", objects, "開孔族", openingBox,
-                "基準模式", mode, "參考模型", sourceBox, "搜尋距離 (mm)", distance,
+                "標註對象來源", objectSourceBox, "標註物件", objects, "開孔族", openingBox,
+                "基準模式", mode, "定位基準來源", sourceBox, "搜尋距離 (mm)", distance,
                 "文字排列", stagger, "擴大上限 (mm)", expanded, "高程搜尋差 (mm)", height,
                 "尺寸線間距 (mm)", offset, "分組最大間距 (mm)", gap, "文字紙面偏移 (mm)", textGap))
             {
                 form.Width = 650;
                 ((System.Windows.Forms.Button)form.AcceptButton).Text = "套用設定";
                 form.Height = Math.Min(560, System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position).WorkingArea.Height - 40);
-                MepConnectionUi.CollapseAdvanced(form, 7);
+                MepConnectionUi.CollapseAdvanced(form, 8);
                 if (form.ShowDialog() != System.Windows.Forms.DialogResult.OK) return null;
+                if (objectSourceBox.SelectedItem == null)
+                    throw new InvalidOperationException("標註對象連結未載入，請明確指定來源，不會自動改用本機。");
                 if (mode.SelectedIndex == 0 && sourceBox.SelectedItem == null)
                     throw new InvalidOperationException("原參考連結未載入，請在定位尺寸設定中指定有效模型；不會自動改用本機。");
                 if (objects.SelectedIndex == 2 && openingBox.SelectedItem == null)
@@ -146,12 +161,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 current = (DimensionType)((MepConnectionUi.Choice)typeBox.SelectedItem).Value;
                 savedType = current.UniqueId; savedOffset = offset.Value; savedGap = gap.Value;
                 automaticBeam = mode.SelectedIndex == 0;
+                objectLink = (string)((MepConnectionUi.Choice)objectSourceBox.SelectedItem).Value;
                 if (sourceBox.SelectedItem != null) sourceLink = (string)((MepConnectionUi.Choice)sourceBox.SelectedItem).Value;
                 searchDistance = distance.Value; heightDistance = height.Value;
                 expandedDistance = expanded.Value;
                 staggerText = stagger.Checked; textOffset = textGap.Value;
                 objectMode = objects.SelectedIndex;
-                if (openingBox.SelectedItem != null) openingFamily = (string)((MepConnectionUi.Choice)openingBox.SelectedItem).Value;
+                openingFamily = (openingBox.SelectedItem as MepConnectionUi.Choice)?.Value as string;
             }
             return current;
         }
@@ -206,19 +222,21 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             {
                 var dimType = Settings(doc, false);
                 if (dimType == null) return Result.Cancelled;
+                var targetLink = ResolveObjectLink(doc);
+                CheckExistingLinkedDimensions(doc, view, targetLink);
                 if (objectMode == 4)
                 {
-                    var selected = ui.Selection.PickElementsByRectangle(new MixedFilter(), "框選管線、管附件、設備或已指定的開孔族");
+                    var selected = PickTargets(ui, targetLink, new MixedFilter());
                     var pipes = selected.Where(e => new CurveFilter().AllowElement(e)).ToList();
                     var families = selected.OfType<FamilyInstance>().ToList();
-                    var pipeResult = pipes.Count > 0 ? ExecuteAutomatic(doc, view, pipes, dimType) : Result.Cancelled;
-                    var familyResult = families.Count > 0 ? ExecuteFamilies(ui, dimType, families) : Result.Cancelled;
+                    var pipeResult = pipes.Count > 0 ? ExecuteAutomatic(doc, view, pipes, dimType, targetLink, ui) : Result.Cancelled;
+                    var familyResult = families.Count > 0 ? ExecuteFamilies(ui, dimType, families, targetLink) : Result.Cancelled;
                     return pipeResult == Result.Succeeded || familyResult == Result.Succeeded ? Result.Succeeded : Result.Cancelled;
                 }
-                if (objectMode != 0) return ExecuteFamilies(ui, dimType);
-                var curves = ui.Selection.PickElementsByRectangle(new CurveFilter(), "框選施工定位範圍內的管線").GroupBy(e => e.Id).Select(g => g.First()).ToList();
+                if (objectMode != 0) return ExecuteFamilies(ui, dimType, null, targetLink);
+                var curves = PickTargets(ui, targetLink, new CurveFilter());
                 if (curves.Count == 0) return Result.Cancelled;
-                if (automaticBeam) return ExecuteAutomatic(doc, view, curves, dimType);
+                if (automaticBeam) return ExecuteAutomatic(doc, view, curves, dimType, targetLink, ui);
                 Reference baseline = ui.Selection.PickObject(ObjectType.PointOnElement, new DatumFilter(doc), "選取本機或連結模型的軸線／牆側面／直梁側面；可按 Tab 切換參考");
                 XYZ pickedPoint = baseline.GlobalPoint;
                 var host = doc.GetElement(baseline);
@@ -274,12 +292,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 var notes = new List<string>();
                 foreach (var element in curves)
                 {
-                    var line = (Line)((LocationCurve)element.Location).Curve;
+                    var line = TargetLine(element, targetLink);
                     var planar = projectVector(line.Direction);
                     if (planar.GetLength() < 1e-6 || Math.Abs(planar.Normalize().DotProduct(direction)) < 0.999999)
                     { notes.Add($"{element.Id}：方向不符或為立管，需另選基準。"); continue; }
                     double a = line.GetEndPoint(0).DotProduct(direction), b = line.GetEndPoint(1).DotProduct(direction);
-                    candidates.Add(new Item { Reference = new Reference(element), Station = line.Evaluate(.5, true).DotProduct(measure),
+                    candidates.Add(new Item { Reference = TargetReference(new Reference(element), targetLink), Station = line.Evaluate(.5, true).DotProduct(measure),
                         Start = Math.Min(a,b), End = Math.Max(a,b), Id = element.Id.ToString() });
                 }
                 var groups = GroupRuns(candidates, (double)savedGap / 304.8);
@@ -366,6 +384,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return created > 0 ? Result.Succeeded : Result.Cancelled;
             }
             catch(Autodesk.Revit.Exceptions.OperationCanceledException){return Result.Cancelled;}
+            catch(System.OperationCanceledException){return Result.Cancelled;}
             catch(Exception ex){TaskDialog.Show("管線定位尺寸",ex.Message);return Result.Cancelled;}
         }
         private sealed class RollBackErrors : IFailuresPreprocessor

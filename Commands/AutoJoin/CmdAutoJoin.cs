@@ -77,6 +77,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         if (action == ExecutionAction.AutoJoin)
         {
             result = JoinEngine.RunAutoJoin(uiDoc.Document, scopedElements, settings);
+            GroupJoinEngine.Run(uiDoc.Document, scopedElements, settings, result);
         }
         else
         {
@@ -94,6 +95,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     {
         var sb = new StringBuilder();
         sb.AppendLine($"範圍內元素數量: {result.ElementsInScope}");
+        if (result.GroupsAttempted > 0)
+            sb.AppendLine($"同群組處理: {result.GroupsAttempted} 組；已提交 {result.GroupsCommitted} 組；整組回復 {result.GroupsRolledBack} 組");
+        if (result.GroupMembersSkipped > 0)
+            sb.AppendLine($"群組保護略過: {result.GroupMembersSkipped} 個構件（未修改接合、未解散群組）");
         sb.AppendLine($"配對檢查次數: {result.PairChecks}");
         sb.AppendLine($"可能配對數量: {result.PairCandidates}");
         sb.AppendLine($"成功接合數量: {result.Joined}");

@@ -1,6 +1,6 @@
 ; HB_BIM Tools 安裝腳本 - Inno Setup
 ; 版本: 2.5.17
-; 日期: 2026-09-21 / Test_20260921_AutoJoinClose
+; 日期: 2026-09-22 / Test_20260922_BeamChoice
 ; 支援: Revit 2022, 2024, 2025, 2026
 
 #define MyAppName "HB_BIM Tools"
@@ -31,7 +31,7 @@ DisableDirPage=yes
 
 ; 輸出設定
 OutputDir=..\Output
-OutputBaseFilename=HB_BIM_Tools_v{#MyAppVersion}_Test_20260921_AutoJoinClose_Setup
+OutputBaseFilename=HB_BIM_Tools_v{#MyAppVersion}_Test_20260922_BeamChoice_Setup
 ; SetupIconFile=..\Resources\Icons\license_32.png  ; PNG 不支援，需要 ICO 檔案
 
 ; 壓縮設定
@@ -72,10 +72,13 @@ Name: "revit2026"; Description: "Install to Revit 2026"; GroupDescription: "Sele
 Source: "LAN_CodeSigning.cer"; DestDir: "{app}\Certificates"; Flags: ignoreversion
 
 ; 共用 Resources（所有版本共用）- 如果不存在則跳過
-Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2022
-Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2024
-Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2025
-Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2026
+Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM\Resources"; Excludes: "Versioned\*"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2022
+Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM\Resources"; Excludes: "Versioned\*,Families\套管-圓形_無.rfa"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2024
+Source: "Resources\Versioned\2024\Families\套管-圓形_無.rfa"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\HB_BIM\Resources\Families"; Flags: ignoreversion; Tasks: revit2024
+Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM\Resources"; Excludes: "Versioned\*,Families\套管-圓形_無.rfa"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2025
+Source: "Resources\Versioned\2024\Families\套管-圓形_無.rfa"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\HB_BIM\Resources\Families"; Flags: ignoreversion; Tasks: revit2025
+Source: "Resources\*"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM\Resources"; Excludes: "Versioned\*,Families\套管-圓形_無.rfa"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: revit2026
+Source: "Resources\Versioned\2024\Families\套管-圓形_無.rfa"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\HB_BIM\Resources\Families"; Flags: ignoreversion; Tasks: revit2026
 
 ; 共用依賴項（所有版本共用）
 Source: "Newtonsoft.Json.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2022\HB_BIM"; Flags: ignoreversion; Tasks: revit2022

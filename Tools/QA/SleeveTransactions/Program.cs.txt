@@ -1,0 +1,118 @@
+using Autodesk.Revit.DB;
+using YD_RevitTools.LicenseManager.Commands.MEP;
+
+class Program
+{
+    static int checks;
+    static void Check(bool ok, string name) { if (!ok) throw new Exception(name); checks++; }
+    static Document Model()
+    {
+        var d = new Document { FamiliesLoaded = 2 };
+        d.Elements.Add(new FamilyInstance { Id = new(1), UniqueId = "sleeve" });
+        d.Elements.Add(new Dimension { Id = new(2), References = new() { new Reference { ElementId = new(1), Stable = "stable" } } });
+        d.Elements.Add(new IndependentTag { Id = new(3), Targets = new() { new(1) } });
+        return d;
+    }
+    static void Main()
+    {
+        foreach (bool skip in new[] { true, false })
+        {
+            var options = new PipeSleeveOptions { SkipExisting = skip };
+            foreach (string mode in new[] { "success", "existing-invalid", "lost-reference", "changed-reference", "lost-tag", "deleted-sleeve", "commit-failure", "group-failure", "write-exception" })
+            {
+                var d = Model();
+                if (mode == "existing-invalid") { ((Dimension)d.GetElement(new(2))).AreReferencesAvailable = false; ((IndependentTag)d.GetElement(new(3))).IsOrphaned = true; }
+                d.RejectCommit = mode == "commit-failure"; d.RejectGroup = mode == "group-failure";
+                PipeSleeveService.Operation = (doc, opt) =>
+                {
+                    if (opt.SkipExisting) doc.Created++; else doc.Updated++;
+                    if (mode == "lost-reference") ((Dimension)doc.GetElement(new(2))).AreReferencesAvailable = false;
+                    if (mode == "changed-reference") ((Dimension)doc.GetElement(new(2))).References = new() { new Reference { ElementId = new(1), Stable = "changed" } };
+                    if (mode == "lost-tag") ((IndependentTag)doc.GetElement(new(3))).IsOrphaned = true;
+                    if (mode == "deleted-sleeve") doc.Elements.RemoveAll(e => e.Id == new ElementId(1));
+                    if (mode == "write-exception") throw new InvalidOperationException("write failure");
+                    return new PipeSleeveResult { CreatedCount = doc.Created, UpdatedCount = doc.Updated };
+                };
+                bool expectedFailure = mode != "success" && mode != "existing-invalid";
+                try
+                {
+                    var result = PipeSleeveService.ExecuteCreate(d, new List<Element>(), options);
+                    Check(!expectedFailure, "failure silently accepted: " + mode);
+                    Check(d.Created + d.Updated == 1 && d.LevelSaved, "success did not commit");
+                }
+                catch (SleeveOperationRolledBackException ex)
+                {
+                    Check(expectedFailure, "existing invalid annotation blocked");
+                    Check(d.Created == 0 && d.Updated == 0 && !d.LevelSaved, "partial changes retained");
+                    Check(d.GetElement(new(1)) != null, "sleeve identity not restored");
+                    if (mode == "lost-reference" || mode == "changed-reference") Check(ex.Message.Contains("尺寸 2"), "dimension ID missing");
+                    if (mode == "lost-tag") Check(ex.Message.Contains("標籤 3"), "tag ID missing");
+                }
+                Check(d.FamiliesLoaded == 2, "preset loads lost");
+            }
+            var unsafeDoc = Model(); unsafeDoc.FailRollback = true;
+            PipeSleeveService.Operation = (doc, opt) => throw new InvalidOperationException("fault");
+            try { PipeSleeveService.ExecuteCreate(unsafeDoc, new List<Element>(), options); throw new Exception("rollback fault hidden"); }
+            catch (SleeveOperationRolledBackException) { throw new Exception("unverified rollback marked safe"); }
+            catch (InvalidOperationException) { checks++; }
+        }
+        Console.WriteLine($"PASS {checks} checks; actual guard and ExecuteCreate with mocked Revit transactions. Native Revit test pending.");
+    }
+}
+
+namespace YD_RevitTools.LicenseManager.Commands.MEP
+{
+    internal class PipeSleeveOptions { public bool SkipExisting; public string CreationLevelUniqueId = "GL"; }
+    internal class PipeSleeveResult { public int CreatedCount, UpdatedCount, SkippedExistingCount; }
+    internal static class SleeveLevelPolicy { internal static void Save(Document d, string key) => d.LevelSaved = true; }
+    internal static partial class PipeSleeveService
+    {
+        internal static Func<Document, PipeSleeveOptions, PipeSleeveResult> Operation;
+        static bool IsSleeveInstance(FamilyInstance e) => true;
+        static PipeSleeveResult CreateSleeves(Document d, IList<Element> p, PipeSleeveOptions o) => Operation(d, o);
+    }
+}
+
+namespace Autodesk.Revit.DB
+{
+    public record ElementId(int Value) { public override string ToString() => Value.ToString(); }
+    public class Element { public ElementId Id; public string UniqueId = "id"; public virtual Element Copy() => (Element)MemberwiseClone(); }
+    public class FamilyInstance : Element { }
+    public class Reference { public ElementId ElementId; public string Stable; public string ConvertToStableRepresentation(Document d) => Stable; }
+    public class Dimension : Element { public bool AreReferencesAvailable = true; public List<Reference> References = new(); }
+    public class IndependentTag : Element { public bool IsOrphaned; public HashSet<ElementId> Targets = new(); public ICollection<ElementId> GetTaggedLocalElementIds() => Targets; }
+    public class Document
+    {
+        public List<Element> Elements = new(); public int Created, Updated, FamiliesLoaded; public bool LevelSaved, RejectCommit, RejectGroup, FailRollback;
+        public Element GetElement(ElementId id) => Elements.FirstOrDefault(e => e.Id == id);
+        public Document Snapshot() { var copy = (Document)MemberwiseClone(); copy.Elements = Elements.Select(e => e.Copy()).ToList(); return copy; }
+        public void Restore(Document copy) { Elements = copy.Elements; Created = copy.Created; Updated = copy.Updated; FamiliesLoaded = copy.FamiliesLoaded; LevelSaved = copy.LevelSaved; }
+    }
+    public class FilteredElementCollector : IEnumerable<Element>
+    {
+        readonly Document doc; Type type;
+        public FilteredElementCollector(Document d) { doc = d; }
+        public FilteredElementCollector OfClass(Type t) { type = t; return this; }
+        public IEnumerator<Element> GetEnumerator() => doc.Elements.Where(e => type.IsInstanceOfType(e)).GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+    public enum TransactionStatus { Uninitialized, Started, Committed, RolledBack }
+    public class TransactionGroup : IDisposable
+    {
+        readonly Document doc; Document before; TransactionStatus status;
+        public TransactionGroup(Document d, string name) { doc = d; }
+        public TransactionStatus Start() { before = doc.Snapshot(); return status = TransactionStatus.Started; }
+        public TransactionStatus GetStatus() => status;
+        public TransactionStatus RollBack() { if (doc.FailRollback) throw new InvalidOperationException("rollback fault"); doc.Restore(before); return status = TransactionStatus.RolledBack; }
+        public TransactionStatus Assimilate() => doc.RejectGroup ? RollBack() : status = TransactionStatus.Committed;
+        public void Dispose() { if (status == TransactionStatus.Started && !doc.FailRollback) RollBack(); }
+    }
+    public class Transaction : IDisposable
+    {
+        readonly Document doc; Document before; TransactionStatus status;
+        public Transaction(Document d, string name) { doc = d; }
+        public void Start() { before = doc.Snapshot(); status = TransactionStatus.Started; }
+        public TransactionStatus Commit() { if (doc.RejectCommit) { doc.Restore(before); return status = TransactionStatus.RolledBack; } return status = TransactionStatus.Committed; }
+        public void Dispose() { if (status == TransactionStatus.Started) doc.Restore(before); }
+    }
+}

@@ -15,6 +15,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         public bool UseDiameterMap { get; set; } = true;
         public bool AutoNumber { get; set; } = true;
         public bool UpdateExisting { get; set; } = false;
+        public bool LimitToActiveView { get; set; } = true;
         public bool HasExplicitSizeList { get; set; } = false;
         public List<PipeSleeveSizeSetting> SizeMappings { get; set; } = new List<PipeSleeveSizeSetting>();
     }

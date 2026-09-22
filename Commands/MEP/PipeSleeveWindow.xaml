@@ -71,6 +71,10 @@
                     </Grid.RowDefinitions>
                     <Border x:Name="bodySeparator" Grid.Column="1" Grid.RowSpan="3" Width="1" Background="#D8DEE2"/>
                     <StackPanel x:Name="settingsPanel" Grid.Row="0">
+                    <GroupBox Header="新增套管約束樓層" Margin="0,0,0,14">
+                        <ComboBox x:Name="cmbCreationLevel" Margin="10" MinHeight="28"
+                                  DisplayMemberPath="Name" SelectedValuePath="Key"/>
+                    </GroupBox>
                     <GroupBox Header="管篩選模式" Margin="0,0,0,14">
                         <StackPanel Margin="10">
                             <RadioButton x:Name="rbSelectedPipes" Content="使用目前已選取管線" IsChecked="True" Margin="0,0,0,8"/>
@@ -115,6 +119,7 @@
                         </StackPanel>
                     </GroupBox>
 
+                    <CheckBox x:Name="chkLimitToActiveView" Content="限制於目前視圖" IsChecked="True" Margin="10,0,0,14"/>
                     <GroupBox Header="編號與更新" Margin="0,0,0,14">
                         <StackPanel Margin="10" Orientation="Horizontal">
                             <CheckBox x:Name="chkAutoNumber" Content="自動編號套管"

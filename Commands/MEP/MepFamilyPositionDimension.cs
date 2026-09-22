@@ -133,10 +133,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return result;
         }
 
-        private static Result ExecuteFamilies(UIDocument ui, DimensionType type, List<FamilyInstance> supplied = null)
+        private static Result ExecuteFamilies(UIDocument ui, DimensionType type, List<FamilyInstance> supplied = null, RevitLinkInstance targetLink = null)
         {
             var doc = ui.Document; var view = ui.ActiveView;
-            var selected = supplied ?? ui.Selection.PickElementsByRectangle(new FamilyFilter(), "框選需要中心定位的本機族實例")
+            var selected = supplied ?? PickTargets(ui, targetLink, new FamilyFilter())
                 .Cast<FamilyInstance>().GroupBy(f => f.Id).Select(g => g.First()).ToList();
             if (selected.Count == 0) return Result.Cancelled;
             var link = sourceLink == null ? null : doc.GetElement(sourceLink) as RevitLinkInstance;
@@ -144,13 +144,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             if (source == null) throw new InvalidOperationException("指定參考模型未載入，請重新設定。");
             XYZ normal = view.ViewDirection.Normalize();
             var transform = link?.GetTotalTransform() ?? Transform.Identity;
+            var targetTransform = targetLink?.GetTotalTransform() ?? Transform.Identity;
             var notes = new List<string>();
             var boxes = new Dictionary<ElementId,List<XYZ>>();
             foreach (var instance in selected)
             {
                 var box = instance.get_BoundingBox(null);
                 if (box == null) notes.Add($"{instance.Id}：沒有可搜尋的幾何範圍。");
-                else boxes.Add(instance.Id, BoxCorners(box));
+                else boxes.Add(instance.Id, BoxCorners(box).Select(targetTransform.OfPoint).ToList());
             }
             if (boxes.Count == 0) { TaskDialog.Show("族中心定位",string.Join("\n",notes)); return Result.Cancelled; }
             var points = boxes.Values.SelectMany(p => p).Select(transform.Inverse.OfPoint).ToList();
@@ -181,6 +182,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 catch { notes.Add($"尺寸 {dim.Id}：無法檢查重複。"); }
             }
             var plans = new List<FamilyPlan>();
+            string preferredReference = null;
             foreach (var instance in selected)
             {
                 if (!boxes.TryGetValue(instance.Id,out var vertices)) continue;
@@ -194,6 +196,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                             notes.Add($"{instance.Id} {instance.Name}：接點或實體幾何無法確認唯一套管軸線，略過自動定位。");
                             continue;
                         }
+                        accessoryAxis = targetTransform.OfVector(accessoryAxis).Normalize();
                     }
                     catch (Exception ex)
                     {
@@ -201,7 +204,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         continue;
                     }
                 }
-                var placement = instance.GetTransform();
+                var placement = targetTransform.Multiply(instance.GetTransform());
                 var kinds = new[] { FamilyInstanceReferenceType.CenterLeftRight, FamilyInstanceReferenceType.CenterFrontBack, FamilyInstanceReferenceType.CenterElevation };
                 var normals = new[] { placement.BasisX.Normalize(), placement.BasisY.Normalize(), placement.BasisZ.Normalize() };
                 for (int i=0;i<kinds.Length;i++)
@@ -214,6 +217,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     var refs = instance.GetReferences(kinds[i]);
                     if (refs == null || refs.Count != 1)
                     { notes.Add(label+"：缺少唯一有效中心參考，未使用插入點代替。"); continue; }
+                    var centerReference = TargetReference(refs[0], targetLink);
                     XYZ measure=normals[i];
                     if (measure.DotProduct(view.RightDirection)<-1e-6 || (Math.Abs(measure.DotProduct(view.RightDirection))<=1e-6 && measure.DotProduct(view.UpDirection)<0)) measure=-measure;
                     XYZ direction=normal.CrossProduct(measure).Normalize();
@@ -233,20 +237,21 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                             side.Vertices.Min(p=>p.DotProduct(normal)),side.Vertices.Max(p=>p.DotProduct(normal)))>(double)heightDistance/304.8) { rejected.Height++; continue; }
                         if (distance>(double)expandedDistance/304.8) { rejected.Distance++; continue; }
                         matches.Add(new BeamMatch { Side=side,Station=station,Distance=distance,Section=along,
+                            HeightGap=IntervalDistance(vertices.Min(p=>p.DotProduct(normal)),vertices.Max(p=>p.DotProduct(normal)),
+                                side.Vertices.Min(p=>p.DotProduct(normal)),side.Vertices.Max(p=>p.DotProduct(normal))),
                             Overlap=side.Vertices.Max(p=>p.DotProduct(direction))-side.Vertices.Min(p=>p.DotProduct(direction)) });
                     }
                     matches=RankMatches(matches,normal,along);
                     if (matches.Count==0) { notes.Add(label+"："+rejected.Describe(sides.Count)); continue; }
-                    if (matches.Count>1 && matches[1].Distance-matches[0].Distance<=25/304.8)
-                    { notes.Add(label+"：梁側面候選接近，未自動選定。"); continue; }
-                    var match=matches[0];
+                    var match=ChooseBeamMatch(ui,doc,matches,normal,label,ref preferredReference);
+                    if (match==null) { notes.Add(label+"：未指定歧義基準，未建立尺寸。"); continue; }
                     if (match.Distance>(double)searchDistance/304.8) notes.Add(label+$"：擴大搜尋配對梁 {match.Side.Id}，距離 {match.Distance*304.8:0} mm，請確認。");
-                    string key=Signature(doc,new[] { match.Side.Reference,refs[0] });
+                    string key=Signature(doc,new[] { match.Side.Reference,centerReference });
                     if (!known.Add(key)) { notes.Add(label+"：已有相同參考尺寸。"); continue; }
                     // The box locates/searches the line only. Revit measures the actual family reference.
                     XYZ origin=normal*view.Origin.DotProduct(normal)+direction*along;
                     double mid=(low+high)/2;
-                    plans.Add(new FamilyPlan { Center=refs[0],Side=match.Side,Label=label,
+                    plans.Add(new FamilyPlan { Center=centerReference,Side=match.Side,Label=label,
                         Measure=measure,Direction=direction,Station=mid,Sign=Math.Sign(mid-match.Station),
                         Start=vertices.Min(p=>p.DotProduct(direction)),End=vertices.Max(p=>p.DotProduct(direction)),
                         BaselineKey=match.Side.Reference.ConvertToStableRepresentation(doc),

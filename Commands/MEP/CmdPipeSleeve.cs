@@ -54,11 +54,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     .ToList();
 
                 PipeSleeveOptions options;
+                LoadMissingPresetFamilies(doc);
                 using (var settings = new PipeSleeveSettingsForm(pipes.Count))
                 {
+                    settings.ConfigureLevels(SleeveLevelPolicy.Choices(doc), SleeveLevelPolicy.Read(doc));
+                    settings.ValidateLevelRule = key => SleeveLevelPolicy.Summary(doc, pipes, key);
                     var symbols = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
-                        .Where(s=>s.Category!=null && (s.Category.Id.GetIdValue()==(long)BuiltInCategory.OST_GenericModel || s.Category.Id.GetIdValue()==(long)BuiltInCategory.OST_PipeAccessory))
-                        .Where(s=> (s.FamilyName+" "+s.Name).IndexOf("套管",StringComparison.OrdinalIgnoreCase)>=0 || (s.FamilyName+" "+s.Name).IndexOf("sleeve",StringComparison.OrdinalIgnoreCase)>=0 || (s.FamilyName+" "+s.Name).Contains("開孔"))
+                        .Where(SleeveFamilyCatalog.IsSleeveSymbol)
                         .OrderBy(s=>s.FamilyName).ThenBy(s=>s.Name).ToList();
                     settings.ConfigureSizes(PipeSleeveNominalRules.ConfigurableSizes.Select(x=>new PipeSleeveSettingsForm.SizeRow { DN=x }).ToList(), symbols.Select(s=>new PipeSleeveSettingsForm.SymbolChoice {
                         Id=s.Id.GetIdValue().ToString(), Name=s.FamilyName+": "+s.Name, Family=s.FamilyName, Type=s.Name }).ToList());
@@ -67,11 +69,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     try
                     {
                         if (settings.ShowDialog(owner) != System.Windows.Forms.DialogResult.OK)
-                            return Result.Cancelled;
+                            return Result.Succeeded; // Preserve committed preset loads when closing settings.
                     }
                     finally { owner.ReleaseHandle(); }
                     options = new PipeSleeveOptions
                     {
+                        CreationLevelUniqueId = settings.CreationLevelUniqueId,
                         PreserveNominalTypeDimensions = true,
                         UseDiameterSymbolMap = settings.UseDiameterMap,
                         SleeveSymbolByDiameterMm = settings.SizeRows.ToDictionary(r=>r.DN,r=>symbols.FirstOrDefault(s=>s.Id.GetIdValue().ToString()==r.SymbolId)?.Id ?? ElementId.InvalidElementId),
@@ -88,23 +91,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     };
                 }
 
-                using (Transaction tx = new Transaction(doc, "自動放置管線套管"))
                 {
-                    tx.Start();
-                    PipeSleeveResult result = PipeSleeveService.CreateSleeves(
+                    if (!SleeveLevelPolicy.Confirm(doc, pipes, options.CreationLevelUniqueId)) return Result.Succeeded;
+                    PipeSleeveResult result = PipeSleeveService.ExecuteCreate(
                         doc,
                         pipes,
                         options);
-                    if (tx.Commit() != TransactionStatus.Committed)
-                    {
-                        TaskDialog.Show("自動套管", "Revit 未成功提交套管變更，請檢查失敗訊息。");
-                        return Result.Failed;
-                    }
-
                     TaskDialog.Show("管線套管", result.ToTaskDialogText());
-                    return result.CreatedCount > 0 || result.SkippedExistingCount > 0
-                        ? Result.Succeeded
-                        : Result.Cancelled;
+                    return Result.Succeeded;
                 }
 #else
                 // 選擇管線
@@ -129,17 +123,18 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                 // 開啟 UI 視窗進行設定
                 var sleeveWindow = new PipeSleeveWindow(doc, pipes);
-                bool? dialogResult = sleeveWindow.ShowDialog();
-
-                if (dialogResult == true)
-                {
-                    return Result.Succeeded;
-                }
-                else
-                {
-                    return Result.Cancelled;
-                }
+                sleeveWindow.ShowDialog();
+                if (sleeveWindow.HasUnrecoveredFailure)
+                    return Result.Failed;
+                return Result.Succeeded;
 #endif
+            }
+            catch (SleeveOperationRolledBackException ex)
+            {
+                // Revit rolls back ALL command transactions for Failed/Cancelled, including preset loads.
+                // The operation already rolled back; Succeeded here means handled, not sleeves created.
+                TaskDialog.Show("套管建立／更新未完成", ex.Message);
+                return Result.Succeeded;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
@@ -151,6 +146,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 TaskDialog.Show("錯誤", $"執行失敗:\n{ex.Message}");
                 return Result.Failed;
             }
+        }
+
+        private static void LoadMissingPresetFamilies(Document doc)
+        {
+            var errors = SleeveFamilyCatalog.LoadMissing(doc);
+            if (errors.Count > 0) TaskDialog.Show("預設族群載入", string.Join("\n", errors) + "\n\n仍可選用模型內既有的族群。");
         }
     }
 

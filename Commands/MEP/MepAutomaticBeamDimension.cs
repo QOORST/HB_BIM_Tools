@@ -25,7 +25,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private sealed class BeamMatch
         {
             internal BeamSide Side;
-            internal double Station, Distance, Section, Overlap;
+            internal double Station, Distance, Section, Overlap, HeightGap;
         }
         private sealed class MatchDiagnostics
         {
@@ -39,14 +39,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             // Expansion is used only when no geometrically eligible candidate is in the primary range.
             var primary = matches.Where(m => m.Distance <= (double)searchDistance/304.8).ToList();
             if (primary.Count > 0) matches = primary;
+            // A face spanning the object's elevation takes precedence over nearby storeys.
+            var atElevation = matches.Where(m => m.HeightGap <= .5/304.8).ToList();
+            if (atElevation.Count > 0) matches = atElevation;
             var representatives = new List<BeamMatch>();
             foreach (var match in matches.OrderByDescending(m=>m.Overlap).ThenBy(m=>Math.Abs(m.Section-preferred))
                 .ThenBy(m=>m.Side.Id,StringComparer.Ordinal))
             {
-                bool samePlane = representatives.Any(r => r.Side.Normal.DotProduct(match.Side.Normal) > .999999 &&
-                    Math.Abs((r.Side.Origin-match.Side.Origin).DotProduct(match.Side.Normal)) <= .5/304.8 &&
-                    Math.Min(r.Side.Vertices.Max(p=>p.DotProduct(viewNormal)),match.Side.Vertices.Max(p=>p.DotProduct(viewNormal))) -
-                    Math.Max(r.Side.Vertices.Min(p=>p.DotProduct(viewNormal)),match.Side.Vertices.Min(p=>p.DotProduct(viewNormal))) > 1/304.8);
+                bool samePlane = representatives.Any(r => r.Side.Id == match.Side.Id &&
+                    r.Side.Reference.ElementId == match.Side.Reference.ElementId &&
+                    r.Side.Normal.DotProduct(match.Side.Normal) > .999999 &&
+                    Math.Abs((r.Side.Origin-match.Side.Origin).DotProduct(match.Side.Normal)) <= .5/304.8);
                 if (!samePlane) representatives.Add(match);
             }
             return representatives.OrderBy(m=>m.Distance).ToList();
@@ -77,7 +80,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private static double IntervalDistance(double a, double b, double c, double d)
             => Math.Max(0, Math.Max(c - b, a - d));
 
-        private static Result ExecuteAutomatic(Document doc, View view, List<Element> curves, DimensionType type)
+        private static Result ExecuteAutomatic(Document doc, View view, List<Element> curves, DimensionType type, RevitLinkInstance targetLink = null, UIDocument ui = null)
         {
             var link = sourceLink == null ? null : doc.GetElement(sourceLink) as RevitLinkInstance;
             var source = sourceLink == null ? doc : link?.GetLinkDocument();
@@ -90,7 +93,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var directions = new List<XYZ>();
             foreach (var e in curves.OrderBy(e => e.UniqueId, StringComparer.Ordinal))
             {
-                var line = (Line)((LocationCurve)e.Location).Curve;
+                var line = TargetLine(e, targetLink);
                 XYZ d = project(line.Direction);
                 if (d.GetLength() < 1e-6) { notes.Add($"管段 {e.Id}：立管不支援。"); continue; }
                 d = d.Normalize();
@@ -102,7 +105,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
             // Broad phase uses transformed bounding boxes; only actual planar faces become references.
             var endpoints = curves.SelectMany(e => {
-                var l = (Line)((LocationCurve)e.Location).Curve;
+                var l = TargetLine(e, targetLink);
                 return new[] { l.GetEndPoint(0), l.GetEndPoint(1) };
             }).Select(transform.Inverse.OfPoint).ToList();
             double expand = ((double)expandedDistance + (double)heightDistance) / 304.8;
@@ -134,21 +137,22 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 catch { notes.Add($"既有尺寸 {dimension.Id}：無法檢查重複參考。"); }
             }
             var plans = new List<AutoPlan>();
+            string preferredReference = null;
             double spacing = (double)savedOffset * view.Scale / 304.8;
             for (int b = 0; b < buckets.Count; b++)
             {
                 XYZ direction = directions[b], measure = normal.CrossProduct(direction).Normalize();
                 var items = buckets[b].Select(e => {
-                    var l = (Line)((LocationCurve)e.Location).Curve;
+                    var l = TargetLine(e, targetLink);
                     double a = l.GetEndPoint(0).DotProduct(direction), z = l.GetEndPoint(1).DotProduct(direction);
-                    return new Item { Reference = new Reference(e), Id = e.Id.ToString(), Station = l.Evaluate(.5,true).DotProduct(measure), Start = Math.Min(a,z), End = Math.Max(a,z) };
+                    return new Item { Reference = TargetReference(new Reference(e), targetLink), GeometryLine = l, Id = e.Id.ToString(), Station = l.Evaluate(.5,true).DotProduct(measure), Start = Math.Min(a,z), End = Math.Max(a,z) };
                 }).ToList();
                 foreach (var group in GroupRuns(items, (double)savedGap / 304.8))
                 {
                     string ids = string.Join(",", group.Select(i => i.Id));
                     double left = group.Min(i => i.Station), right = group.Max(i => i.Station);
                     var elevations = group.SelectMany(i => {
-                        var l = (Line)((LocationCurve)doc.GetElement(i.Reference).Location).Curve;
+                        var l = i.GeometryLine;
                         return new[] { l.GetEndPoint(0).DotProduct(normal), l.GetEndPoint(1).DotProduct(normal) };
                     }).ToList();
                     var matches = new List<BeamMatch>();
@@ -173,13 +177,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                             .Select(p => p.Axis.GetEndPoint(0).DotProduct(direction));
                         var section = ChooseSection(start, end, spacing, occupied);
                         if (!section.HasValue) { rejected.Placement++; continue; }
-                        matches.Add(new BeamMatch { Side = side, Station = station, Distance = distance, Section = section.Value, Overlap=end-start });
+                        matches.Add(new BeamMatch { Side = side, Station = station, Distance = distance, Section = section.Value, Overlap=end-start,
+                            HeightGap=IntervalDistance(elevations.Min(),elevations.Max(),hmin,hmax) });
                     }
                     matches = RankMatches(matches,normal,(group.Max(i=>i.Start)+group.Min(i=>i.End))/2);
                     if (matches.Count == 0) { notes.Add($"管段 {ids}："+rejected.Describe(sides.Count)); continue; }
-                    if (matches.Count > 1 && matches[1].Distance - matches[0].Distance <= 25/304.8)
-                    { notes.Add($"管段 {ids}：梁側面候選接近（梁 {matches[0].Side.Id}／{matches[1].Side.Id}），請以手選基準處理。"); continue; }
-                    var chosen = matches[0];
+                    var chosen = ChooseBeamMatch(ui, doc, matches, normal, "管段 " + ids, ref preferredReference);
+                    if (chosen == null) { notes.Add($"管段 {ids}：未指定歧義基準，未建立尺寸。"); continue; }
                     if (chosen.Distance>(double)searchDistance/304.8) notes.Add($"管段 {ids}：擴大搜尋配對梁 {chosen.Side.Id}，距離 {chosen.Distance*304.8:0} mm，請確認。");
                     var chain = group.Concat(new[] { new Item { Reference = chosen.Side.Reference, Station = chosen.Station } }).OrderBy(i => i.Station).ToList();
                     if (chain.Zip(chain.Skip(1),(x,y) => y.Station-x.Station).Any(d => d < .5/304.8))

@@ -129,10 +129,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     int familyIndex = family.FindStringExact(saved.FamilyType); if (familyIndex >= 0) family.SelectedIndex = familyIndex;
                     var purpose = combo(new[] { "通氣管", "連通管", "溢水管" }); int purposeIndex = purpose.FindStringExact(saved.Purpose); if (purposeIndex >= 0) purpose.SelectedIndex = purposeIndex;
                     var level = combo(levels.Select(l => l.Name)); var mode = combo(new[] { "TOP：板下 − X", "BOP：大底完成面 ＋ Y" }); mode.SelectedIndex = saved.Top ? 0 : 1;
+                    level.SelectedIndex = levels.FindIndex(l => l.UniqueId == SleeveLevelPolicy.Read(doc));
+                    ok.DialogResult = F.DialogResult.None;
+                    ok.Click += (_, __) => {
+                        if (level.SelectedIndex < 0) { F.MessageBox.Show(form, "無來源管線，請明確指定約束樓層。", form.Text); return; }
+                        form.DialogResult = F.DialogResult.OK;
+                    };
                     var datum = number(0, -1000000, 1000000); var offset = number(saved.OffsetMm, 0, 100000);
                     var length = number(saved.LengthMm, 1, 100000); var count = number(saved.Count, 1, 20); count.DecimalPlaces = 0;
                     var spacing = number(saved.SpacingMm, 1, 100000);
-                    add("CAD 連結", cadBox); add("用途", purpose); add("套管族型", family); add("參考樓層", level); add("外緣定位", mode);
+                    add("CAD 連結", cadBox); add("用途", purpose); add("套管族型", family); add("約束樓層（目前視圖）", level); add("外緣定位", mode);
                     add("基準高程 mm（專案座標）", datum); add("X／Y 距離 mm", offset); add("套管長度 mm", length); add("支數", count); add("中心間距 mm", spacing);
                     if (form.ShowDialog() != F.DialogResult.OK) return Result.Cancelled;
                     var symbol = symbols[family.SelectedIndex]; var targetLevel = levels[level.SelectedIndex]; var cad = cads[cadBox.SelectedIndex];
@@ -174,6 +180,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                                 var mark = f.get_Parameter(BuiltInParameter.ALL_MODEL_MARK);
                                 if (mark != null && !mark.IsReadOnly) mark.Set("RC-" + f.Id.ToString());
                             }
+                            SleeveLevelPolicy.Save(doc, targetLevel.UniqueId);
                             if (tx.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("模型未提交。");
                             created += saved.Count;
                         }

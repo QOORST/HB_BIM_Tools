@@ -145,6 +145,7 @@ namespace YD_RevitTools.LicenseManager
                 // Family - 族參數工具基本功能
                 "Family.ParameterSlider",     // 族參數滑桿
                 "Family.ProjectSlider",       // 專案參數滑桿
+                "Family.ParameterCopy",       // 共用參數複製
                 // MEP - 機電工具基本功能
                 "MEP.PipeSleeve",             // 管線套管
                 // Data - 資料工具基本功能
@@ -190,6 +191,7 @@ namespace YD_RevitTools.LicenseManager
                 // Family - 族參數工具標準功能
                 "Family.ParameterSlider",     // 族參數滑桿
                 "Family.ProjectSlider",       // 專案參數滑桿
+                "Family.ParameterCopy",       // 共用參數複製
                 // MEP - 機電工具標準功能
                 "MEP.PipeSleeve",             // 管線套管
                 // Data - 資料工具標準功能

@@ -1,9 +1,8 @@
 {
   "version": "2.5.17",
   "downloadUrl": "",
-  "releaseNotes": "Test_20260921_AutoJoinClose: 修正自動接合關窗 API context 例外與清理流程，新增自訂 DN 對應、防呆及保守尺寸匹配。四版本編譯、9 項生命週期與 32 項尺寸設定離線檢查通過；安裝及 Revit 實機驗收未完成，詳見 README.txt。",
-  "releaseDate": "2026-09-21T00:00:00+08:00",
+  "releaseNotes": "Test_20260922_BeamChoice：連結模型定位尺寸、梁面候選去重與高程優先、歧義基準手選。四版本編譯及18項候選與24項連結模擬測試通過；原生尺寸與安裝驗收待完成。套管族群依Revit版本分流，詳見README.txt。",
+  "releaseDate": "2026-09-22T00:00:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0"
 }
-

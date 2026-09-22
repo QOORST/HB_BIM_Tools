@@ -68,16 +68,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     private static IList<Element> CollectFromSelection(UIDocument uiDoc)
     {
         var list = new List<Element>();
+        var visited = new HashSet<ElementId>();
         foreach (var id in uiDoc.Selection.GetElementIds())
         {
-            var element = uiDoc.Document.GetElement(id);
-            if (element != null)
-            {
-                list.Add(element);
-            }
+            AddSelected(uiDoc.Document, id, visited, list);
         }
 
         return list;
+    }
+    private static void AddSelected(Document doc, ElementId id, HashSet<ElementId> visited, List<Element> list)
+    {
+        if (!visited.Add(id)) return;
+        var element = doc.GetElement(id);
+        if (element is Group group)
+            foreach (var member in group.GetMemberIds()) AddSelected(doc, member, visited, list);
+        else if (element != null) list.Add(element);
     }
     }
 }

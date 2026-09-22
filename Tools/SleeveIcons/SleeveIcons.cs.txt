@@ -1,0 +1,65 @@
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Drawing.Text;
+
+var names=new[]{"sleeve_create","sleeve_manage","sleeve_cad_create","sleeve_opening","parameter_copy"};
+var labels=new[]{"自動套管","套管管理","CAD 建立套管","建築開孔","參數複製"};
+Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory,"icons"));
+foreach(var name in names)foreach(int size in new[]{16,32}){
+    using var bitmap=new Bitmap(size,size,PixelFormat.Format32bppArgb);
+    using(var g=Graphics.FromImage(bitmap)){g.Clear(Color.Transparent);g.SmoothingMode=SmoothingMode.AntiAlias;g.ScaleTransform(size/32f,size/32f);Draw(g,name);}
+    int opaque=0,clear=0;for(int x=0;x<size;x++)for(int y=0;y<size;y++){if(bitmap.GetPixel(x,y).A>0)opaque++;else clear++;}
+    if(opaque<20||clear<20)throw new Exception("Invalid icon "+name);
+    bitmap.Save(Path.Combine(AppContext.BaseDirectory,"icons",$"{name}_{size}.png"),ImageFormat.Png);
+}
+using(var sheet=new Bitmap(1060,350)){
+using(var g=Graphics.FromImage(sheet)){
+g.Clear(Color.White);g.TextRenderingHint=TextRenderingHint.ClearTypeGridFit;
+using var dark=new SolidBrush(Color.FromArgb(49,56,64));g.FillRectangle(dark,0,175,1060,175);
+using var font=new Font("Microsoft JhengHei UI",12);using var small=new Font("Microsoft JhengHei UI",9);
+for(int row=0;row<2;row++)for(int i=0;i<names.Length;i++){
+int x=20+i*208,y=row*175;using var text=new SolidBrush(row==0?Color.FromArgb(40,48,54):Color.White);
+g.DrawString(labels[i],font,text,x,y+16);
+using var icon32=new Bitmap(Path.Combine(AppContext.BaseDirectory,"icons",names[i]+"_32.png"));
+using var icon16=new Bitmap(Path.Combine(AppContext.BaseDirectory,"icons",names[i]+"_16.png"));
+g.DrawImageUnscaled(icon16,x+8,y+89);g.DrawImageUnscaled(icon32,x+48,y+81);
+g.DrawString("16",small,text,x+6,y+122);g.DrawString("32",small,text,x+53,y+122);
+var state=g.Save();g.TranslateTransform(x+103,y+60);g.ScaleTransform(2,2);g.SmoothingMode=SmoothingMode.AntiAlias;Draw(g,names[i]);g.Restore(state);
+g.DrawString("放大檢視",small,text,x+107,y+136);
+}}
+sheet.Save(Path.Combine(AppContext.BaseDirectory,"icon-preview.png"),ImageFormat.Png);
+}
+Console.WriteLine("PASS 10 icons: correct dimensions, nonblank alpha content, transparent backgrounds. Light/dark preview generated.");
+
+static void Draw(Graphics g,string name){
+using var outline=new Pen(Color.FromArgb(100,122,136),2){LineJoin=LineJoin.Round};
+using var blue=new Pen(Color.FromArgb(0,156,187),2.5f){StartCap=LineCap.Round,EndCap=LineCap.Round,LineJoin=LineJoin.Round};
+using var orange=new Pen(Color.FromArgb(232,148,34),2.5f){StartCap=LineCap.Round,EndCap=LineCap.Round,LineJoin=LineJoin.Round};
+using var paper=new SolidBrush(Color.FromArgb(241,245,247));
+using var wall=new SolidBrush(Color.FromArgb(168,184,194));
+if(name=="sleeve_create"){
+g.FillRectangle(wall,11,3,9,25);g.DrawRectangle(outline,11,3,9,25);
+g.DrawLine(blue,2,15,28,15);g.FillEllipse(paper,8,8,14,14);g.DrawEllipse(orange,8,8,14,14);g.DrawEllipse(blue,12,12,6,6);
+g.FillRectangle(paper,21,21,10,10);g.DrawLine(blue,26,22,26,30);g.DrawLine(blue,22,26,30,26);
+}else if(name=="sleeve_manage"){
+g.FillRectangle(paper,4,3,22,26);g.DrawRectangle(outline,4,3,22,26);
+g.DrawLines(blue,new[]{new PointF(7,12),new PointF(9,14),new PointF(12,10)});g.DrawLine(outline,16,12,22,12);
+g.DrawLines(blue,new[]{new PointF(7,21),new PointF(9,23),new PointF(12,19)});g.DrawLine(outline,16,21,22,21);
+g.FillEllipse(paper,19,1,11,11);g.DrawEllipse(orange,19,1,11,11);
+}else if(name=="sleeve_cad_create"){
+g.FillRectangle(paper,3,3,24,25);g.DrawRectangle(outline,3,3,24,25);
+using var grid=new Pen(Color.FromArgb(190,204,212),1);for(int i=9;i<=21;i+=6){g.DrawLine(grid,i,4,i,27);g.DrawLine(grid,4,i,26,i);}
+g.DrawRectangle(blue,9,11,12,8);g.DrawLine(blue,7,10,7,20);g.DrawLine(blue,23,10,23,20);
+g.DrawEllipse(orange,18,19,10,10);g.DrawLine(orange,23,17,23,21);g.DrawLine(orange,23,27,23,31);g.DrawLine(orange,16,24,20,24);g.DrawLine(orange,26,24,30,24);
+}else if(name=="sleeve_opening"){
+g.FillRectangle(wall,3,3,26,6);g.FillRectangle(wall,3,23,26,6);g.FillRectangle(wall,3,9,6,14);g.FillRectangle(wall,23,9,6,14);
+g.DrawRectangle(outline,3,3,26,26);g.DrawRectangle(orange,9,9,14,14);
+g.DrawLine(outline,4,6,12,6);g.DrawLine(outline,20,26,28,26);
+}else{
+g.FillRectangle(paper,2,3,16,20);g.DrawRectangle(outline,2,3,16,20);
+g.DrawLine(outline,5,8,13,8);g.DrawLine(outline,5,12,10,12);
+g.FillRectangle(paper,14,10,16,20);g.DrawRectangle(blue,14,10,16,20);
+g.DrawLine(blue,19,23,26,23);g.DrawLine(blue,19,27,26,27);
+g.DrawLine(orange,7,17,23,17);g.DrawLines(orange,new[]{new PointF(19,13),new PointF(23,17),new PointF(19,21)});
+}}

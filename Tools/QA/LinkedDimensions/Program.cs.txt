@@ -1,0 +1,121 @@
+using System;
+using System.Collections.Generic;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Selection;
+
+namespace Autodesk.Revit.DB
+{
+    public record ElementId(int Value) { public static ElementId InvalidElementId = new(-1); }
+    public class XYZ { public double X,Y,Z; public XYZ(double x,double y,double z) { X=x;Y=y;Z=z; } }
+    public class Transform
+    {
+        public double A=1,B,C,D=1,X,Y,Z;
+        public XYZ OfPoint(XYZ p) => new(A*p.X+B*p.Y+X,C*p.X+D*p.Y+Y,p.Z+Z);
+    }
+    public class Line
+    {
+        public XYZ Start,End;
+        public Line(XYZ a,XYZ b) { Start=a;End=b; }
+        public Line CreateTransformed(Transform t) => new(t.OfPoint(Start),t.OfPoint(End));
+    }
+    public class LocationCurve { public object Curve; }
+    public class Element { public ElementId Id; public object Location; }
+    public class Document
+    {
+        public List<Dimension> Dimensions=new();
+        public Dictionary<string,Element> Items=new();
+        public Element GetElement(string key) => Items.GetValueOrDefault(key);
+        public Element GetElement(ElementId id) => GetElement(id.Value.ToString());
+    }
+    public class View { public ElementId Id=new(1); }
+    public class Dimension : Element { public List<Reference> References=new(); public bool AreReferencesAvailable=true; }
+    public class FilteredElementCollector : System.Collections.IEnumerable
+    {
+        Document doc; public FilteredElementCollector(Document d,ElementId id){doc=d;}
+        public FilteredElementCollector OfClass(Type t)=>this;
+        public System.Collections.IEnumerator GetEnumerator()=>doc.Dimensions.GetEnumerator();
+    }
+    public class RevitLinkInstance : Element
+    {
+        public Document Source; public Transform Transform=new();
+        public Document GetLinkDocument()=>Source;
+        public Transform GetTotalTransform()=>Transform;
+    }
+    public class Reference
+    {
+        public ElementId ElementId,LinkedElementId;
+        public Reference CreateLinkReference(RevitLinkInstance link)=>new(){ElementId=link.Id,LinkedElementId=ElementId};
+    }
+}
+namespace Autodesk.Revit.UI.Selection
+{
+    public enum ObjectType { LinkedElement }
+    public interface ISelectionFilter { bool AllowElement(Element e); bool AllowReference(Reference r,XYZ p); }
+    public class Selection
+    {
+        public List<Element> Elements=new(); public List<Reference> References=new();
+        public IList<Element> PickElementsByRectangle(ISelectionFilter filter,string prompt)=>Elements;
+        public IList<Reference> PickObjects(ObjectType type,ISelectionFilter filter,string prompt)=>References;
+    }
+}
+namespace Autodesk.Revit.UI {
+    public class UIDocument { public Selection.Selection Selection=new(); }
+    public static class TaskDialog { public static int Count; public static void Show(string title,string text){Count++;} }
+}
+namespace YD_RevitTools.LicenseManager.Commands.MEP
+{
+    public partial class CmdMepPositionDimension
+    {
+        private static string objectLink;
+        private static string sourceLink;
+        private sealed class Filter : ISelectionFilter
+        {
+            public bool AllowElement(Element e)=>e.Location is LocationCurve;
+            public bool AllowReference(Reference r,XYZ p)=>false;
+        }
+        static int checks;
+        static void Check(bool value,string name) { checks++; if(!value)throw new Exception(name); }
+        static void Throws(Action action,string name) { try { action(); }catch(InvalidOperationException){checks++;return;} throw new Exception(name); }
+        public static void Main()
+        {
+            var host=new Document(); var source=new Document();
+            var pipe=new Element { Id=new(10), Location=new LocationCurve { Curve=new Line(new(1,2,3),new(4,2,3)) } };
+            source.Items["10"]=pipe;
+            var first=new RevitLinkInstance { Id=new(100),Source=source };
+            var second=new RevitLinkInstance { Id=new(200),Source=source };
+            host.Items["first"]=first; host.Items["second"]=second;
+            objectLink=null;Check(ResolveObjectLink(host)==null,"local source");
+            objectLink="first";Check(ResolveObjectLink(host)==first,"chosen instance");
+            objectLink="missing";Throws(()=>ResolveObjectLink(host),"missing must not fall back");
+            objectLink="first"; first.Source=null;Throws(()=>ResolveObjectLink(host),"unloaded must not fall back");first.Source=source;
+            var local=TargetLine(pipe,null);Check(ReferenceEquals(local,((LocationCurve)pipe.Location).Curve),"local unchanged");
+            first.Transform=new(){X=100,Y=-20,Z=5};var line=TargetLine(pipe,first);
+            Check(line.Start.X==101&&line.Start.Y==-18&&line.Start.Z==8,"translation");
+            first.Transform=new(){A=0,B=-1,C=1,D=0,X=10};line=TargetLine(pipe,first);
+            Check(line.Start.X==8&&line.Start.Y==1&&line.End.Y==4,"rotation");
+            second.Transform=new(){A=-1,X=50};line=TargetLine(pipe,second);
+            Check(line.Start.X==49&&line.End.X==46,"reflection second instance");
+            var r=new Reference {ElementId=pipe.Id};Check(ReferenceEquals(TargetReference(r,null),r),"local reference");
+            var linked=TargetReference(r,first);Check(linked.ElementId==first.Id&&linked.LinkedElementId==pipe.Id,"linked reference");
+            Check(TargetReference(r,second).ElementId!=linked.ElementId,"same file distinct references");
+            var filter=new LinkedTargetFilter(first,new Filter());
+            Check(filter.AllowElement(first)&&!filter.AllowElement(second),"instance filter");
+            Check(filter.AllowReference(linked,null),"valid target");
+            Check(!filter.AllowReference(TargetReference(r,second),null),"reject wrong instance");
+            Check(!filter.AllowReference(new(){ElementId=first.Id,LinkedElementId=ElementId.InvalidElementId},null),"reject root");
+            Check(!filter.AllowReference(new(){ElementId=first.Id,LinkedElementId=new(999)},null),"reject deleted element");
+            var ui=new UIDocument();ui.Selection.References.Add(linked);ui.Selection.References.Add(linked);
+            Check(PickTargets(ui,first,new Filter()).Count==1,"deduplicate picks");
+            ui.Selection.References.Add(TargetReference(r,second));Throws(()=>PickTargets(ui,first,new Filter()),"recheck selection identity");
+            Throws(()=>TargetLine(new Element(),first),"reject nonlinear geometry");
+            CheckExistingLinkedDimensions(host,new View(),first);Check(TaskDialog.Count==0,"no invalid references");
+            host.Dimensions.Add(new(){Id=new(301),References=new(){linked},AreReferencesAvailable=false});
+            CheckExistingLinkedDimensions(host,new View(),first);Check(TaskDialog.Count==1,"invalid link reference warning");
+            Check(host.Dimensions.Count==1,"audit does not delete dimensions");
+            CheckExistingLinkedDimensions(host,new View(),second);Check(TaskDialog.Count==1,"unrelated instance ignored");
+            sourceLink="first";CheckExistingLinkedDimensions(host,new View(),second);Check(TaskDialog.Count==2,"baseline link audited separately");
+            Console.WriteLine($"PASS {checks} actual-helper checks with mock Revit API; native linked dimension creation not tested.");
+        }
+    }
+}

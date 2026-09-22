@@ -34,19 +34,33 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             .Select(f.LookupParameter).FirstOrDefault(p => p != null && p.StorageType == StorageType.Double && !p.IsReadOnly);
         public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
         {
-            var ui = data.Application.ActiveUIDocument;
+            return ExecuteSelected(data.Application.ActiveUIDocument, null);
+        }
+
+        internal static Result ExecuteSelected(UIDocument ui, IList<Element> selected)
+        {
             if (ui == null || ui.Document.IsFamilyDocument) return Result.Cancelled;
             var doc = ui.Document;
             try
             {
                 if (!LicenseManager.Instance.HasFeatureAccess("MEP.PipeSleeve")) throw new InvalidOperationException("授權未包含套管功能。");
-                Level gl = SleeveGlLevel.Require(doc);
                 var filter = new Filter();
-                var selection = ui.Selection.GetElementIds().Select(doc.GetElement).ToList();
+                var selection = selected?.ToList() ?? ui.Selection.GetElementIds().Select(doc.GetElement).ToList();
+                if (selected != null && selection.Count == 0) return Result.Cancelled;
                 if (selection.Count == 0) selection = ui.Selection.PickObjects(ObjectType.Element, filter, "選取套管-圓形_無，可無來源管線；Esc 取消").Select(doc.GetElement).ToList();
                 if (selection.Any(e => !filter.AllowElement(e))) throw new InvalidOperationException("本次只支援套管-圓形_無，請排除其他元素。");
                 var sleeves = selection.Cast<FamilyInstance>().ToList();
                 if (sleeves.Count == 0) return Result.Cancelled;
+                Level gl;
+                var levels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l => l.ProjectElevation).ToList();
+                using (var combo = MepConnectionUi.Choices(new[] { new MepConnectionUi.Choice { Text="請選擇目標約束樓層", Value=null } }
+                    .Concat(levels.Select(l => new MepConnectionUi.Choice { Text=l.Name, Value=l }))))
+                using (var form = MepConnectionUi.Form("變更約束樓層", "目標樓層", combo))
+                {
+                    if (form.ShowDialog() != System.Windows.Forms.DialogResult.OK) return Result.Cancelled;
+                    gl = (combo.SelectedItem as MepConnectionUi.Choice)?.Value as Level;
+                    if (gl == null) throw new InvalidOperationException("未指定目標樓層，未修改套管。");
+                }
                 foreach (var f in sleeves)
                 {
                     if (f.Pinned || f.GroupId != ElementId.InvalidElementId || !(f.Location is LocationPoint) ||
@@ -66,14 +80,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 var portStates = sleeves.SelectMany(CmdRaftCadSleeve.Ports)
                     .SelectMany(c => new[] { c }.Concat(c.AllRefs.Cast<Connector>().Where(p => p.ConnectorType == ConnectorType.End)))
                     .Select(c => new PortState { Port=c, Origin=c.Origin, Direction=c.CoordinateSystem.BasisZ, Peers=Peers(c) }).ToList();
-                var preview = new TaskDialog("套管 GL 歸位") {
+                var preview = new TaskDialog("變更約束樓層") {
                     MainInstruction = $"將 {sleeves.Count} 支套管歸位至 {gl.Name}？",
                     MainContent = "保留原實例與位置；同步約束樓層及立面高程，不修改 TOP／BOP。任一驗證失敗即整批回復。",
                     ExpandedContent = string.Join("\n", originals.Select(x => $"{x.Sleeve.Id}：{SleeveGlLevel.Actual(doc,x.Sleeve)?.Name ?? "未確認"} → {gl.Name}，立面高程 {(x.Center.Z-gl.ProjectElevation)*304.8:0.##} mm")),
                     CommonButtons = TaskDialogCommonButtons.Ok | TaskDialogCommonButtons.Cancel, DefaultButton=TaskDialogResult.Cancel
                 };
                 if (preview.Show() != TaskDialogResult.Ok) return Result.Cancelled;
-                using (var tx = new Transaction(doc, "套管 GL 歸位（保留實例）"))
+                using (var tx = new Transaction(doc, "變更套管約束樓層（保留實例）"))
                 {
                     tx.Start();
                     foreach (var x in originals)
@@ -111,7 +125,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return Result.Succeeded;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException) { return Result.Cancelled; }
-            catch (Exception ex) { TaskDialog.Show("套管 GL 歸位", ex.Message); return Result.Failed; }
+            catch (Exception ex) { TaskDialog.Show("變更約束樓層", ex.Message); return Result.Failed; }
         }
     }
 }

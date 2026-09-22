@@ -1,0 +1,61 @@
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Selection;
+namespace Autodesk.Revit.DB {
+ public record ElementId(int Value);
+ public class Element { public ElementId Id; }
+ public class Document { public Dictionary<ElementId,Element> Items=new(); public Element GetElement(ElementId id)=>Items.GetValueOrDefault(id); }
+ public class RevitLinkInstance:Element { public string UniqueId; public Document Source=new(); public Document GetLinkDocument()=>Source; }
+ public class Reference { public ElementId ElementId; public string Key; public Reference Native; public string ConvertToStableRepresentation(Document d)=>Key; public Reference CreateReferenceInLink()=>Native; }
+ public class XYZ { public double X,Y,Z; public XYZ(double x,double y,double z){X=x;Y=y;Z=z;} public double DotProduct(XYZ p)=>X*p.X+Y*p.Y+Z*p.Z; public static XYZ operator -(XYZ a,XYZ b)=>new(a.X-b.X,a.Y-b.Y,a.Z-b.Z); }
+}
+namespace Autodesk.Revit.UI.Selection {
+ public enum ObjectType { PointOnElement }
+ public interface ISelectionFilter { bool AllowElement(Element e); bool AllowReference(Reference r,XYZ p); }
+ public class Selection { public Reference Pick; public Reference PickObject(ObjectType t,ISelectionFilter f,string s){if(!f.AllowReference(Pick,null))throw new InvalidOperationException();return Pick;} }
+}
+namespace Autodesk.Revit.UI {
+ public class UIDocument {public Selection.Selection Selection=new();}
+ public enum TaskDialogResult {Cancel,CommandLink1,CommandLink2}
+ public enum TaskDialogCommonButtons {Cancel}
+ public enum TaskDialogCommandLinkId {CommandLink1,CommandLink2}
+ public class TaskDialog {public static TaskDialogResult Answer; public static int Calls; public TaskDialog(string s){} public string MainInstruction,MainContent,ExpandedContent; public TaskDialogCommonButtons CommonButtons;public TaskDialogResult DefaultButton;public void AddCommandLink(TaskDialogCommandLinkId id,string s){}public TaskDialogResult Show(){Calls++;return Answer;}}
+}
+namespace YD_RevitTools.LicenseManager.Commands.MEP {
+ public partial class CmdMepPositionDimension {
+  private static decimal searchDistance=3000;
+  private sealed class BeamSide {internal Reference Reference;internal XYZ Origin,Normal;internal List<XYZ> Vertices;internal string Id;}
+  private sealed class BeamMatch {internal BeamSide Side;internal double Station,Distance,Section,Overlap,HeightGap;}
+  static int count;
+  static void Check(bool pass,string label){count++;if(!pass)throw new Exception(label);}
+  static BeamMatch Match(string id,int instance,string key,double x=0,double z=0,double gap=0)=>new(){Distance=1,Overlap=1,HeightGap=gap,Side=new(){Id=id,Reference=new(){ElementId=new(instance),Key=key},Origin=new(x,0,z),Normal=new(1,0,0),Vertices=new(){new(x,0,z),new(x,1,z+1)}}};
+  public static void Main(){
+   var n=new XYZ(0,0,1); var a=Match("A",1,"a"); var b=Match("A",1,"b",z:2);
+   Check(RankMatches(new(){a,b},n,0).Count==1,"same beam split plane");
+   b=Match("B",2,"b");Check(RankMatches(new(){a,b},n,0).Count==2,"different beams stay separate");
+   b=Match("A",2,"b");Check(RankMatches(new(){a,b},n,0).Count==2,"different link instances stay separate");
+   b=Match("A",1,"b",x:.6/304.8);Check(RankMatches(new(){a,b},n,0).Count==2,"offset plane not merged");
+   b=Match("A",1,"b");b.Side.Normal=new(-1,0,0);Check(RankMatches(new(){a,b},n,0).Count==2,"opposite side not merged");
+   b=Match("B",2,"b",gap:1);Check(RankMatches(new(){a,b},n,0).Single()==a,"actual elevation preferred");
+   a.HeightGap=2;Check(RankMatches(new(){a,b},n,0).Count==2,"no overlap remains ambiguous");a.HeightGap=0;
+   b=Match("B",2,"b");b.Distance=20;Check(RankMatches(new(){a,b},n,0).Single()==a,"primary search range");
+   b.Distance=1;var doc=new Document();var ui=new UIDocument();string cache=null;
+   Check(ChooseBeamMatch(ui,doc,new(){a},n,"x",ref cache)==a,"unique automatically selected");
+   b.Distance=2;Check(ChooseBeamMatch(ui,doc,new(){a,b},n,"x",ref cache)==a,"clear nearest selected");b.Distance=1;
+   TaskDialog.Answer=TaskDialogResult.CommandLink2;Check(ChooseBeamMatch(ui,doc,new(){a,b},n,"x",ref cache)==null,"skip no selection");
+   TaskDialog.Answer=TaskDialogResult.Cancel;bool canceled=false;try{ChooseBeamMatch(ui,doc,new(){a,b},n,"x",ref cache);}catch(OperationCanceledException){canceled=true;}Check(canceled,"cancel exits operation");
+   TaskDialog.Answer=TaskDialogResult.CommandLink1;ui.Selection.Pick=b.Side.Reference;Check(ChooseBeamMatch(ui,doc,new(){a,b},n,"x",ref cache)==b,"explicit face selected");
+   int calls=TaskDialog.Calls;Check(ChooseBeamMatch(ui,doc,new(){a,b},n,"x",ref cache)==b&&TaskDialog.Calls==calls,"valid cached choice");
+   var filter=new CandidateFaceFilter(doc,new[]{a,b});Check(!filter.AllowReference(new(){ElementId=new(99),Key="a"},null),"reject other element");
+   Check(!filter.AllowReference(new(){ElementId=new(1),Key="wrong"},null),"reject other face");
+   var l1=new RevitLinkInstance{Id=new(100),UniqueId="L1"};var l2=new RevitLinkInstance{Id=new(200),UniqueId="L2"};doc.Items[l1.Id]=l1;doc.Items[l2.Id]=l2;
+   var r1=new Reference{ElementId=l1.Id,Native=new(){Key="face"}};var r2=new Reference{ElementId=l2.Id,Native=new(){Key="face"}};
+   Check(FaceKey(doc,r1)!=FaceKey(doc,r2),"linked face identity includes instance");
+   l1.Source=null;bool rejected=false;try{FaceKey(doc,r1);}catch(InvalidOperationException){rejected=true;}Check(rejected,"unloaded link rejected");
+   Console.WriteLine($"PASS {count} real ranking/choice checks with mocked API; native dimensions not tested.");
+  }
+ }
+}

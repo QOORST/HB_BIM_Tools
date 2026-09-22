@@ -149,6 +149,7 @@ Write-Host "Creating shared resources..." -ForegroundColor Yellow
 
 # 1. Resources directory
 $sharedResourcesDir = Join-Path $installerDir "Resources"
+if ([IO.Path]::GetFullPath($sharedResourcesDir) -ne [IO.Path]::Combine([IO.Path]::GetFullPath($installerDir), 'Resources')) { throw 'Unsafe resources staging path' }
 if (Test-Path $sharedResourcesDir) {
     Remove-Item $sharedResourcesDir -Recurse -Force
 }
@@ -200,6 +201,7 @@ Write-Host "[OK] Copied $copiedCount dependency DLLs" -ForegroundColor Green
 
 $sourceRuntimes = Join-Path $baseBinDir "runtimes"
 $targetRuntimes = Join-Path $installerDir "runtimes"
+if ([IO.Path]::GetFullPath($targetRuntimes) -ne [IO.Path]::Combine([IO.Path]::GetFullPath($installerDir), 'runtimes')) { throw 'Unsafe runtimes staging path' }
 if (Test-Path $sourceRuntimes) {
     if (Test-Path $targetRuntimes) {
         Remove-Item $targetRuntimes -Recurse -Force

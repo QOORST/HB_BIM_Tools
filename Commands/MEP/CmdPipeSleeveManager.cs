@@ -17,6 +17,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     public class CmdPipeSleeveManager : IExternalCommand
     {
         private static PipeSleeveManagerForm _openForm;
+        private static PipeSleeveManagerRequestHandler _openHandler;
 
 public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
@@ -38,6 +39,12 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     return Result.Failed;
                 }
 
+                if (_openHandler != null && (_openForm == null || _openForm.IsDisposed || !_openHandler.IsCurrentDocument(commandData.Application)))
+                {
+                    _openHandler.ReleaseInApiContext();
+                    _openHandler = null;
+                    _openForm = null;
+                }
                 if (_openForm != null && !_openForm.IsDisposed)
                 {
                     _openForm.Activate();
@@ -46,15 +53,26 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
 
                 var handler = new PipeSleeveManagerRequestHandler();
                 ExternalEvent externalEvent = ExternalEvent.Create(handler);
+                try
+                {
+                handler.Bind(commandData.Application, uidoc.Document, externalEvent);
                 var form = new PipeSleeveManagerForm(commandData.Application, uidoc, handler, externalEvent);
                 handler.Window = form;
                 form.FormClosed += (s, e) =>
                 {
                     if (ReferenceEquals(_openForm, form)) _openForm = null;
-                    externalEvent.Dispose();
+                    handler.CloseRequested = true;
                 };
                 _openForm = form;
+                _openHandler = handler;
                 form.Show(new RevitWindow(commandData.Application.MainWindowHandle));
+                }
+                catch
+                {
+                    handler.ReleaseInApiContext();
+                    if (ReferenceEquals(_openHandler, handler)) { _openHandler = null; _openForm = null; }
+                    throw;
+                }
 
                 return Result.Succeeded;
             }
@@ -77,6 +95,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
     {
         None,
         Reload,
+        Organize,
+        Rebase,
         Focus,
         Delete,
         Update
@@ -87,14 +107,92 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         private PipeSleeveManagerAction _pendingAction = PipeSleeveManagerAction.None;
 
         public PipeSleeveManagerForm Window { get; set; }
-
-        public void Request(PipeSleeveManagerAction action)
+        private UIApplication _app;
+        private Document _document;
+        private ExternalEvent _event;
+        private bool _released;
+        private bool _busy;
+        private bool _refreshPending;
+        private bool _staleShown;
+        private long _lastChangeTick;
+        private string _viewId;
+        public bool CloseRequested { get; set; }
+        internal void Bind(UIApplication app, Document document, ExternalEvent externalEvent)
         {
-            _pendingAction = action;
+            _app = app; _document = document; _event = externalEvent;
+            _app.Idling += CheckDocument;
+            _app.Application.DocumentChanged += ModelChanged;
+            _viewId = document.ActiveView?.UniqueId;
         }
+        private void ModelChanged(object sender, Autodesk.Revit.DB.Events.DocumentChangedEventArgs args)
+        {
+            if (_released || CloseRequested || !_document.Equals(args.GetDocument())) return;
+            MarkRefreshPending();
+        }
+        private void MarkRefreshPending()
+        {
+            _refreshPending = true;
+            _staleShown = false;
+            _lastChangeTick = System.Diagnostics.Stopwatch.GetTimestamp();
+        }
+        internal void RowsRefreshed()
+        {
+            _refreshPending = false;
+            _staleShown = false;
+            _viewId = _document.ActiveView?.UniqueId;
+        }
+        internal bool IsCurrentDocument(UIApplication app) => _document != null && _document.IsValidObject &&
+            app.ActiveUIDocument?.Document != null && _document.Equals(app.ActiveUIDocument.Document);
+        private void CheckDocument(object sender, Autodesk.Revit.UI.Events.IdlingEventArgs args)
+        {
+            if (_released || _busy) return;
+            if (CloseRequested || Window == null || Window.IsDisposed || !IsCurrentDocument(_app))
+            { ReleaseInApiContext(); return; }
+            try
+            {
+                string viewId = _document.ActiveView?.UniqueId;
+                if (_viewId != viewId) { _viewId = viewId; MarkRefreshPending(); }
+                if (!_refreshPending) return;
+                if (!_staleShown) { Window.ShowRefreshState("模型已變更，等待重新檢查"); _staleShown = true; }
+                double elapsed = (System.Diagnostics.Stopwatch.GetTimestamp() - _lastChangeTick) / (double)System.Diagnostics.Stopwatch.Frequency;
+                if (_pendingAction != PipeSleeveManagerAction.None || _document.IsModifiable || elapsed < 0.75) return;
+                _busy = true;
+                if (!LicenseManager.Instance.HasFeatureAccess("MEP.PipeSleeve"))
+                    throw new InvalidOperationException("目前授權不包含套管管理功能。");
+                Window.ReloadRowsInternal();
+            }
+            catch (Exception ex)
+            {
+                // Keep the old snapshot and wait for an explicit retry or another model change.
+                _refreshPending = false;
+                Window.ShowRefreshState("自動檢查失敗，請按重新檢查。" + ex.Message);
+            }
+            finally { _busy = false; }
+        }
+        internal void ReleaseInApiContext()
+        {
+            if (_released) return;
+            CloseRequested = true;
+            _pendingAction = PipeSleeveManagerAction.None;
+            _app.Idling -= CheckDocument;
+            _app.Application.DocumentChanged -= ModelChanged;
+            if (Window != null && !Window.IsDisposed) Window.Close();
+            _event.Dispose();
+            _released = true;
+        }
+
+        public bool Request(PipeSleeveManagerAction action)
+        {
+            if (_released || CloseRequested || _busy || _pendingAction != PipeSleeveManagerAction.None) return false;
+            _pendingAction = action;
+            return true;
+        }
+        public void CancelRequest() { _pendingAction = PipeSleeveManagerAction.None; }
 
         public void Execute(UIApplication app)
         {
+            if (_released) return;
+            if (CloseRequested || !IsCurrentDocument(app)) { ReleaseInApiContext(); return; }
             PipeSleeveManagerAction action = _pendingAction;
             _pendingAction = PipeSleeveManagerAction.None;
 
@@ -103,10 +201,19 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
 
             try
             {
+                _busy = true;
+                if (!LicenseManager.Instance.HasFeatureAccess("MEP.PipeSleeve"))
+                    throw new InvalidOperationException("目前授權不包含套管管理功能。");
                 switch (action)
                 {
                     case PipeSleeveManagerAction.Reload:
+                        window.ReloadRowsInternal();
+                        break;
+                    case PipeSleeveManagerAction.Organize:
                         window.OrganizeSleevesInternal();
+                        break;
+                    case PipeSleeveManagerAction.Rebase:
+                        window.RebaseSelectedInternal();
                         break;
                     case PipeSleeveManagerAction.Focus:
                         window.FocusSelectedInternal();
@@ -123,6 +230,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             {
                 TaskDialog.Show("套管管理", "執行管理動作失敗:\n" + ex.Message);
             }
+            finally { _busy = false; }
         }
 
         public string GetName()
@@ -149,6 +257,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         private readonly WinForms.Label _summary = new WinForms.Label();
         private readonly WinForms.Label _detail = new WinForms.Label();
         private readonly WinForms.Label _scopeNote = new WinForms.Label();
+        private readonly WinForms.Label _syncState = new WinForms.Label();
         private readonly List<WinForms.Button> _selectionButtons = new List<WinForms.Button>();
         private List<PipeSleeveManagerRow> _allRows = new List<PipeSleeveManagerRow>();
 
@@ -168,10 +277,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             Text = "HB_BIM｜套管管理";
             Width = 1120;
             Height = 720;
-            MinimumSize = new Size(720, 480);
+            MinimumSize = new Size(760, 560);
             AutoScaleMode = WinForms.AutoScaleMode.Dpi;
             StartPosition = WinForms.FormStartPosition.CenterParent;
-            Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
             BackColor = System.Drawing.Color.White;
 
             var root = new WinForms.TableLayoutPanel
@@ -184,7 +293,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Percent, 100));
-            root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Absolute, 170));
+            root.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Absolute, 90));
+            root.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent,100));
             Controls.Add(root);
 
             var title = new WinForms.Label
@@ -214,6 +324,9 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _scopeNote.ForeColor = System.Drawing.Color.DimGray;
             _scopeNote.Margin = new WinForms.Padding(0, 0, 0, 8);
             titleStack.Controls.Add(_scopeNote);
+            _syncState.AutoSize = true;
+            _syncState.Margin = new WinForms.Padding(0,0,0,8);
+            titleStack.Controls.Add(_syncState);
             root.Controls.Add(titleStack, 0, 0);
 
             var filters = new WinForms.TableLayoutPanel
@@ -253,7 +366,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             filters.SetColumnSpan(quickFilters, 8);
 
             ConfigureGrid();
-            root.Controls.Add(_grid, 0, 2);
+            var split = new WinForms.SplitContainer { Dock=WinForms.DockStyle.Fill, Orientation=WinForms.Orientation.Horizontal,
+                Size=new Size(900,400), Panel1MinSize=60, Panel2MinSize=50, SplitterDistance=280 };
+            split.Panel1.Controls.Add(_grid);
+            root.Controls.Add(split, 0, 2);
 
             var bottom = new WinForms.TableLayoutPanel
             {
@@ -264,7 +380,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             };
             bottom.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 100));
             bottom.RowCount = 2;
-            bottom.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.Percent, 100));
+            bottom.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             bottom.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             root.Controls.Add(bottom, 0, 3);
 
@@ -282,9 +398,13 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _detail.AutoSize = true;
             _detail.MaximumSize = new Size(680, 0);
             _detail.ForeColor = System.Drawing.Color.DimGray;
-            infoStack.Controls.Add(_summary);
             infoStack.Controls.Add(_detail);
-            bottom.Controls.Add(infoStack, 0, 0);
+            split.Panel2.Controls.Add(infoStack);
+            var summaryBar = new WinForms.FlowLayoutPanel { AutoSize=true, Dock=WinForms.DockStyle.Fill };
+            var detailsToggle = new WinForms.CheckBox { Text="顯示明細", Checked=true, AutoSize=true };
+            detailsToggle.CheckedChanged += (s,e) => split.Panel2Collapsed=!detailsToggle.Checked;
+            summaryBar.Controls.Add(_summary); summaryBar.Controls.Add(detailsToggle);
+            bottom.Controls.Add(summaryBar, 0, 0);
 
             var buttons = new WinForms.FlowLayoutPanel
             {
@@ -294,20 +414,48 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 Dock = WinForms.DockStyle.Fill,
                 Padding = new WinForms.Padding(0)
             };
-            bottom.Controls.Add(buttons, 0, 1);
+            var actionBar = new WinForms.TableLayoutPanel { Dock=WinForms.DockStyle.Fill, AutoSize=true, AutoSizeMode=WinForms.AutoSizeMode.GrowAndShrink, ColumnCount=2 };
+            actionBar.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent,55));
+            actionBar.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent,45));
+            var tools = new WinForms.FlowLayoutPanel { Dock=WinForms.DockStyle.Fill, AutoSize=true, WrapContents=true };
+            actionBar.Controls.Add(tools,0,0); actionBar.Controls.Add(buttons,1,0);
+            bottom.Controls.Add(actionBar, 0, 1);
 
             buttons.Controls.Add(MakeButton("關閉", 92, (s, e) => Close()));
-            _selectionButtons.Add(MakeButton("刪除", 92, (s, e) => Raise(PipeSleeveManagerAction.Delete)));
             _selectionButtons.Add(MakeButton("更新", 92, (s, e) => Raise(PipeSleeveManagerAction.Update), true));
             _selectionButtons.Add(MakeButton("定位", 92, (s, e) => Raise(PipeSleeveManagerAction.Focus)));
             foreach (var button in _selectionButtons)
             {
                 button.Enabled = false;
-                buttons.Controls.Add(button);
+                if (button.Text == "定位") tools.Controls.Add(button);
+                else buttons.Controls.Add(button);
+                if (button.Text == "刪除") button.FlatAppearance.BorderSize = 0;
             }
-            buttons.Controls.Add(MakeButton("重新檢查", 110, (s, e) => Raise(PipeSleeveManagerAction.Reload)));
+            tools.Controls.Add(MakeButton("重新檢查", 110, (s, e) => Raise(PipeSleeveManagerAction.Reload)));
+            var moreMenu = new WinForms.ContextMenuStrip();
+            var rebaseItem = moreMenu.Items.Add("變更約束樓層", null, (s,e) => Raise(PipeSleeveManagerAction.Rebase));
+            moreMenu.Items.Add("整理編號", null, (s, e) => {
+                if (WinForms.MessageBox.Show(this, "重新整理目前視圖的套管編號？此操作會寫入模型。", "整理編號",
+                    WinForms.MessageBoxButtons.OKCancel, WinForms.MessageBoxIcon.Question,
+                    WinForms.MessageBoxDefaultButton.Button2) == WinForms.DialogResult.OK)
+                    Raise(PipeSleeveManagerAction.Organize);
+            });
+            moreMenu.Items.Add(new WinForms.ToolStripSeparator());
+            var deleteItem = moreMenu.Items.Add("刪除選取套管", null, (s,e) => Raise(PipeSleeveManagerAction.Delete));
+            moreMenu.Opening += (s,e) => {
+                bool selected = GetSelectedRows().Count > 0;
+                rebaseItem.Enabled = selected; deleteItem.Enabled = selected;
+            };
+            var moreButton = MakeButton("更多 ▾", 92, (s,e) => {
+                var button = (WinForms.Button)s;
+                moreMenu.Show(button, new System.Drawing.Point(0, button.Height));
+            });
+            tools.Controls.Add(moreButton);
+            Disposed += (s,e) => moreMenu.Dispose();
             root.SizeChanged += (s, e) => {
+                root.RowStyles[3].Height = (root.ClientSize.Width < 900 * DeviceDpi / 96.0 ? 130 : 90) * DeviceDpi / 96f;
                 _scopeNote.MaximumSize = new Size(Math.Max(100, root.ClientSize.Width - 40), 0);
+                _syncState.MaximumSize = new Size(Math.Max(100, root.ClientSize.Width - 40), 0);
                 _detail.MaximumSize = new Size(Math.Max(100, root.ClientSize.Width - 40), 0);
             };
             var area = WinForms.Screen.FromControl(this).WorkingArea;
@@ -389,12 +537,12 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _grid.CellToolTipTextNeeded += Grid_CellToolTipTextNeeded;
 
             _grid.Columns.Add(MakeColumn("Mark", "編號", 88));
-            _grid.Columns.Add(MakeColumn("Level", "樓層", 82));
-            _grid.Columns.Add(MakeColumn("SystemName", "系統", 210));
-            _grid.Columns.Add(MakeColumn("HostType", "穿越", 78));
-            _grid.Columns.Add(MakeColumn("NominalDiameter", "DN", 76));
-            _grid.Columns.Add(MakeColumn("Status", "狀態", 98));
-            _grid.Columns.Add(MakeColumn("CheckInfo", "檢核摘要", 360, true, true));
+            _grid.Columns.Add(MakeColumn("Level", "樓層", 95));
+            _grid.Columns.Add(MakeColumn("SystemName", "系統", 115));
+            _grid.Columns.Add(MakeColumn("HostType", "穿越", 70));
+            _grid.Columns.Add(MakeColumn("NominalDiameter", "DN", 65));
+            _grid.Columns.Add(MakeColumn("Status", "狀態", 85));
+            _grid.Columns.Add(MakeColumn("CheckInfo", "主要問題", 360, true, true));
         }
         private static bool ContainsAny(string text, params string[] terms)
         {
@@ -461,13 +609,15 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             {
                 _detail.Text = _grid.Rows.Count == 0
                     ? "目前範圍或篩選條件下沒有套管；請調整視圖或篩選條件後重新整理。"
-                    : "選取套管後可定位、更新或刪除，並查看長度、立面高程與類型。";
+                    : "未選取套管";
                 return;
             }
 
             PipeSleeveManagerRow row = selected[0];
             string multi = selected.Count > 1 ? $"，已選 {selected.Count} 筆" : string.Empty;
-            _detail.Text = $"長度 {Blank(row.LengthMm)} mm，立面 {Blank(row.ElevationMm)}，類型 {row.TypeName}{multi}\n{row.CheckDetails}";
+            _detail.Text = $"{row.Mark}｜{row.Status}{multi}\n{row.CheckDetails}\n" +
+                $"長度 {Blank(row.LengthMm)} mm｜立面高程 {Blank(row.ElevationMm)} mm｜{row.Level}\n" +
+                $"族型：{row.TypeName}\n元素 ID：{row.ElementIdValue}｜來源 ID：{row.SourcePipeIdValue}";
         }
 
         private static string Blank(string value)
@@ -476,8 +626,18 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         }
         private void Raise(PipeSleeveManagerAction action)
         {
-            _handler.Request(action);
-            _externalEvent.Raise();
+            if (!_handler.Request(action)) return;
+            try
+            {
+                var status = _externalEvent.Raise();
+                if (status != ExternalEventRequest.Accepted && status != ExternalEventRequest.Pending)
+                    throw new InvalidOperationException("Revit 尚無法接受操作，請結束目前指令後重試。");
+            }
+            catch (Exception ex)
+            {
+                _handler.CancelRequest();
+                WinForms.MessageBox.Show(this, ex.Message, "套管管理");
+            }
         }
 
         private static WinForms.DataGridViewTextBoxColumn MakeColumn(string property, string header, int width, bool fill = false, bool wrap = false)
@@ -487,15 +647,21 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 DataPropertyName = property,
                 HeaderText = header,
                 Width = width,
-                MinimumWidth = fill ? 220 : 60,
-                AutoSizeMode = fill ? WinForms.DataGridViewAutoSizeColumnMode.Fill : WinForms.DataGridViewAutoSizeColumnMode.AllCells,
+                MinimumWidth = fill ? 140 : 60,
+                AutoSizeMode = fill ? WinForms.DataGridViewAutoSizeColumnMode.Fill : WinForms.DataGridViewAutoSizeColumnMode.None,
                 SortMode = WinForms.DataGridViewColumnSortMode.Automatic
             };
-            if (wrap)
+            if (wrap || !fill)
             {
                 column.DefaultCellStyle.WrapMode = WinForms.DataGridViewTriState.True;
             }
             return column;
+        }
+
+        internal void ShowRefreshState(string message)
+        {
+            _syncState.Text = message;
+            _syncState.ForeColor = message.Contains("失敗") ? System.Drawing.Color.Firebrick : System.Drawing.Color.DarkOrange;
         }
 
         internal void ReloadRowsInternal()
@@ -503,14 +669,16 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _loadingFilters = true;
             try {
             _allRows = CollectSleeves(_doc, _doc.ActiveView);
-            _scopeNote.Text = BuildScopeNote(_doc.ActiveView, _allRows.Count) +
-                "　檢查時間：" + DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture) + "（非即時監控）";
+            _scopeNote.Text = BuildScopeNote(_doc.ActiveView, _allRows.Count);
             LoadFilter(_levelFilter, _allRows.Select(r => r.Level));
             LoadFilter(_systemFilter, _allRows.Select(r => r.SystemName));
             LoadFilter(_hostFilter, _allRows.Select(r => r.HostType));
             LoadFilter(_statusFilter, _allRows.Select(r => r.Status));
             } finally { _loadingFilters = false; }
             ApplyFilters();
+            _handler.RowsRefreshed();
+            _syncState.Text = "已檢查　" + DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture) + "｜自動檢查開啟";
+            _syncState.ForeColor = System.Drawing.Color.SeaGreen;
         }
 
         private static void LoadFilter(WinForms.ComboBox combo, IEnumerable<string> values)
@@ -529,6 +697,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         private void ApplyFilters()
         {
             if (_loadingFilters) return;
+            int scrollRow = _grid.FirstDisplayedScrollingRowIndex;
             var selectedIds = new HashSet<long>(GetSelectedRows().Select(r => r.ElementIdValue));
             string level = SelectedFilter(_levelFilter);
             string system = SelectedFilter(_systemFilter);
@@ -550,6 +719,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             _grid.ClearSelection();
             foreach (WinForms.DataGridViewRow gridRow in _grid.Rows)
                 if (gridRow.DataBoundItem is PipeSleeveManagerRow item && selectedIds.Contains(item.ElementIdValue)) gridRow.Selected = true;
+            if (scrollRow >= 0 && _grid.Rows.Count > 0)
+                _grid.FirstDisplayedScrollingRowIndex = Math.Min(scrollRow, _grid.Rows.Count - 1);
             int needAction = visible.Count(NeedsAttention);
             _summary.Text = $"顯示 {visible.Count} / {_allRows.Count} 個｜待處理 {needAction} 個（全部 {_allRows.Count(NeedsAttention)} 個）";
             UpdateDetail();
@@ -606,7 +777,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             {
                 tx.Start();
                 _doc.Delete(ids);
-                tx.Commit();
+                if (tx.Commit() != TransactionStatus.Committed)
+                    throw new InvalidOperationException("Revit 未提交刪除，請重新檢查模型。");
             }
 
             ReloadRowsInternal();
@@ -649,37 +821,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 .Distinct(new ElementIdComparer())
                 .ToList();
 
-            var annotationChecks = new List<Func<bool>>();
+            SleeveAnnotationGuard annotationGuard;
             try
             {
-                var protectedIds = new HashSet<long>(staleSleeveIds.Select(id => id.GetIdValue()));
-                var annotations = new List<Element>();
-                foreach (Dimension dimension in new FilteredElementCollector(_doc).OfClass(typeof(Dimension)))
-                {
-                    ReferenceArray references = dimension.References;
-                    if (references != null && references.Cast<Reference>().Any(reference =>
-                        reference.ElementId != null && protectedIds.Contains(reference.ElementId.GetIdValue())))
-                        annotations.Add(dimension);
-                }
-                foreach (IndependentTag tag in new FilteredElementCollector(_doc).OfClass(typeof(IndependentTag)))
-                    if (tag.GetTaggedLocalElementIds().Any(id => protectedIds.Contains(id.GetIdValue())))
-                        annotations.Add(tag);
-                foreach (var annotation in annotations)
-                {
-                    var id = annotation.Id;
-                    if (annotation is Dimension dimension)
-                    {
-                        var references = dimension.References.Cast<Reference>().Select(reference => reference.ConvertToStableRepresentation(_doc)).ToArray();
-                        annotationChecks.Add(() => _doc.GetElement(id) is Dimension current && current.AreReferencesAvailable &&
-                            current.References.Cast<Reference>().Select(reference => reference.ConvertToStableRepresentation(_doc)).SequenceEqual(references));
-                    }
-                    else if (annotation is IndependentTag tag)
-                    {
-                        var targets = new HashSet<long>(tag.GetTaggedLocalElementIds().Select(target => target.GetIdValue()));
-                        annotationChecks.Add(() => _doc.GetElement(id) is IndependentTag current && !current.IsOrphaned &&
-                            targets.SetEquals(current.GetTaggedLocalElementIds().Select(target => target.GetIdValue())));
-                    }
-                }
+                annotationGuard = new SleeveAnnotationGuard(_doc, staleSleeveIds);
             }
             catch (Exception ex)
             {
@@ -688,13 +833,22 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 return;
             }
 
-            string updateNotice = $"已選取 {selected.Count} 支套管，涉及 {pipes.Count} 條有效來源管線。\n" +
-                $"僅更新選取的 {staleSleeveIds.Count} 支套管，保留原構件，不新增或刪除其他套管。\n\n" +
-                "配對不明、需要換型或既有標註參考失效時，會回復本次更新。偏心可容納不代表必須更新。\n\n確定繼續？";
-            if (WinForms.MessageBox.Show(this, updateNotice, "確認套管更新範圍",
-                WinForms.MessageBoxButtons.OKCancel, WinForms.MessageBoxIcon.Warning,
-                WinForms.MessageBoxDefaultButton.Button2) != WinForms.DialogResult.OK) return;
             PipeSleeveOptions updateOptions = BuildUpdateOptions();
+            var previewRows = PipeSleeveService.PreviewSelectedUpdate(_doc, pipes,
+                staleSleeveIds.Select(id => _doc.GetElement(id)).Cast<FamilyInstance>().ToList(), updateOptions);
+            foreach (var previewRow in previewRows)
+            {
+                if (long.TryParse(previewRow.Id, out long id) &&
+                    _doc.GetElement(RevitApiCompatibility.CreateElementId(id)) is FamilyInstance instance)
+                {
+                    var inspection = PipeSleeveManagerRow.From(_doc, instance);
+                    previewRow.CurrentCheckStatus = inspection.Status;
+                    previewRow.CurrentCheckSummary = inspection.CheckInfo;
+                    previewRow.CurrentCheckDetails = inspection.CheckDetails;
+                }
+            }
+            using (var preview = new SleeveUpdatePreviewForm(previewRows))
+                if (preview.ShowDialog(this) != WinForms.DialogResult.OK) return;
             PipeSleeveResult result;
             try
             {
@@ -721,8 +875,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 }
             }
 
-            if (annotationChecks.Any(check => !check()))
-                throw new InvalidOperationException("既有尺寸或標籤參考失效，需確認後修復。");
+            annotationGuard.Verify();
             if (group.Assimilate() != TransactionStatus.Committed)
                 throw new InvalidOperationException("Revit 未完成更新交易群組。");
             }
@@ -795,7 +948,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     LimitToActiveView = true,
                     ActiveViewId = _doc.ActiveView != null ? _doc.ActiveView.Id : ElementId.InvalidElementId
                 });
-                tx.Commit();
+                if (tx.Commit() != TransactionStatus.Committed)
+                    throw new InvalidOperationException("Revit 未提交編號整理，請重新檢查模型。");
             }
 
             ReloadRowsInternal();
@@ -941,6 +1095,20 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         {
             var actual = SleeveGlLevel.Actual(doc, sleeve);
             return actual?.Name ?? "約束樓層未確認";
+        }
+
+        internal void RebaseSelectedInternal()
+        {
+            var selected = GetSelectedRows().Select(r => _doc.GetElement(RevitApiCompatibility.CreateElementId(r.ElementIdValue))).ToList();
+            if (selected.Count == 0) return;
+            if (selected.Any(e => e == null))
+            {
+                ReloadRowsInternal();
+                WinForms.MessageBox.Show(this, "選取套管已變更或刪除，請重新選取。", "變更約束樓層");
+                return;
+            }
+            CmdSleeveGlRebase.ExecuteSelected(_uidoc, selected);
+            ReloadRowsInternal();
         }
 
         private static string GetLegacySleeveLevelName(Document doc, FamilyInstance sleeve)
@@ -1105,14 +1273,13 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     checkInfo = positionInfo + (string.IsNullOrWhiteSpace(checkInfo) ? string.Empty : "；" + checkInfo);
                 if (!RaftCadRecord.IsManaged(sleeve))
                 {
-                    var gl = SleeveGlLevel.Read(doc);
                     var actual = SleeveGlLevel.Actual(doc, sleeve);
-                    if (gl == null || actual?.Id != gl.Id)
+                    if (actual == null)
                     {
-                        string reason = gl == null ? "尚未指定 GL 約束樓層" : "約束樓層不符 GL：" + (actual?.Name ?? "未確認") + " → " + gl.Name;
+                        string reason = "無有效約束樓層，請使用更多 → 變更約束樓層";
                         brief = reason;
                         checkInfo = reason + "；" + checkInfo;
-                        if (status == "正常" || status == "偏心可容納" || status == "待確認") status = gl == null ? "待確認" : "需更新";
+                        if (status == "正常" || status == "偏心可容納" || status == "待確認") status = "待確認";
                     }
                 }
 
@@ -1168,10 +1335,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             {
                 brief = string.Empty;
                 positionInfo = string.Empty;
-                if (source == null) return "來源遺失";
+                if (source == null) { brief = "找不到來源管線"; return "來源遺失"; }
                 LocationPoint sleevePoint = sleeve.Location as LocationPoint;
                 LocationCurve sourceCurve = source.Location as LocationCurve;
-                if (sleevePoint == null || sourceCurve == null) return "需檢查";
+                if (sleevePoint == null || sourceCurve == null) { brief = "無法取得定位幾何"; return "需檢查"; }
 
                 try
                 {
@@ -1179,7 +1346,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                         return GetRoundPipeStatus(sleeve, pipe, out positionInfo, out brief);
                     Curve curve = sourceCurve.Curve;
                     IntersectionResult projected = curve.Project(sleevePoint.Point);
-                    if (projected == null) return "需檢查";
+                    if (projected == null) { brief = "無法投影至來源管段"; return "需檢查"; }
                     XYZ nearest = projected.XYZPoint;
                     // Project may return a point on the unbounded extension of the curve.
                     if (curve.IsBound && (projected.Parameter < curve.GetEndParameter(0) ||
@@ -1192,6 +1359,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     double distanceMm = nearest.DistanceTo(sleevePoint.Point) * 304.8;
                     if (distanceMm > 1.0)
                     {
+                        brief = $"偏離來源 {distanceMm:0.##} mm";
                         positionInfo = "套管定位點偏離來源管段 " + distanceMm.ToString("0.##", CultureInfo.InvariantCulture) + " mm（容差 1 mm）";
                         return "需更新";
                     }
@@ -1199,21 +1367,38 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 }
                 catch
                 {
+                    brief = "位置檢查未完成";
                     return "需檢查";
                 }
             }
 
             private static string GetRoundPipeStatus(FamilyInstance sleeve, Pipe pipe, out string info, out string brief)
             {
-                brief = "尺寸或接點資料待確認";
-                info = "圓管淨空待確認：需明確內徑、兩端圓形接點及直線來源管段。";
+                brief = "來源不是直線管段";
+                info = "來源管線不是直線，尚無法完成圓管淨空檢查。";
                 var line = (pipe.Location as LocationCurve)?.Curve as Line;
+                if (line == null) return "待確認";
                 var ports = sleeve.MEPModel?.ConnectorManager?.Connectors.Cast<Connector>()
                     .Where(c => c.ConnectorType == ConnectorType.End).ToList();
-                if (line == null || ports == null || ports.Count != 2 ||
-                    ports.Any(c => c.Shape != ConnectorProfileType.Round)) return "待確認";
+                if (ports == null || ports.Count != 2)
+                {
+                    brief = $"端點接點 {ports?.Count ?? 0} 個，需 2 個";
+                    info = brief + "。請檢查目前模型中的套管族群；更新套管位置不會重新載入族群接點。";
+                    return "待確認";
+                }
+                if (ports.Any(c => c.Shape != ConnectorProfileType.Round))
+                {
+                    brief = "接點不是圓形";
+                    info = "套管端點接點包含非圓形接點，無法套用圓管淨空檢查。";
+                    return "待確認";
+                }
                 XYZ axis = ports[1].Origin - ports[0].Origin;
-                if (axis.GetLength() < 1e-6) return "待確認";
+                if (axis.GetLength() < 1e-6)
+                {
+                    brief = "兩端接點重疊";
+                    info = "套管兩端接點位置重疊，無法確認穿越方向。";
+                    return "待確認";
+                }
                 if (Math.Abs(axis.Normalize().DotProduct(line.Direction)) < 0.999999)
                 {
                     info = "管線與套管不同向，斜穿淨空需人工確認。";
@@ -1244,8 +1429,18 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     }
                 }
                 double outer = pipe.get_Parameter(BuiltInParameter.RBS_PIPE_OUTER_DIAMETER)?.AsDouble() * 304.8 ?? 0;
-                if (inner <= 0 || outer <= 0 || double.IsNaN(inner) || double.IsNaN(outer) ||
-                    double.IsInfinity(inner) || double.IsInfinity(outer)) return "待確認";
+                if (inner <= 0 || double.IsNaN(inner) || double.IsInfinity(inner))
+                {
+                    brief = "缺少有效套管內徑";
+                    info = "未取得有效內徑，也無法由管外直徑減兩倍壁厚推算。請確認實例或族型的長度參數；公稱尺寸與接點半徑不代替淨內徑。";
+                    return "待確認";
+                }
+                if (outer <= 0 || double.IsNaN(outer) || double.IsInfinity(outer))
+                {
+                    brief = "缺少來源管外徑";
+                    info = "來源管線的外徑參數無有效值，無法計算剩餘淨空。";
+                    return "待確認";
+                }
                 double offset = 0;
                 foreach (var port in ports)
                 {

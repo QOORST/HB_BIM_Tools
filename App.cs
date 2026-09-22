@@ -478,7 +478,7 @@ namespace YD_RevitTools.LicenseManager
                     "• One-click batch placement\n" +
                     "• Auto-numbering and distance measurement";
 
-                SetButtonIcon(pipeSleeveData, "pipe_sleeve_wall");
+                SetButtonIcon(pipeSleeveData, "sleeve_create");
 
                 panel.AddItem(pipeSleeveData);
             }
@@ -945,7 +945,7 @@ namespace YD_RevitTools.LicenseManager
 
                 pipeSleeveData.ToolTip = "自動套管";
                 pipeSleeveData.LongDescription = "為穿越牆、樓板與梁的管線及風管自動建立套管。";
-                SetButtonIcon(pipeSleeveData, "pipe_sleeve_wall");
+                SetButtonIcon(pipeSleeveData, "sleeve_create");
                 sleeveMenu?.AddPushButton(pipeSleeveData);
                 PushButtonData pipeSleeveManagerData = new PushButtonData(
                     "PipeSleeveManager",
@@ -955,27 +955,12 @@ namespace YD_RevitTools.LicenseManager
 
                 pipeSleeveManagerData.ToolTip = "套管管理";
                 pipeSleeveManagerData.LongDescription = "檢視、篩選、定位、刪除與更新自動生成的管線套管。";
-                SetButtonIcon(pipeSleeveManagerData, "pipe_sleeve");
+                SetButtonIcon(pipeSleeveManagerData, "sleeve_manage");
                 sleeveMenu?.AddPushButton(pipeSleeveManagerData);
-                var sleeveGl = new PushButtonData("SleeveGlSettings", "套管 GL\n基準", assemblyPath,
-                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdSleeveGlSettings");
-                SetButtonIcon(sleeveGl, "pipe_sleeve");
-                sleeveGl.ToolTip = "指定本專案自動套管共同約束樓層；不直接搬移既有套管。";
-                sleeveMenu?.AddPushButton(sleeveGl);
-                var sleeveRebase = new PushButtonData("SleeveGlRebase", "套管 GL\n歸位", assemblyPath,
-                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdSleeveGlRebase");
-                SetButtonIcon(sleeveRebase, "pipe_sleeve");
-                sleeveRebase.ToolTip = "保留套管實例與位置，同步 GL 約束及立面高程；不需來源管線。";
-                sleeveMenu?.AddPushButton(sleeveRebase);
-                var parameterCopy = new PushButtonData("ParameterCopy", "參數\n複製", assemblyPath,
-                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdParameterCopy");
-                SetButtonIcon(parameterCopy, "pipe_sleeve");
-                parameterCopy.ToolTip = "批次複製實例長度參數，預覽後寫入；幾何檢核失敗則回復。";
-                sleeveMenu?.AddPushButton(parameterCopy);
-                var raftCad = new PushButtonData("RaftCadSleeve", "筏基 CAD\n定位", assemblyPath,
+                var raftCad = new PushButtonData("RaftCadSleeve", "CAD 建立\n套管", assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.MEP.CmdRaftCadSleeve");
                 raftCad.ToolTip = "依 CAD 點選位置，以套管外頂或外底高程建立連通、通氣與溢水管。";
-                SetButtonIcon(raftCad, "pipe_sleeve");
+                SetButtonIcon(raftCad, "sleeve_cad_create");
                 sleeveMenu?.AddPushButton(raftCad);
                 PushButtonData architecturalOpeningData = new PushButtonData(
                     "ArchitecturalOpeningFromSleeves",
@@ -985,7 +970,7 @@ namespace YD_RevitTools.LicenseManager
 
                 architecturalOpeningData.ToolTip = "依 MEP 套管建立建築開孔/預留洞";
                 architecturalOpeningData.LongDescription = "在建築模型中讀取連結 MEP 模型的自動套管需求，建立或更新建築端開孔/預留洞切割元件。";
-                SetButtonIcon(architecturalOpeningData, "pipe_sleeve_wall");
+                SetButtonIcon(architecturalOpeningData, "sleeve_opening");
                 sleeveMenu?.AddSeparator();
                 sleeveMenu?.AddPushButton(architecturalOpeningData);
             }
@@ -1055,6 +1040,14 @@ namespace YD_RevitTools.LicenseManager
             }
 
             // === 族參數名稱修改 ===
+            if (!HasButton(panel, "ParameterCopy"))
+            {
+                var parameterCopy = new PushButtonData("ParameterCopy", "參數\n複製", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdParameterCopy");
+                SetButtonIcon(parameterCopy, "parameter_copy");
+                parameterCopy.ToolTip = "預覽並複製實例參數；保留原有參數型別與幾何檢核。";
+                panel.AddItem(parameterCopy);
+            }
             if (!HasButton(panel, "FamilyParameterRename"))
             {
                 PushButtonData familyParameterRenameData = new PushButtonData(

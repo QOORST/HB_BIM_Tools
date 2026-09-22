@@ -73,7 +73,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     tx.Start(); SleeveGlLevel.Select(doc);
                     if (tx.Commit() != TransactionStatus.Committed) return Result.Failed;
                 }
-                TaskDialog.Show("套管 GL 樓層", "設定已儲存於本專案。既有套管尚未變更；重新檢查後可執行更新。");
+                TaskDialog.Show("套管 GL 樓層", "歸位基準已儲存。既有套管尚未變更；需變更約束樓層時，請選取套管執行樓層歸位。一般更新會保留原樓層。");
                 return Result.Succeeded;
             }
             catch (System.OperationCanceledException) { return Result.Cancelled; }
