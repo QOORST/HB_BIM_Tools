@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Plumbing;
+using YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services;
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
 {
@@ -20,6 +21,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
         /// 管線系統名稱
         /// </summary>
         public string SystemName { get; set; }
+        public ElementId SystemId { get; set; } = ElementId.InvalidElementId;
+        public SystemSnapshot Snapshot { get; set; }
+        public List<Element> GetScopedElements(Document doc)
+        {
+            if (Snapshot == null) Snapshot = SystemSnapshot.Capture(doc.GetElement(SystemId) as PipingSystem);
+            return Snapshot.Elements.ToList();
+        }
 
         /// <summary>
         /// 系統類型（供水、排水、消防等）
@@ -150,87 +158,72 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
         /// <param name="doc">Revit 文件</param>
         public void GenerateBOMFromSystem(Document doc)
         {
-            if (doc == null || string.IsNullOrEmpty(SystemName))
-                return;
-
+            if (doc == null) throw new ArgumentNullException(nameof(doc));
             BillOfMaterials.Clear();
-            Dictionary<string, BOMItem> bomDict = new Dictionary<string, BOMItem>();
-
-            try
+            var elements = GetScopedElements(doc);
+            if (elements.Count == 0)
+                throw new InvalidOperationException("選定系統沒有管路元件。");
+            var items = new Dictionary<string, BOMItem>();
+            // 收集失敗時不退回不完整的路徑資料，也不交付部分 BOM。
+            foreach (Element element in elements)
             {
-                // 查找管線系統
-                FilteredElementCollector systemCollector = new FilteredElementCollector(doc)
-                    .OfClass(typeof(PipingSystem));
-
-                PipingSystem targetSystem = null;
-                foreach (PipingSystem system in systemCollector)
-                {
-                    if (system.Name == SystemName)
-                    {
-                        targetSystem = system;
-                        break;
-                    }
-                }
-
-                if (targetSystem == null)
-                    return;
-
-                // 獲取系統中的所有元件
-                ElementSet systemElements = targetSystem.PipingNetwork;
-                if (systemElements == null || systemElements.Size == 0)
-                    return;
-
-                // 處理每個元件
-                foreach (Element element in systemElements)
-                {
-                    if (element is Pipe pipe)
-                    {
-                        ProcessPipeForBOM(pipe, bomDict);
-                    }
-                    else if (element is FamilyInstance fitting)
-                    {
-                        ProcessFittingForBOM(fitting, bomDict, doc);
-                    }
-                }
-
-                // 添加項次編號並加入清單
-                int itemNumber = 1;
-                var sortedItems = bomDict.Values.OrderBy(b => b.Type).ThenBy(b => b.Diameter).ToList();
-                foreach (var bomItem in sortedItems)
-                {
-                    bomItem.ItemNumber = itemNumber++;
-                    BillOfMaterials.Add(bomItem);
-                }
+                if (element is Pipe pipe) ProcessPipeForBOM(pipe, items);
+                else if (element is FamilyInstance fitting) ProcessFittingForBOM(fitting, items, doc);
             }
-            catch (Exception)
+            if (items.Count == 0) throw new InvalidOperationException("沒有可統計的管線或配件。");
+            int number = 1;
+            foreach (var item in items.Values.OrderBy(b => b.Type).ThenBy(b => b.Diameter).ThenBy(b => b.Description))
             {
-                // 如果直接收集失敗,回退到使用段資料
-                GenerateBOM();
+                item.ItemNumber = number++;
+                BillOfMaterials.Add(item);
             }
+            if (BillOfMaterials.Sum(b => b.Quantity) != elements.Count)
+                throw new InvalidOperationException("材料表件數與核對範圍不符，已停止匯出。");
+            TotalLength = BillOfMaterials.Where(b => b.Type == "Pipe").Sum(b => b.TotalLength);
+            double capturedLength = Snapshot.Rows.Where(r => r.Included && r.Element is Pipe)
+                .Sum(r => r.LengthMm ?? throw new InvalidOperationException("核對範圍含無法讀取長度的管線。"));
+            if (Math.Abs(TotalLength - capturedLength) > 0.001)
+                throw new InvalidOperationException("材料表長度與核對範圍不符，已停止匯出。");
         }
 
+        internal static string ReadMaterial(Element element)
+        {
+            foreach (var source in new[] { element, element.Document.GetElement(element.GetTypeId()) })
+            {
+                if (source == null) continue;
+                foreach (var parameter in new[] { source.get_Parameter(BuiltInParameter.RBS_PIPE_MATERIAL_PARAM),
+                    source.LookupParameter("材料"), source.LookupParameter("Material") })
+                {
+                    string value = ReadMaterialParameter(parameter, element.Document);
+                    if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+                }
+            }
+            return "未指定";
+        }
+
+        private static string ReadMaterialParameter(Parameter parameter, Document doc)
+        {
+            if (parameter == null || !parameter.HasValue) return null;
+            if (parameter.StorageType == StorageType.ElementId)
+                return (doc.GetElement(parameter.AsElementId()) as Material)?.Name;
+            if (parameter.StorageType == StorageType.String) return parameter.AsString();
+            return null;
+        }
         private void ProcessPipeForBOM(Pipe pipe, Dictionary<string, BOMItem> bomDict)
         {
             double diameter = UnitUtils.ConvertFromInternalUnits(pipe.Diameter, UnitTypeId.Millimeters);
             LocationCurve locationCurve = pipe.Location as LocationCurve;
-            double length = 0;
+            double length;
 
             if (locationCurve != null)
             {
                 length = UnitUtils.ConvertFromInternalUnits(locationCurve.Curve.Length, UnitTypeId.Millimeters);
             }
+            else throw new InvalidOperationException("管線 " + pipe.Id + " 缺少模型長度，已停止算量。");
 
             string typeName = pipe.PipeType.Name;
-            string material = "聚氯乙烯"; // 預設材料
-
-            Parameter materialParam = pipe.LookupParameter("材料") ?? pipe.LookupParameter("Material");
-            if (materialParam != null && materialParam.HasValue)
-            {
-                material = materialParam.AsValueString() ?? material;
-            }
-
-            string key = $"Pipe_{diameter:F0}_{typeName}";
-
+            string material = ReadMaterial(pipe);
+            string key = $"Pipe|{pipe.GetTypeId()}|{diameter:R}|{material}";
             if (!bomDict.ContainsKey(key))
             {
                 bomDict[key] = new BOMItem
@@ -239,7 +232,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
                     Diameter = diameter,
                     Description = typeName,
                     Material = material,
-                    Unit = "m",
+                    Unit = "段",
                     Quantity = 0,
                     TotalLength = 0
                 };
@@ -255,60 +248,23 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
             string fittingType = GetFittingType(fitting);
             string typeName = fitting.Symbol.Name;
             
-            // 獲取管徑
-            double diameter = 0;
-            
-            // 嘗試從連接器獲取管徑
-            ConnectorSet connectors = fitting.MEPModel?.ConnectorManager?.Connectors;
-            if (connectors != null && connectors.Size > 0)
-            {
-                foreach (Connector conn in connectors)
-                {
-                    if (conn.Domain == Domain.DomainPiping)
-                    {
-                        diameter = UnitUtils.ConvertFromInternalUnits(conn.Radius * 2, UnitTypeId.Millimeters);
-                        break;
-                    }
-                }
-            }
-
-            // 如果沒有連接器,嘗試從參數獲取
-            if (diameter == 0)
-            {
-                Parameter diamParam = fitting.LookupParameter("尺寸") ?? 
-                                     fitting.LookupParameter("Size") ??
-                                     fitting.LookupParameter("管徑");
-                if (diamParam != null && diamParam.HasValue)
-                {
-                    if (diamParam.StorageType == StorageType.Double)
-                    {
-                        diameter = UnitUtils.ConvertFromInternalUnits(diamParam.AsDouble(), UnitTypeId.Millimeters);
-                    }
-                    else if (diamParam.StorageType == StorageType.String)
-                    {
-                        string sizeStr = diamParam.AsString();
-                        if (double.TryParse(sizeStr, out double parsedSize))
-                        {
-                            diameter = parsedSize;
-                        }
-                    }
-                }
-            }
-
-            string material = "聚氯乙烯"; // 預設材料
-            Parameter materialParam = fitting.LookupParameter("材料") ?? fitting.LookupParameter("Material");
-            if (materialParam != null && materialParam.HasValue)
-            {
-                material = materialParam.AsValueString() ?? material;
-            }
-
-            string key = $"{fittingType}_{diameter:F0}_{typeName}";
-
+            double diameter = PipeToISOCommand.GetPipeDiameter(fitting, doc);
+            var connectors = fitting.MEPModel?.ConnectorManager?.Connectors;
+            var sizes = connectors == null ? new List<double>() : connectors.Cast<Connector>()
+                .Where(c => c.Domain == Domain.DomainPiping && c.Shape == ConnectorProfileType.Round)
+                .Select(c => UnitUtils.ConvertFromInternalUnits(c.Radius * 2, UnitTypeId.Millimeters))
+                .OrderByDescending(d => d).ToList();
+            string sizeText = sizes.Count > 0
+                ? string.Join("×", sizes.Select(d => ExportFormatting.Number(d, "0.###")))
+                : diameter > 0 ? ExportFormatting.Number(diameter, "0.###") : "未指定";
+            string material = ReadMaterial(fitting);
+            string key = $"{fittingType}|{fitting.GetTypeId()}|{sizeText}|{material}";
             if (!bomDict.ContainsKey(key))
             {
                 bomDict[key] = new BOMItem
                 {
                     Type = fittingType,
+                    SizeText = sizeText,
                     Diameter = diameter,
                     Description = typeName,
                     Material = material,
@@ -323,6 +279,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
 
         private string GetFittingType(FamilyInstance fitting)
         {
+            var category = fitting.Category?.Id;
+            if (category == new ElementId(BuiltInCategory.OST_Sprinklers)) return "Sprinkler";
+            if (category == new ElementId(BuiltInCategory.OST_PlumbingFixtures)) return "PlumbingFixture";
             string familyName = fitting.Symbol.Family.Name.ToUpper();
             string typeName = fitting.Symbol.Name.ToUpper();
 
@@ -350,14 +309,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
                 familyName.Contains("管帽") || typeName.Contains("封頭"))
                 return "Cap";
 
-            return "Fitting";
+            return category == new ElementId(BuiltInCategory.OST_PipeAccessory) ? "PipeAccessory" : "Fitting";
         }
 
         private void ProcessSegmentsForBOM(List<PipeSegment> segments, Dictionary<string, BOMItem> bomDict)
         {
             foreach (var segment in segments)
             {
-                string key = $"{segment.Type}_{segment.Diameter:F0}_{segment.TypeName}";
+                string key = $"{segment.Type}|{segment.Diameter:R}|{segment.FamilyName}|{segment.TypeName}|{segment.Material}";
 
                 if (!bomDict.ContainsKey(key))
                 {
@@ -366,8 +325,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
                         Type = segment.Type,
                         Diameter = segment.Diameter,
                         Description = segment.TypeName,
-                        Material = segment.Material,
-                        Unit = segment.Type == "Pipe" ? "m" : "個",
+                        Material = ExportFormatting.MaterialOrUnknown(segment.Material),
+                        Unit = segment.Type == "Pipe" ? "段" : "個",
                         Quantity = 0,
                         TotalLength = 0
                     };
@@ -403,6 +362,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Models
         /// 管徑（mm）
         /// </summary>
         public double Diameter { get; set; }
+        public string SizeText { get; set; }
 
         /// <summary>
         /// 描述

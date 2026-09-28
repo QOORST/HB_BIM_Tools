@@ -9,7 +9,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
 {
     /// <summary>
     /// PCF (Piping Component File) 匯出器
-    /// PCF 是管線加工行業的標準格式，用於 CNC 切割和彎管機
+    /// 實驗性 PCF 輸出，尚未驗證下游匯入或加工適用性
     /// </summary>
     public class PCFExporter
     {
@@ -129,7 +129,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
         {
             sb.AppendLine($"        PIPE");
             sb.AppendLine($"            ITEM-CODE {segment.SequenceNumber}");
-            sb.AppendLine($"            PIPING-SPEC {segment.Material ?? "CARBON-STEEL"}");
+            sb.AppendLine($"            PIPING-SPEC {ExportFormatting.MaterialOrUnknown(segment.Material)}");
             sb.AppendLine($"            NOMINAL-DIAMETER {segment.Diameter:F1}");
             sb.AppendLine($"            END-POINT {FormatCoordinate(segment.StartPoint)}");
             sb.AppendLine($"            END-POINT {FormatCoordinate(segment.EndPoint)}");
@@ -150,7 +150,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
         {
             sb.AppendLine($"        ELBOW");
             sb.AppendLine($"            ITEM-CODE {segment.SequenceNumber}");
-            sb.AppendLine($"            PIPING-SPEC {segment.Material ?? "CARBON-STEEL"}");
+            sb.AppendLine($"            PIPING-SPEC {ExportFormatting.MaterialOrUnknown(segment.Material)}");
             sb.AppendLine($"            NOMINAL-DIAMETER {segment.Diameter:F1}");
             sb.AppendLine($"            CENTRE-POINT {FormatCoordinate(segment.CenterPoint)}");
             sb.AppendLine($"            ANGLE 45");  // 預設 45 度，可依實際情況調整
@@ -171,7 +171,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
         {
             sb.AppendLine($"        TEE");
             sb.AppendLine($"            ITEM-CODE {segment.SequenceNumber}");
-            sb.AppendLine($"            PIPING-SPEC {segment.Material ?? "CARBON-STEEL"}");
+            sb.AppendLine($"            PIPING-SPEC {ExportFormatting.MaterialOrUnknown(segment.Material)}");
             sb.AppendLine($"            NOMINAL-DIAMETER {segment.Diameter:F1}");
             sb.AppendLine($"            CENTRE-POINT {FormatCoordinate(segment.CenterPoint)}");
             
@@ -190,7 +190,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
         {
             sb.AppendLine($"        REDUCER");
             sb.AppendLine($"            ITEM-CODE {segment.SequenceNumber}");
-            sb.AppendLine($"            PIPING-SPEC {segment.Material ?? "CARBON-STEEL"}");
+            sb.AppendLine($"            PIPING-SPEC {ExportFormatting.MaterialOrUnknown(segment.Material)}");
             sb.AppendLine($"            NOMINAL-DIAMETER {segment.Diameter:F1}");
             sb.AppendLine($"            CENTRE-POINT {FormatCoordinate(segment.CenterPoint)}");
             
@@ -209,7 +209,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
         {
             sb.AppendLine($"        FLANGE");
             sb.AppendLine($"            ITEM-CODE {segment.SequenceNumber}");
-            sb.AppendLine($"            PIPING-SPEC {segment.Material ?? "CARBON-STEEL"}");
+            sb.AppendLine($"            PIPING-SPEC {ExportFormatting.MaterialOrUnknown(segment.Material)}");
             sb.AppendLine($"            NOMINAL-DIAMETER {segment.Diameter:F1}");
             sb.AppendLine($"            CENTRE-POINT {FormatCoordinate(segment.CenterPoint)}");
             
@@ -228,7 +228,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
         {
             sb.AppendLine($"        VALVE");
             sb.AppendLine($"            ITEM-CODE {segment.SequenceNumber}");
-            sb.AppendLine($"            PIPING-SPEC {segment.Material ?? "CARBON-STEEL"}");
+            sb.AppendLine($"            PIPING-SPEC {ExportFormatting.MaterialOrUnknown(segment.Material)}");
             sb.AppendLine($"            NOMINAL-DIAMETER {segment.Diameter:F1}");
             sb.AppendLine($"            CENTRE-POINT {FormatCoordinate(segment.CenterPoint)}");
             
@@ -248,7 +248,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
             sb.AppendLine($"        COMPONENT");
             sb.AppendLine($"            ITEM-CODE {segment.SequenceNumber}");
             sb.AppendLine($"            COMPONENT-TYPE {segment.Type}");
-            sb.AppendLine($"            PIPING-SPEC {segment.Material ?? "CARBON-STEEL"}");
+            sb.AppendLine($"            PIPING-SPEC {ExportFormatting.MaterialOrUnknown(segment.Material)}");
             sb.AppendLine($"            NOMINAL-DIAMETER {segment.Diameter:F1}");
             sb.AppendLine($"            CENTRE-POINT {FormatCoordinate(segment.CenterPoint)}");
             
@@ -276,7 +276,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
                 sb.AppendLine($"        COMPONENT-TYPE {bomItem.Type}");
                 sb.AppendLine($"        NOMINAL-DIAMETER {bomItem.Diameter:F1}");
                 sb.AppendLine($"        DESCRIPTION {bomItem.Description ?? bomItem.Type}");
-                sb.AppendLine($"        MATERIAL {bomItem.Material ?? "CARBON-STEEL"}");
+                sb.AppendLine($"        MATERIAL {ExportFormatting.MaterialOrUnknown(bomItem.Material)}");
                 sb.AppendLine($"        QUANTITY {bomItem.Quantity}");
                 
                 if (bomItem.Type == "Pipe" && bomItem.TotalLength > 0)
@@ -348,41 +348,21 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
 
             StringBuilder csv = new StringBuilder();
 
-            // CSV 標題行
-            csv.AppendLine("項次,元件類型,管徑(mm),描述,材料,數量,單位,總長度(m),重量(kg)");
-
-            // 資料行
-            foreach (var bomItem in isoData.BillOfMaterials)
+            csv.AppendLine("項次,元件類型,管徑或各接頭尺寸(mm),描述,材料,數量,數量單位,模型總長度(m),重量(kg)");
+            foreach (var item in isoData.BillOfMaterials)
             {
-                string lengthStr = bomItem.Type == "Pipe" && bomItem.TotalLength > 0 
-                    ? (bomItem.TotalLength / 1000).ToString("F2") 
-                    : "-";
-                    
-                string weightStr = bomItem.TotalWeight > 0 
-                    ? bomItem.TotalWeight.ToString("F2") 
-                    : "-";
-                
-                string description = !string.IsNullOrEmpty(bomItem.Description) 
-                    ? bomItem.Description 
-                    : bomItem.Type;
-                
-                string material = !string.IsNullOrEmpty(bomItem.Material) 
-                    ? bomItem.Material 
-                    : "聚氯乙烯 - 硬質";
-
-                csv.AppendLine($"{bomItem.ItemNumber}," +
-                             $"{bomItem.Type}," +
-                             $"{bomItem.Diameter:F0}," +
-                             $"{description}," +
-                             $"{material}," +
-                             $"{bomItem.Quantity}," +
-                             $"{bomItem.Unit}," +
-                             $"{lengthStr}," +
-                             $"{weightStr}");
+                string size = !string.IsNullOrWhiteSpace(item.SizeText) ? item.SizeText
+                    : item.Diameter > 0 ? ExportFormatting.Number(item.Diameter, "0.###") : "未指定";
+                csv.AppendLine(ExportFormatting.CsvRow(
+                    ExportFormatting.Number(item.ItemNumber, "0"), item.Type, size,
+                    string.IsNullOrWhiteSpace(item.Description) ? item.Type : item.Description,
+                    ExportFormatting.MaterialOrUnknown(item.Material),
+                    ExportFormatting.Number(item.Quantity, "0"), item.Type == "Pipe" ? "段" : "個",
+                    item.Type == "Pipe" ? ExportFormatting.Number(item.TotalLength / 1000, "F3") : "-",
+                    item.TotalWeight > 0 ? ExportFormatting.Number(item.TotalWeight, "F2") : "-"));
             }
-
             // 寫入檔案(使用 UTF-8 with BOM 以便 Excel 正確顯示中文)
-            File.WriteAllText(filePath, csv.ToString(), new UTF8Encoding(true));
+            AtomicOutput.Write(filePath, writer => writer.Write(csv.ToString()));
         }
     }
 }

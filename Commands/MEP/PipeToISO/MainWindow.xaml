@@ -1,8 +1,8 @@
 <Window x:Class="YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="管線轉 ISO 圖工具"
-        Height="600"
+        Title="管路等角視圖"
+        Height="650"
         Width="800"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
@@ -67,7 +67,7 @@
 
         <!-- 標題 -->
         <TextBlock Grid.Row="0" 
-                   Text="Revit 管線轉 ISO 圖與 PCF 輸出" 
+                   Text="管路等角視圖與材料核對"
                    Style="{StaticResource HeaderTextStyle}"
                    FontSize="20"
                    Margin="0,0,0,20"/>
@@ -125,30 +125,33 @@
             <GroupBox Grid.Row="1" Header="輸出選項" Padding="10">
                 <StackPanel>
                     <CheckBox x:Name="GenerateISOViewCheckBox" 
-                              Content="生成 ISO 等角視圖"
+                              Content="建立管路等角視圖（輔助檢視）"
                               IsChecked="True"
                               Margin="0,5"/>
                     
                     <CheckBox x:Name="ExportPCFCheckBox" 
-                              Content="匯出 PCF 格式檔案"
-                              IsChecked="True"
+                              Content="PCF（暫停：待端點與加工規則驗證）" IsEnabled="False"
+                              IsChecked="False"
                               Margin="0,5"/>
+                    <CheckBox x:Name="GenerateDimensionReviewCheckBox"
+                              Content="建立尺寸核對詳圖（水平文字、模型長度，非加工圖）"
+                              IsChecked="True" Margin="0,5"/>
                     
                     <CheckBox x:Name="ExportBOMCheckBox" 
-                              Content="匯出材料清單 (CSV)"
+                              Content="匯出材料清單與逐件核對表 (CSV)"
                               IsChecked="True"
                               Margin="0,5"/>
                     
                     <CheckBox x:Name="ExportImageCheckBox" 
-                              Content="匯出視圖圖片 (PNG)"
+                              Content="匯出視圖圖片 (PNG，自動建立所需視圖)"
                               IsChecked="False"
                               Margin="0,5"/>
                     
                     <CheckBox x:Name="GenerateScheduleCheckBox" 
-                              Content="建立 Revit 明細表 (BOM 表格)"
+                              Content="建立 Revit 管線／配件明細表"
                               IsChecked="True"
                               Margin="0,5"
-                              ToolTip="在 Revit 中自動建立包含管線和配件的材料明細表"/>
+                              ToolTip="只統計選定系統的管線與配件；不含管路附件及設備，材料清單為模型數量，非採購或加工量"/>
 
                     <Separator Margin="0,15,0,15"/>
 

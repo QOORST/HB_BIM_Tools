@@ -21,6 +21,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
         private UIDocument _uidoc;
         private List<PipingSystem> _pipingSystems;
         private PipingSystem _selectedSystem;
+        public bool HasGeneratedOutput { get; private set; }
 
         public MainWindow(Document doc, UIDocument uidoc)
         {
@@ -32,10 +33,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
             // 設定預設輸出路徑
             string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             string defaultPath = Path.Combine(documentsPath, "Revit_ISO_Export");
-            if (!Directory.Exists(defaultPath))
-            {
-                Directory.CreateDirectory(defaultPath);
-            }
             OutputPathTextBox.Text = defaultPath;
 
             // 載入管線系統
@@ -49,6 +46,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
         {
             try
             {
+                _selectedSystem = null;
                 _pipingSystems = PipeToISOCommand.GetAllPipingSystems(_doc);
 
                 SystemComboBox.ItemsSource = _pipingSystems;
@@ -131,14 +129,15 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(OutputPathTextBox.Text))
+            if ((ExportPCFCheckBox.IsChecked == true || ExportBOMCheckBox.IsChecked == true ||
+                 ExportImageCheckBox.IsChecked == true) && string.IsNullOrWhiteSpace(OutputPathTextBox.Text))
             {
                 Logger.Warning("未選擇輸出路徑");
                 MessageBox.Show("請選擇輸出路徑。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            if (!GenerateISOViewCheckBox.IsChecked.Value && 
+            if (GenerateDimensionReviewCheckBox.IsChecked != true && !GenerateISOViewCheckBox.IsChecked.Value &&
                 !ExportPCFCheckBox.IsChecked.Value && 
                 !ExportBOMCheckBox.IsChecked.Value &&
                 !ExportImageCheckBox.IsChecked.Value &&
@@ -156,25 +155,25 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
                 GenerateButton.IsEnabled = false;
 
                 // 執行生成
-                PerformGeneration();
+                GenerationReport report = PerformGeneration();
+                HasGeneratedOutput |= report.HasSuccess;
 
                 // 隱藏進度
                 ShowProgress(false);
                 GenerateButton.IsEnabled = true;
 
-                // 完成提示
-                string logPath = Logger.GetLogFilePath();
-                string message = "ISO 圖與 PCF 檔案已成功生成！\n\n";
-                message += $"輸出位置：{OutputPathTextBox.Text}\n\n";
-                message += $"日誌檔案：{logPath}";
-                
-                Logger.Info("========== 流程完成 ==========");
-                
-                MessageBox.Show(message, "成功", MessageBoxButton.OK, MessageBoxImage.Information);
-
-                // 關閉視窗
-                this.DialogResult = true;
-                this.Close();
+                string message = report + "\n\n日誌：" + Logger.GetLogFilePath();
+                if (report.HasFailures && report.HasSuccess)
+                    message += "\n\n已完成的成果會保留；重新生成會新增視圖／明細表，並覆寫同名輸出檔案。";
+                Logger.Info(message);
+                MessageBox.Show(message, report.HasFailures ? (report.HasSuccess ? "處理完成，部分項目失敗" : "處理失敗") : "處理結果",
+                    MessageBoxButton.OK, report.HasFailures ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                // 讓使用者閱讀逐項結果；全部成功才關閉，部分失敗可保留已完成成果。
+                if (!report.HasFailures)
+                {
+                    DialogResult = true;
+                    Close();
+                }
             }
             catch (Exception ex)
             {
@@ -194,183 +193,159 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
         /// <summary>
         /// 執行生成作業
         /// </summary>
-        private void PerformGeneration()
+        private GenerationReport PerformGeneration()
         {
-            Logger.Info("===== 開始執行生成作業 =====");
-            
-            // 1. 分析管線系統
-            ShowProgress(true, "正在分析管線系統...", 20);
-            Logger.Info("步驟 1: 分析管線系統");
-            
-            PipeAnalyzer analyzer = new PipeAnalyzer(_doc);
-            ISOData isoData = null;
-            
+            var report = new GenerationReport((name, error) => Logger.Error(name + "失敗", error));
+            if (ExportPCFCheckBox.IsChecked == true || ExportBOMCheckBox.IsChecked == true || ExportImageCheckBox.IsChecked == true)
+            {
+                try { OutputPreflight.Check(OutputPathTextBox.Text, ISONumberTextBox.Text.Trim()); }
+                catch (Exception ex)
+                {
+                    Logger.Error("輸出預檢失敗", ex);
+                    report.Fail("輸出預檢", ex.Message);
+                    report.Skip("生成作業", "尚未建立視圖或明細表，請改選資料夾後重試");
+                    return report;
+                }
+            }
+            var isoData = new ISOData
+            {
+                SystemId = _selectedSystem.Id,
+                SystemName = _selectedSystem.Name,
+                ProjectName = _doc.ProjectInformation.Name,
+                ISONumber = ISONumberTextBox.Text.Trim()
+            };
             try
             {
-                isoData = analyzer.AnalyzePipingSystem(_selectedSystem);
-                Logger.Info($"系統分析完成 - 主管: {isoData.MainPipeSegments.Count}, 分支: {isoData.BranchSegments.Count}");
+                isoData.Snapshot = SystemSnapshot.Capture(_selectedSystem);
+                report.Note("系統範圍與連通檢查", isoData.Snapshot.Summary);
             }
             catch (Exception ex)
             {
-                Logger.Error("分析管線系統失敗", ex);
-                throw;
+                Logger.Error("系統範圍檢查失敗", ex);
+                report.Fail("系統範圍與連通檢查", ex.Message);
+                return report;
             }
-
-            // 設定 ISO 編號
-            if (!string.IsNullOrWhiteSpace(ISONumberTextBox.Text))
-            {
-                isoData.ISONumber = ISONumberTextBox.Text;
-            }
-            Logger.Info($"ISO 編號: {isoData.ISONumber}");
-
-            // 重新從系統生成完整 BOM(確保收集所有元件)
-            Logger.Info("從系統重新生成完整 BOM");
-            try
-            {
-                isoData.GenerateBOMFromSystem(_doc);
-                Logger.Info($"BOM 生成完成,共 {isoData.BillOfMaterials.Count} 個項目");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning($"使用系統生成 BOM 失敗,使用備用方法: {ex.Message}");
-            }
-
-            // 2. 生成 ISO 視圖
+            var generator = new ISOGenerator(_doc);
+            var reviewGenerator = new DimensionReviewGenerator(_doc);
+            var exporter = new PCFExporter();
             View3D isoView = null;
-            if (GenerateISOViewCheckBox.IsChecked.Value)
+            ViewDrafting dimensionView = null;
+            bool framingReady = false;
+            bool needView = GenerateISOViewCheckBox.IsChecked == true || ExportImageCheckBox.IsChecked == true;
+            ShowProgress(true, "正在處理等角視圖...", 20);
+            if (needView)
             {
-                ShowProgress(true, "正在生成 ISO 視圖...", 40);
-                Logger.Info("步驟 2: 生成 ISO 視圖");
-                
-                ISOGenerator generator = new ISOGenerator(_doc);
-                
-                try
+                report.Run("等角視圖", () =>
                 {
                     isoView = generator.GenerateISOView(isoData);
-                    Logger.Info($"ISO 視圖建立成功: {isoView.Name}");
-                }
-                catch (Exception ex)
+                    return isoView.Name + (GenerateISOViewCheckBox.IsChecked != true ? "（供 PNG 匯出使用）" : "");
+                });
+                if (isoView != null)
                 {
-                    Logger.Error("生成 ISO 視圖失敗", ex);
-                    throw;
+                    report.Run("管線標籤", () => generator.AddAnnotations(isoView, isoData));
+                    framingReady = report.Run("完整取景", () => generator.FitView(isoView, isoData));
+                    try { _uidoc.ActiveView = isoView; }
+                    catch (Exception ex) { Logger.Warning("切換視圖失敗：" + ex.Message); }
                 }
-                
-                // 添加標註
-                ShowProgress(true, "正在添加標註...", 50);
-                Logger.Info("步驟 2.1: 添加標註");
-                
-                try
-                {
-                    generator.AddAnnotations(isoView, isoData);
-                    Logger.Info("標註添加成功");
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error("添加標註時發生錯誤", ex);
-                    // 標註失敗不影響主流程
-                }
-                
-                // 設定為當前視圖
-                try
-                {
-                    _uidoc.ActiveView = isoView;
-                    Logger.Info("已切換到 ISO 視圖");
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning($"切換視圖失敗: {ex.Message}");
-                }
+                else report.Skip("管線標籤", "等角視圖建立失敗");
             }
+            else report.Skip("等角視圖／管線標籤", "未勾選");
 
-            // 3. 匯出 PCF
-            if (ExportPCFCheckBox.IsChecked.Value)
+            if (GenerateDimensionReviewCheckBox.IsChecked == true)
+                report.Run("尺寸核對詳圖", () =>
+                {
+                    dimensionView = reviewGenerator.Create(isoData);
+                    try { _uidoc.ActiveView = dimensionView; }
+                    catch (Exception ex) { Logger.Warning("切換核對詳圖失敗：" + ex.Message); }
+                    return dimensionView.Name + "；" + reviewGenerator.LayoutSummary + "（靜態投影）";
+                });
+
+            ShowProgress(true, "正在處理材料與檔案...", 60);
+            if (ExportBOMCheckBox.IsChecked == true)
             {
-                ShowProgress(true, "正在匯出 PCF 檔案...", 60);
-                Logger.Info("步驟 3: 匯出 PCF");
-                
-                string pcfPath = Path.Combine(OutputPathTextBox.Text, $"{isoData.ISONumber}.pcf");
-                PCFExporter exporter = new PCFExporter();
-                
-                try
+                report.Run("離線重播資料 JSON", () =>
                 {
-                    exporter.ExportToPCF(isoData, pcfPath);
-                    Logger.Info($"PCF 匯出成功: {pcfPath}");
-                }
-                catch (Exception ex)
+                    var scene = reviewGenerator.Scene ?? reviewGenerator.CaptureScene(isoData);
+                    string path = GetOutputFilePath(isoData.ISONumber, "_Review.json");
+                    AtomicOutput.Write(path, writer => writer.Write(Newtonsoft.Json.JsonConvert.SerializeObject(scene,
+                        Newtonsoft.Json.Formatting.Indented)));
+                    return path;
+                });
+                if (reviewGenerator.Scene != null) report.Run("離線核對預覽 SVG", () =>
                 {
-                    Logger.Error("PCF 匯出失敗", ex);
-                    MessageBox.Show($"PCF 匯出失敗：{ex.Message}", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
+                    string path = GetOutputFilePath(isoData.ISONumber, "_Review.svg");
+                    string svg = ReviewSvg.Render(reviewGenerator.Scene);
+                    AtomicOutput.Write(path, writer => writer.Write(svg));
+                    return path + "（排版可離線重播；字型外觀以 Revit 為準）";
+                });
+                report.Run("逐管尺寸 CSV", () =>
+                {
+                    string pipePath = GetOutputFilePath(isoData.ISONumber, "_Pipes.csv");
+                    isoData.Snapshot.ExportPipes(_doc, isoData.SystemName, pipePath);
+                    return pipePath;
+                });
+                report.Run("逐件核對表 CSV", () =>
+                {
+                    string auditPath = GetOutputFilePath(isoData.ISONumber, "_Audit.csv");
+                    isoData.Snapshot.ExportAudit(_doc, isoData.SystemName, auditPath);
+                    return auditPath;
+                });
+                report.Run("材料清單 CSV", () =>
+                {
+                    isoData.GenerateBOMFromSystem(_doc);
+                    string path = GetOutputFilePath(isoData.ISONumber, "_BOM.csv");
+                    exporter.ExportBOMToCSV(isoData, path);
+                    return path + $"（{isoData.BillOfMaterials.Sum(b => b.Quantity)} 件，模型管長 {isoData.TotalLength / 1000:0.###} m；非加工切長）";
+                });
             }
+            else report.Skip("材料清單 CSV", "未勾選");
 
-            // 4. 匯出材料清單
-            if (ExportBOMCheckBox.IsChecked.Value)
+            if (ExportPCFCheckBox.IsChecked == true)
             {
-                ShowProgress(true, "正在匯出材料清單...", 80);
-                Logger.Info("步驟 4: 匯出 BOM");
-                
-                string bomPath = Path.Combine(OutputPathTextBox.Text, $"{isoData.ISONumber}_BOM.csv");
-                PCFExporter exporter = new PCFExporter();
-                
-                try
-                {
-                    exporter.ExportBOMToCSV(isoData, bomPath);
-                    Logger.Info($"BOM 匯出成功: {bomPath}");
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error("BOM 匯出失敗", ex);
-                    MessageBox.Show($"BOM 匯出失敗：{ex.Message}", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
+                report.Fail("PCF", "已暫停舊版匯出，待實際管件端點、接合與加工規則完成驗證後開放。");
             }
+            else report.Skip("PCF（實驗性）", "未勾選");
 
-            // 5. 匯出圖片
-            if (ExportImageCheckBox.IsChecked.Value && isoView != null)
+            if (ExportImageCheckBox.IsChecked == true)
             {
-                ShowProgress(true, "正在匯出視圖圖片...", 85);
-                Logger.Info("步驟 5: 匯出圖片");
-                
-                string imagePath = Path.Combine(OutputPathTextBox.Text, isoData.ISONumber);
-                ISOGenerator generator = new ISOGenerator(_doc);
-                
-                try
+                if (dimensionView != null) report.Run("尺寸核對詳圖 PNG", () =>
                 {
-                    generator.ExportViewAsImage(isoView, imagePath);
-                    Logger.Info($"圖片匯出成功: {imagePath}.png");
-                }
-                catch (Exception ex)
+                    generator.ExportViewAsImage(dimensionView, GetOutputFilePath(isoData.ISONumber, "_尺寸核對"));
+                    return "已匯出至 " + OutputPathTextBox.Text;
+                });
+                if (isoView == null) report.Skip("PNG", "等角視圖建立失敗");
+                else if (!framingReady) report.Skip("PNG", "完整取景失敗，避免匯出遭裁切的圖片");
+                else report.Run("PNG", () =>
                 {
-                    Logger.Error("圖片匯出失敗", ex);
-                    MessageBox.Show($"圖片匯出失敗：{ex.Message}", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
+                    string path = GetOutputFilePath(isoData.ISONumber, "");
+                    generator.ExportViewAsImage(isoView, path);
+                    return "已匯出至 " + OutputPathTextBox.Text + "（檔名由 Revit 加入視圖名稱）";
+                });
             }
+            else report.Skip("PNG", "未勾選");
 
-            // 6. 建立 Revit 明細表
-            if (GenerateScheduleCheckBox.IsChecked.Value)
+            ShowProgress(true, "正在建立明細表...", 90);
+            if (GenerateScheduleCheckBox.IsChecked == true)
             {
-                ShowProgress(true, "正在建立 Revit 明細表...", 90);
-                Logger.Info("步驟 6: 建立 Revit 明細表");
-
-                ScheduleGenerator scheduleGenerator = new ScheduleGenerator(_doc);
-
-                try
+                report.Run("Revit 明細表", () =>
                 {
-                    ViewSchedule schedule = scheduleGenerator.CreateBOMSchedule(isoData);
-                    Logger.Info($"明細表建立成功: {schedule.Name}");
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error("明細表建立失敗", ex);
-                    MessageBox.Show($"明細表建立失敗：{ex.Message}\n\n這不影響其他功能的使用。", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
+                    var schedule = new ScheduleGenerator(_doc).CreateBOMSchedule(isoData);
+                    return schedule.Name + " 與配件表（不含管路附件／設備）";
+                });
             }
-            
-            Logger.Info("===== 所有操作完成 =====");
-            Logger.Info($"日誌檔案位置: {Logger.GetLogFilePath()}");
-            
-            ShowProgress(true, "完成！", 100);
+            else report.Skip("Revit 明細表", "未勾選");
+            ShowProgress(true, "處理完成", 100);
+            return report;
         }
 
+        private string GetOutputFilePath(string number, string suffix)
+        {
+            if (string.IsNullOrWhiteSpace(number) || number.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                number.EndsWith(".") || number.EndsWith(" ") || number == "." || number == "..")
+                throw new InvalidOperationException("ISO 編號不可空白或包含檔名不允許的字元。");
+            Directory.CreateDirectory(OutputPathTextBox.Text);
+            return Path.Combine(OutputPathTextBox.Text, number + suffix);
+        }
         /// <summary>
         /// 顯示/隱藏進度
         /// </summary>

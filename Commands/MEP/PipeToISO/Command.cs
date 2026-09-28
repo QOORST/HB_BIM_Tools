@@ -30,11 +30,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
 
                 if (dialogResult == true)
                 {
-                    TaskDialog.Show("成功", "ISO 圖與 PCF 檔案已成功生成！");
                     return Result.Succeeded;
                 }
 
-                return Result.Cancelled;
+                // 已產生成果時不可回傳 Cancelled，避免 Revit 回復已提交的視圖。
+                return mainWindow.HasGeneratedOutput ? Result.Succeeded : Result.Cancelled;
             }
             catch (Exception ex)
             {
@@ -109,6 +109,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
             }
             else if (element is FamilyInstance fitting)
             {
+                var connectors = fitting.MEPModel?.ConnectorManager?.Connectors;
+                if (connectors != null)
+                {
+                    var diameters = connectors.Cast<Connector>()
+                        .Where(c => c.Domain == Domain.DomainPiping && c.Shape == ConnectorProfileType.Round)
+                        .Select(c => UnitUtils.ConvertFromInternalUnits(c.Radius * 2, UnitTypeId.Millimeters))
+                        .Distinct().ToList();
+                    // 多管徑配件不能以單一管徑冒充完整尺寸。
+                    if (diameters.Count > 1) return 0;
+                    if (diameters.Count == 1) return diameters[0];
+                }
                 // 嘗試從管配件取得尺寸參數
                 Parameter sizeParam = fitting.LookupParameter("尺寸") ?? 
                                      fitting.LookupParameter("Size") ??
@@ -124,7 +135,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
                     {
                         string sizeStr = sizeParam.AsString();
                         // 嘗試解析尺寸字串（例如 "DN50", "2\"", "50mm"）
-                        return ParseSizeString(sizeStr);
+                        return Services.ExportFormatting.ParseDiameterMm(sizeStr);
                     }
                 }
             }
@@ -132,30 +143,5 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
             return 0;
         }
 
-        /// <summary>
-        /// 解析尺寸字串為 mm 值
-        /// </summary>
-        private static double ParseSizeString(string sizeStr)
-        {
-            if (string.IsNullOrEmpty(sizeStr))
-                return 0;
-
-            // 移除常見前綴
-            sizeStr = sizeStr.Replace("DN", "").Replace("dn", "")
-                           .Replace("mm", "").Replace("MM", "")
-                           .Replace("\"", "").Trim();
-
-            if (double.TryParse(sizeStr, out double value))
-            {
-                // 假設小於 50 的數字是英吋，需轉換為 mm
-                if (value < 50)
-                {
-                    return value * 25.4; // 英吋轉 mm
-                }
-                return value;
-            }
-
-            return 0;
-        }
     }
 }

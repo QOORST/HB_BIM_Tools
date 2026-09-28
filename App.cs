@@ -550,30 +550,6 @@ namespace YD_RevitTools.LicenseManager
                 panel.AddItem(pipeCenterAlignSettingsData);
             }
 
-            // === 管線轉 ISO 圖工具 ===
-            if (!HasButton(panel, "PipeToISO"))
-            {
-                PushButtonData pipeToISOData = new PushButtonData(
-                    "PipeToISO",
-                    "管線轉\nISO圖",
-                    assemblyPath,
-                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdPipeToISO");
-
-                pipeToISOData.ToolTip = "管線轉 ISO 圖工具";
-                pipeToISOData.LongDescription = "將 Revit 管線系統轉換為標準 ISO 等角圖與 PCF 檔案\n\n" +
-                    "功能特色：\n" +
-                    "• 選擇管線系統生成 ISO 圖\n" +
-                    "• 自動建立等角視圖\n" +
-                    "• 匯出 PCF 檔案（管線加工標準格式）\n" +
-                    "• 生成 BOM 明細表\n" +
-                    "• 支援管件標註與尺寸標記\n\n" +
-                    "授權要求：Trial+";
-
-                SetButtonIcon(pipeToISOData, "pipe_iso");
-
-                panel.AddItem(pipeToISOData);
-            }
-
             // === MEP 自動配管 (Beta) ===
             if (!HasButton(panel, "AutoPipeRouting"))
             {
@@ -1014,6 +990,29 @@ namespace YD_RevitTools.LicenseManager
                 }
                 else panel.AddItem(button);
             }
+#if !REVIT2025 && !REVIT2026
+            // === 管線轉 ISO 圖工具 ===
+            if (!HasButton(panel, "PipeToISO"))
+            {
+                PushButtonData pipeToISOData = new PushButtonData(
+                    "PipeToISO",
+                    "管路\n等角視圖",
+                    assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.MEP.CmdPipeToISO");
+
+                pipeToISOData.ToolTip = "管路等角視圖與材料核對";
+                pipeToISOData.LongDescription = "建立管線系統的 3D 等角視圖，輔助模型檢視與數量核對。\n\n" +
+                    "• 管線標籤、PNG、材料 CSV 與管線／配件明細表\n" +
+                    "• 材料清單為模型數量，非採購或加工量\n" +
+                    "• PCF 為實驗性輸出，尚未驗證下游匯入\n" +
+                    "• 尚不包含施工尺寸與完整施工 ISO 出圖\n\n" +
+                    "授權要求：Trial+";
+                SetButtonIcon(pipeToISOData, "pipe_iso");
+
+                panel.AddItem(pipeToISOData);
+            }
+
+#endif
         }
         private void AddFamilyToolButtons(RibbonPanel panel)
         {

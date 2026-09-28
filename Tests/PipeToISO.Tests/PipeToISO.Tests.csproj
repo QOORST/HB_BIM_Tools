@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/ReviewLayout.cs" Link="ReviewLayout.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/ReviewSvg.cs" Link="ReviewSvg.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/AtomicOutput.cs" Link="AtomicOutput.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/PipeMeasurement.cs" Link="PipeMeasurement.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/ConnectivityGraph.cs" Link="ConnectivityGraph.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/ExportFormatting.cs" Link="ExportFormatting.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/PCFExporter.cs" Link="PCFExporter.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Models/GenerationReport.cs" Link="GenerationReport.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/OutputPreflight.cs" Link="OutputPreflight.cs" />
+    <Compile Include="../../Commands/MEP/PipeToISO/Services/ViewLayout.cs" Link="ViewLayout.cs" />
+  </ItemGroup>
+</Project>

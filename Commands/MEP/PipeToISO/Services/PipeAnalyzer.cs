@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -31,6 +31,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO.Services
 
             ISOData isoData = new ISOData
             {
+                SystemId = pipingSystem.Id,
                 SystemName = pipingSystem.Name,
                 SystemType = GetSystemType(pipingSystem),
                 ProjectName = _doc.ProjectInformation.Name,
