@@ -1,0 +1,50 @@
+{
+  "schema_version": "0.1",
+  "status": "prototype_input_not_manufacturing_specification",
+  "target_revit_versions": [2024, 2025, 2026],
+  "build_revit_version": 2024,
+  "family_category": "OST_MechanicalEquipment",
+  "scope": ["pump", "auto_coupling", "guide_rails", "upper_bracket"],
+  "source": {
+    "file": "EVERGUSH-EF-TW(60Hz)-202002.pdf",
+    "assembly_dimensions_pdf_page": 4,
+    "pump_performance_pdf_page": 3,
+    "review": "Pump-Sample-001-EF-Review.md"
+  },
+  "units": {"length": "mm", "mass": "kg", "frequency": "Hz"},
+  "types": [
+    {
+      "assembly_model": "TOS-EF-05",
+      "pump_series_reference": "EF-05",
+      "assembly_dimensions": {"A":477,"A1":303,"D":163,"H":496,"H1":380,"H2":196,"H3":243,"L":110,"W":140,"W1":70},
+      "pump_and_coupling_approximate_mass":29,
+      "motor_hp":0.5,
+      "catalog_motor_kw":0.37,
+      "discharge_nominal_size_source":"2 inch",
+      "guide_rail_nominal_size_source":"1-1/4 inch",
+      "fasteners_source":{"M1":"M12","M2":"M10"}
+    },
+    {
+      "assembly_model": "TOS-EF-21",
+      "pump_series_reference": "EF-21",
+      "assembly_dimensions": {"A":477,"A1":303,"D":163,"H":547,"H1":423,"H2":196,"H3":243,"L":110,"W":140,"W1":70},
+      "pump_and_coupling_approximate_mass":34,
+      "motor_hp":1,
+      "catalog_motor_kw":0.75,
+      "discharge_nominal_size_source":"2 inch",
+      "guide_rail_nominal_size_source":"1-1/4 inch",
+      "fasteners_source":{"M1":"M12","M2":"M10"}
+    }
+  ],
+  "installation": {"guide_rail_length":null,"guide_rail_actual_outer_diameter":null},
+  "electrical": {"frequency":60,"phase_count":null,"voltage":null,"apparent_load_va":null},
+  "design_duty": {"flow_lpm":null,"head_m":null},
+  "connector_intent": {"external_pipe_connectors":1,"discharge_direction":"up","electrical_configuration_status":"pending","flange_standard":null},
+  "constraints": [
+    "Guide rail length changes must not move pump, coupling or discharge connector.",
+    "Catalog motor kW must not be used as electrical input load.",
+    "Do not mix dimensions from the earlier TOS single-page catalog.",
+    "Unknown values remain null; nominal pipe size is not actual outside diameter.",
+    "EF self-standing pump dimensions must not be added directly to the coupling geometry."
+  ]
+}

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>HB.PumpFamilyBuilder</AssemblyName>
+    <RevitRoot>C:/Program Files/Autodesk/Revit 2024</RevitRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="RevitAPI"><HintPath>$(RevitRoot)/RevitAPI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="RevitAPIUI"><HintPath>$(RevitRoot)/RevitAPIUI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+    <None Include="../../Docs/FamilyAutomation/pump-sample-001.input.json" Link="pump-sample-001.input.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
