@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework><LangVersion>9.0</LangVersion><PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>HB.CadProbe</AssemblyName><EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="BatchProbe.cs"/><Compile Include="Core.cs"/><Compile Include="CurveCore.cs"/><Compile Include="DwgReader.cs"/>
+    <Reference Include="AcDbMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2024\acdbmgd.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="AcCoreMgd"><HintPath>C:\Program Files\Autodesk\AutoCAD 2024\accoremgd.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+<ItemGroup><Compile Include="PlanProjection.cs" /></ItemGroup></Project>

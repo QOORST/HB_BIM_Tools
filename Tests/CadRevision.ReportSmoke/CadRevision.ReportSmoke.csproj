@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><TargetFramework>net48</TargetFramework><OutputType>Exe</OutputType><LangVersion>9.0</LangVersion></PropertyGroup>
+<ItemGroup><Reference Include="System.Web.Extensions" />
+<Compile Include="../../Tools/CadRevision/Core.cs" Link="Core.cs" />
+<Compile Include="../../Tools/CadRevision/CurveCore.cs" Link="CurveCore.cs" />
+<Compile Include="../../Tools/CadRevision/UnifiedReport.cs" Link="UnifiedReport.cs" />
+<EmbeddedResource Include="../../Tools/CadRevision/review-template.html" LogicalName="HB.CadRevision.review-template.html" />
+<EmbeddedResource Include="../../Tools/CadRevision/compare_modes.js" LogicalName="HB.CadRevision.compare_modes.js" />
+</ItemGroup></Project>

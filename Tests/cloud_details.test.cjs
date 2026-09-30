@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+const {collectCandidateDetails}=require('../Tools/CadRevision/cloud_details.js');
+const p={layers:['WALL'],kinds:['新增'],data:[[0,0,[], '', 'A:0','直線'],[0,0,[],'','B','圓']]};
+const a={side:1,source:'cloud-a',candidates:[0,1],relations:{0:'圈內',1:'邊界待查'}};
+const b={side:1,source:'cloud-b',candidates:[0],relations:{0:'圈內'}};
+let rows=collectCandidateDetails(p,[a,b],[0,1],null);
+assert.equal(rows.length,2);assert.equal(rows[0].regions.length,2);
+assert.equal(collectCandidateDetails(p,[a,b],[1],null).length,1);
+assert.equal(collectCandidateDetails(p,[a,b],[0,1],b).length,1);
+assert.equal(collectCandidateDetails(p,[a,b],[],null).length,0);
+assert.equal(rows[1].geometry,'圓');assert.equal(rows[0].newHandle,'A:0');
+console.log('Candidate deduplication, region scope, visible filters and geometry identity passed.');

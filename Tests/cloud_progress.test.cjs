@@ -1,0 +1,23 @@
+const assert=require('node:assert/strict');
+const {regionKey,validateRegionProgress}=require('../Tools/CadRevision/cloud_progress.js');
+const regions=[{side:1,source:'block/abc'}],key=regionKey(regions[0]);
+const value={version:1,type:'cloud-region-progress',sourceId:'abc',regions:{[key]:{status:'進行中',note:'確認牆線 <script> 保留文字'}}};
+const roundtrip=validateRegionProgress(JSON.parse(JSON.stringify(value)),'abc',regions);
+assert.equal(roundtrip[key].note,value.regions[key].note);
+assert.throws(()=>validateRegionProgress(value,'other',regions));
+assert.throws(()=>validateRegionProgress({...value,regions:{unknown:{status:'待查',note:''}}},'abc',regions));
+for(const item of [{status:'核准',note:''},{status:'待查',note:'a'.repeat(4001)},null])
+  assert.throws(()=>validateRegionProgress({...value,regions:{[key]:item}},'abc',regions));
+assert.equal(Object.keys(validateRegionProgress({...value,regions:{}},'abc',regions)).length,0);
+console.log('Progress roundtrip, source mismatch, unknown region, invalid status/note and empty progress passed.');
+const {validateReviewBundle}=require('../Tools/CadRevision/cloud_progress.js');
+const payload={sourceId:'abc',layers:['WALL'],data:[[0,0,[],'','A:2']]};
+const bundle={...value,version:2,type:'cloud-review-bundle',groups:['建築候選'],verdicts:{'[1,"A"]':'設計變更'}};
+const restored=validateReviewBundle(JSON.parse(JSON.stringify(bundle)),payload,regions,['建築候選']);
+assert.equal(restored.progress[key].note,value.regions[key].note);
+assert.equal(restored.verdicts['[1,"A"]'],'設計變更');
+assert.deepEqual(restored.groups,['建築候選']);
+assert.throws(()=>validateReviewBundle({...bundle,sourceId:'wrong'},payload,regions,['建築候選']));
+assert.throws(()=>validateReviewBundle({...bundle,groups:[]},payload,regions,['建築候選']));
+assert.throws(()=>validateReviewBundle({...bundle,verdicts:{bad:'其他'}},payload,regions,['建築候選']));
+console.log('Full bundle roundtrip and atomic validation checks passed.');

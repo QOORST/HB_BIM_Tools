@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="AutoCAD" Name="HB CAD Revision" AppVersion="0.1.0" ProductCode="{BCBA6738-5044-4C0A-B862-AE434A0BEE11}" UpgradeCode="{68929327-5183-4B8E-89E8-47DB783CC781}" Author="HB" Description="HB CAD 版次比對試用版">
+  <Components>
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.3" SeriesMax="R24.3" />
+    <ComponentEntry AppName="HB.CadRevision" Version="0.1.0" ModuleName="./Contents/Win64/HB.CadRevision.dll" AppDescription="HB CAD 版次比對" LoadOnCommandInvocation="True">
+      <Commands GroupName="HB_CAD_REVISION"><Command Global="HBCADCOMPARE" Local="HBCADCOMPARE" /></Commands>
+    </ComponentEntry>
+  </Components>
+  <Components>
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.1" SeriesMax="R25.1" />
+    <ComponentEntry AppName="HB.CadRevision" Version="0.1.0" ModuleName="./Contents/2026/HB.CadRevision.dll" AppDescription="HB CAD 版次比對" LoadOnCommandInvocation="True">
+      <Commands GroupName="HB_CAD_REVISION"><Command Global="HBCADCOMPARE" Local="HBCADCOMPARE" /></Commands>
+    </ComponentEntry>
+  </Components>
+</ApplicationPackage>

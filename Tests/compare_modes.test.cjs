@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict');
+const {versionShapes}=require('../Tools/CadRevision/compare_modes.js');
+const a=[1,2,3,4],b=[5,6,7,8];
+assert.deepEqual(versionShapes([0,0,[a],'','new'],'新增',0),[]);
+assert.deepEqual(versionShapes([0,0,[a],'','new'],'新增',1),[a]);
+assert.deepEqual(versionShapes([0,0,[a],'old',''],'刪除（配對不明）',1),[]);
+assert.deepEqual(versionShapes([0,0,[a],'old',''],'刪除',0),[a]);
+assert.deepEqual(versionShapes([0,0,[a,b],'old','new'],'疑似位移',0),[a]);
+assert.deepEqual(versionShapes([0,0,[a,b],'old','new'],'疑似位移',1),[b]);
+for(const side of [0,1])assert.deepEqual(versionShapes([0,0,[a],'old','new'],'未變更',side),[a]);
+console.log('Old/new geometry selection, moved counterparts and shared unchanged geometry passed.');

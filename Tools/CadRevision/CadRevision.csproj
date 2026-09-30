@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <CadVersion Condition="'$(CadVersion)'==''">2024</CadVersion><TargetFramework Condition="'$(CadVersion)'=='2024'">net48</TargetFramework><TargetFramework Condition="'$(CadVersion)'=='2026'">net8.0-windows</TargetFramework><UseWindowsForms Condition="'$(CadVersion)'=='2026'">true</UseWindowsForms><UseWPF Condition="'$(CadVersion)'=='2026'">true</UseWPF><LangVersion>9.0</LangVersion><PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>HB.CadRevision</AssemblyName><AutoCadRoot Condition="'$(AutoCadRoot)'==''">C:\Program Files\Autodesk\AutoCAD $(CadVersion)</AutoCadRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="svg-navigation.js" LogicalName="HB.CadRevision.svg-navigation.js" />
+    <EmbeddedResource Include="review-template.html" LogicalName="HB.CadRevision.review-template.html" />
+    <EmbeddedResource Include="compare_modes.js" LogicalName="HB.CadRevision.compare_modes.js" />
+    <Reference Include="System.Web.Extensions" Condition="'$(CadVersion)'=='2024'" />
+    <Reference Include="AcDbMgd"><HintPath>$(AutoCadRoot)\acdbmgd.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="AcMgd"><HintPath>$(AutoCadRoot)\acmgd.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="AcCoreMgd"><HintPath>$(AutoCadRoot)\accoremgd.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Windows.Forms" Condition="'$(CadVersion)'=='2024'"/><Reference Include="System.Drawing" Condition="'$(CadVersion)'=='2024'"/>
+  </ItemGroup>
+</Project>
