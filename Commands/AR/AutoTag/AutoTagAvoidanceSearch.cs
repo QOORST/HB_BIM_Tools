@@ -14,7 +14,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         // Paper-space search. Exhaust the requested half-plane before considering other sides.
         internal static IEnumerable<Offset> GetOffsets(AutoTagPlacement placement, double maxPaperMm, bool crossSide, bool leader)
         {
-            if (placement == AutoTagPlacement.Center || double.IsNaN(maxPaperMm) || double.IsInfinity(maxPaperMm) || maxPaperMm <= 0)
+            if ((placement == AutoTagPlacement.Center && !leader) || double.IsNaN(maxPaperMm) || double.IsInfinity(maxPaperMm) || maxPaperMm <= 0)
                 yield break;
             double limit = leader ? maxPaperMm : Math.Min(maxPaperMm, 3.0);
             var directions = new[] { new Offset { Y=1 }, new Offset { X=1 }, new Offset { Y=-1 }, new Offset { X=-1 },
@@ -23,7 +23,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 for (int ring=1; ring<=4; ring++)
                     foreach (var d in directions)
                     {
-                        bool same = placement == AutoTagPlacement.Above ? d.Y >= 0 :
+                        bool same = placement == AutoTagPlacement.Center ? true : placement == AutoTagPlacement.Above ? d.Y >= 0 :
                             placement == AutoTagPlacement.Below ? d.Y <= 0 :
                             placement == AutoTagPlacement.Left ? d.X <= 0 : d.X >= 0;
                         if (same != (pass == 0)) continue;

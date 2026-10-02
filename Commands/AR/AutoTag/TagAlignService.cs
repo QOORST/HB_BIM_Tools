@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 {
-    internal sealed class TagAlignService
+    internal sealed partial class TagAlignService
     {
         private const double MinimumLength = 1e-6;
         private const double RectPaddingFeet = 20.0 / 304.8;
@@ -22,6 +22,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             View view = doc.ActiveView;
             if (view == null || view.IsTemplate)
                 return TagAlignResult.Failed("目前視圖不可整理標籤。");
+
+            if (options.PickReference)
+                return AlignToPickedReference(uiDoc, options);
 
             List<IndependentTag> tags = GetTags(uiDoc, view, options.Scope);
             if (tags.Count < 2)
@@ -261,8 +264,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
                 foreach (XYZ corner in corners)
                 {
-                    double x = corner.DotProduct(right);
-                    double y = corner.DotProduct(up);
+                    XYZ transformed = box.Transform.OfPoint(corner);
+                    double x = transformed.DotProduct(right);
+                    double y = transformed.DotProduct(up);
                     minX = Math.Min(minX, x);
                     minY = Math.Min(minY, y);
                     maxX = Math.Max(maxX, x);

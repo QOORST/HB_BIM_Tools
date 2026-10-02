@@ -89,6 +89,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             var occupiedTagRects = new List<TagViewRect>();
 
             var issues = new List<string>();
+            var frames = options.PipeBank ? null : TagFrameCatalog.Read(doc, selectedRules.Select(r => r.TagTypeId), issues);
             var reviewIds = new List<ElementId>();
             var bankTags = new List<(TagCandidate Candidate, ElementId Id)>();
             if (options.PipeBank)
@@ -116,14 +117,18 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             int created = 0;
             int skipped = 0;
             int failed = 0;
+            var expectedCenters = new Dictionary<ElementId, XYZ>();
 
+            using (var batch = new TransactionGroup(doc, GetTransactionName(mode)))
+            {
+            batch.Start();
             using (var tx = new Transaction(doc, GetTransactionName(mode)))
             {
                 tx.Start();
                 if (options.AvoidTagOverlap)
                     occupiedTagRects = CollectTagRects(doc, view, options.UsePaperMillimeters);
 
-                foreach (TagCandidate candidate in candidates)
+                foreach (TagCandidate candidate in candidates.OrderBy(c => GetCandidateElevation(c)).ThenBy(c => c.Key, StringComparer.Ordinal))
                 {
                     Element element = candidate.Element;
                     if (!options.PipeBank && !options.AllDirections && (mode != AutoTagMode.Unified || IsDirectionalCategory(element)) &&
@@ -148,7 +153,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     {
                         itemTransaction.Start();
                         bool ok = TryCreateTag(doc, view, candidate, rule.TagTypeId, options, occupiedTagRects, timings,
-                            out TagViewRect placedRect, out ElementId tagId, out string error);
+                            out TagViewRect placedRect, out ElementId tagId, out XYZ requestedPoint, out string error, frames);
                         if (!ok)
                         {
                             itemTransaction.RollBack();
@@ -159,6 +164,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                         if (itemTransaction.Commit() != TransactionStatus.Committed)
                             throw new InvalidOperationException("單筆標籤交易未完成，已停止本次作業。");
                         taggedElementIds.Add(candidate.Key);
+                        if (!options.PipeBank)
+                        {
+                            XYZ expected;
+                            if (options.Placement == AutoTagPlacement.Center && (!options.AvoidTagOverlap || !options.AddLeader))
+                            {
+                                expected = requestedPoint;
+                            }
+                            else
+                            {
+                                if (placedRect == null) throw new InvalidOperationException("無法記錄標籤投影位置");
+                                if (frames == null || !frames.TryCenter((IndependentTag)doc.GetElement(tagId), view, out expected))
+                                    expected = placedRect.Center(view);
+                            }
+                            expectedCenters.Add(tagId, expected);
+                        }
                         if (options.PipeBank) bankTags.Add((candidate, tagId));
                         if (options.AvoidTagOverlap && (placedRect == null || IntersectsAny(placedRect, occupiedTagRects)))
                         {
@@ -189,6 +209,23 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     tx.RollBack();
                 else if (tx.Commit() != TransactionStatus.Committed)
                     return AutoTagResult.Failed("標籤交易未提交，請處理 Revit 的失敗訊息後重試。");
+            }
+
+            if (created > 0 && !options.PipeBank)
+            {
+                try
+                {
+                    VerifyCommittedProjection(doc, view, expectedCenters, reviewIds, issues, frames);
+                }
+                catch (Exception ex)
+                {
+                    if (batch.RollBack() != TransactionStatus.RolledBack)
+                        throw new InvalidOperationException("投影驗證失敗且無法回復", ex);
+                    return AutoTagResult.Failed("投影定位未通過驗證，本次建立已回復：" + ex.Message);
+                }
+            }
+            if (batch.Assimilate() != TransactionStatus.Committed)
+                return AutoTagResult.Failed("標籤交易群組未提交。");
             }
 
             totalTimer.Stop();
@@ -404,9 +441,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             AutoTagOptions options,
             IList<TagViewRect> occupiedTagRects,
             TagTimings timings,
-            out TagViewRect placedRect, out ElementId tagId, out string error)
+            out TagViewRect placedRect, out ElementId tagId, out XYZ requestedPoint, out string error, TagFrameCatalog frames)
         {
             placedRect = null;
+            requestedPoint = null;
             tagId = ElementId.InvalidElementId;
             error = "未能建立標籤。";
             try
@@ -417,6 +455,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     error = "無法取得放置點，或放置點位於目前視圖裁切範圍外。";
                     return false;
                 }
+                requestedPoint = tagPoint;
                 timings.Geometry.Stop();
                 timings.Creation.Start();
                 FamilySymbol tagSymbol = doc.GetElement(tagTypeId) as FamilySymbol;
@@ -443,13 +482,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     tag.TagHeadPosition = tagPoint;
                     timings.Creation.Stop();
                     timings.Alignment.Start();
-                    BoundingBoxXYZ alignedBox = AlignTagBoxCenter(doc, view, tag, tagPoint);
+                    BoundingBoxXYZ alignedBox = AlignTagBoxCenter(doc, view, tag, tagPoint, frames);
                     timings.Alignment.Stop();
 
-                    if (!options.PipeBank && options.AvoidTagOverlap && options.Placement != AutoTagPlacement.Center)
+                    if (!options.PipeBank && options.AvoidTagOverlap)
                     {
                         timings.Avoidance.Start();
-                        placedRect = MoveTagToAvailablePosition(doc, view, tag, tagPoint, options, occupiedTagRects, candidate.Link != null);
+                        placedRect = MoveTagToAvailablePosition(doc, view, tag, tagPoint, options, occupiedTagRects, candidate.Link != null, frames);
                         timings.Avoidance.Stop();
                     }
                     else
@@ -618,7 +657,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private static TagViewRect MoveTagToAvailablePosition(
             Document doc, View view, IndependentTag tag, XYZ preferredPoint,
-            AutoTagOptions options, IList<TagViewRect> occupiedRects, bool constrainToCrop)
+            AutoTagOptions options, IList<TagViewRect> occupiedRects, bool constrainToCrop, TagFrameCatalog frames)
         {
             TagViewRect original = GetTagRect(doc, view, tag, options.UsePaperMillimeters);
             if (original == null || !IntersectsAny(original, occupiedRects)) return original;
@@ -629,7 +668,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 double scale = Math.Max(1, view.Scale) / 304.8;
                 XYZ point = preferredPoint + view.RightDirection * (offset.X * scale) + view.UpDirection * (offset.Y * scale);
                 if (constrainToCrop && !IsInsideCrop(view, point)) continue;
-                AlignTagBoxCenter(doc, view, tag, point);
+                AlignTagBoxCenter(doc, view, tag, point, frames);
                 TagViewRect rect = GetTagRect(doc, view, tag, options.UsePaperMillimeters);
                 if (rect != null && !IntersectsAny(rect, occupiedRects)) return rect;
             }
@@ -638,11 +677,84 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             return original;
         }
 
+        private static void VerifyCommittedProjection(Document doc, View view,
+            Dictionary<ElementId, XYZ> expected, List<ElementId> review, List<string> issues, TagFrameCatalog frames)
+        {
+            var verificationTimer = System.Diagnostics.Stopwatch.StartNew();
+            var ids = new FilteredElementCollector(doc, view.Id).OfClass(typeof(IndependentTag)).ToElementIds().ToList();
+            var original = TagAlignService.MeasureCommittedHeads(doc, view, ids);
+            var measured = new Dictionary<ElementId, TagAlignService.HeadSnapshot>(original);
+            var changedIds = expected.Keys.ToList();
+            double tolerance = 0.05 / 304.8;
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                var corrections = new Dictionary<ElementId, XYZ>();
+                foreach (var pair in expected)
+                {
+                    if (!measured.ContainsKey(pair.Key)) throw new InvalidOperationException($"標籤 {pair.Key} 已失效");
+                    XYZ center;
+                    if (frames == null || !frames.TryCenter((IndependentTag)doc.GetElement(pair.Key), view, out center))
+                        center = measured[pair.Key].Center;
+                    XYZ delta = pair.Value - center;
+                    XYZ correction = view.RightDirection * delta.DotProduct(view.RightDirection) + view.UpDirection * delta.DotProduct(view.UpDirection);
+                    if (correction.GetLength() > tolerance) corrections.Add(pair.Key, correction);
+                }
+                if (corrections.Count == 0) break;
+                if (attempt == 3)
+                    throw new InvalidOperationException("提交後投影中心仍有偏差：" + string.Join("；", corrections.Select(p => $"{p.Key} / {p.Value.GetLength()*304.8:F3} mm")));
+                using (var tx = new Transaction(doc, "校正標籤投影位置"))
+                {
+                    tx.Start();
+                    foreach (var pair in corrections)
+                    {
+                        var tag = (IndependentTag)doc.GetElement(pair.Key);
+                        tag.TagHeadPosition += pair.Value;
+                        foreach (var end in original[pair.Key].Ends) tag.SetLeaderEnd(end.Key, end.Value);
+                    }
+                    if (tx.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("投影校正交易未提交");
+                }
+                foreach (var snapshot in TagAlignService.MeasureCommittedHeads(doc, view, changedIds))
+                    measured[snapshot.Key] = snapshot.Value;
+            }
+            foreach (var id in ids)
+            {
+                var tag = (IndependentTag)doc.GetElement(id);
+                if (tag.HasLeader != original[id].HasLeader ||
+                    (tag.HasLeader && tag.LeaderEndCondition != original[id].Condition))
+                    throw new InvalidOperationException($"標籤 {id} 引線狀態改變");
+                foreach (var end in original[id].Ends)
+                    if (tag.GetLeaderEnd(end.Key).DistanceTo(end.Value) > tolerance)
+                        throw new InvalidOperationException($"標籤 {id} 引線端點改變");
+                if (!expected.ContainsKey(id) && tag.TagHeadPosition.DistanceTo(original[id].Head) > tolerance)
+                    throw new InvalidOperationException($"既有標籤 {id} 位置改變");
+            }
+            var rectangles = measured.ToDictionary(p => p.Key,
+                p => TagViewRect.FromBoundingBox(p.Value.Box, view, 0.4 * Math.Max(1, view.Scale)));
+            foreach (var pair in expected)
+            {
+                // API bounds may include invisible controls or label extents; equality is not visual validation.
+                if (frames == null || !frames.TryCenter((IndependentTag)doc.GetElement(pair.Key), view, out _))
+                {
+                    if (!review.Contains(pair.Key)) review.Add(pair.Key);
+                    issues.Add($"標籤 {pair.Key}：無法辨識唯一線框中心，採 API 包圍框定位，需複核。");
+                }
+                else issues.Add($"標籤 {pair.Key}：族群閉合線框中心定位完成，已依視圖比例及旋轉換算；出圖外觀仍需驗收。");
+                var rect = rectangles[pair.Key];
+                if (rectangles.Any(other => other.Key != pair.Key && rect.Intersects(other.Value)))
+                {
+                    if (!review.Contains(pair.Key)) review.Add(pair.Key);
+                    issues.Add($"標籤 {pair.Key}：最終平面投影重疊，需複核。");
+                }
+            }
+            issues.Add($"提交後定位基準檢查：{expected.Count} 個，容差 0.05 mm（模型單位）；線框資料不足者另列複核，重疊仍以 API 包圍框保守檢查。");
+            issues.Add($"定位驗證耗時：{verificationTimer.ElapsedMilliseconds} ms；初次量測 {ids.Count} 個，校正重測範圍 {changedIds.Count} 個。");
+        }
+
         private static BoundingBoxXYZ GetTagHeadBox(Document doc, View view, IndependentTag tag)
         {
+            doc.Regenerate();
             if (!tag.HasLeader)
             {
-                doc.Regenerate();
                 return tag.get_BoundingBox(view);
             }
             using (var probe = new SubTransaction(doc))
@@ -693,14 +805,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             return count;
         }
 
-        private static BoundingBoxXYZ AlignTagBoxCenter(Document doc, View view, IndependentTag tag, XYZ targetPoint)
+        private static BoundingBoxXYZ AlignTagBoxCenter(Document doc, View view, IndependentTag tag, XYZ targetPoint, TagFrameCatalog frames = null)
         {
-            double tolerance = 0.05 * Math.Max(1, view.Scale) / 304.8;
+            double tolerance = 0.05 / 304.8;
             for (int attempt = 0; attempt < 6; attempt++)
             {
                 var box = GetTagHeadBox(doc, view, tag);
                 if (box == null) throw new InvalidOperationException("無法量測標籤本體。");
-                XYZ currentCenter = box.Transform.OfPoint((box.Min + box.Max) * 0.5);
+                XYZ currentCenter;
+                if (frames == null || !frames.TryCenter(tag, view, out currentCenter))
+                    currentCenter = box.Transform.OfPoint((box.Min + box.Max) * 0.5);
                 XYZ delta = targetPoint - currentCenter;
                 XYZ correction = view.RightDirection * delta.DotProduct(view.RightDirection) +
                     view.UpDirection * delta.DotProduct(view.UpDirection);
@@ -756,12 +870,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             point = null;
 
             XYZ center;
-            if (view is ViewPlan plan &&
-                (IsCategory(candidate.Element, BuiltInCategory.OST_StructuralFraming) ||
+            if ((IsCategory(candidate.Element, BuiltInCategory.OST_StructuralFraming) ||
                  IsCategory(candidate.Element, BuiltInCategory.OST_StructuralColumns)))
             {
-                if (!TryGetPlanStructuralCenter(candidate, plan, out center))
-                    throw new InvalidOperationException("無法取得平面梁投影或柱切割截面中心；未改用體積重心，請核對視圖範圍與元素幾何。");
+                if (!TryGetPlanStructuralCenter(candidate, view, out center))
+                    throw new InvalidOperationException("無法取得結構投影或柱切割截面中心；未改用體積重心，請核對視圖範圍與元素幾何。");
             }
             else
             {
@@ -797,20 +910,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             return candidate.Link == null || IsInsideCrop(view, point);
         }
 
-        private static bool TryGetPlanStructuralCenter(TagCandidate candidate, ViewPlan view, out XYZ center)
+        private static double GetCandidateElevation(TagCandidate candidate)
+        {
+            var box = candidate.Element.get_BoundingBox(null);
+            if (box != null)
+                return candidate.ToHost.OfPoint(box.Transform.OfPoint((box.Min + box.Max) * 0.5)).Z;
+            return 0;
+        }
+
+        private static bool TryGetPlanStructuralCenter(TagCandidate candidate, View view, out XYZ center)
         {
             center = null;
             bool column = IsCategory(candidate.Element, BuiltInCategory.OST_StructuralColumns);
             double? cutHeight = null;
-            if (column)
-            {
-                using (var range = view.GetViewRange())
-                {
-                    Level level = view.Document.GetElement(range.GetLevelId(PlanViewPlane.CutPlane)) as Level;
-                    if (level == null) return false;
-                    cutHeight = level.ProjectElevation + range.GetOffset(PlanViewPlane.CutPlane);
-                }
-            }
+            // Plan output uses projected physical geometry, independent of element elevation.
 
             XYZ axis = candidate.Element is FamilyInstance family ? family.GetTransform().BasisX : XYZ.BasisX;
             if (!column && candidate.Element.Location is LocationCurve location)
@@ -842,7 +955,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
                 minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
             }
-            center = origin + axis * ((minX + maxX) * 0.5) + across * ((minY + maxY) * 0.5);
+            double depth = points.Average(p => (p - origin).DotProduct(normal));
+            center = origin + axis * ((minX + maxX) * 0.5) + across * ((minY + maxY) * 0.5) + normal * depth;
             return true;
         }
 
@@ -1090,6 +1204,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private sealed class TagViewRect
         {
+            public XYZ Center(View view) => view.RightDirection * ((MinX + MaxX) * 0.5) + view.UpDirection * ((MinY + MaxY) * 0.5);
 
 
             private TagViewRect(double minX, double minY, double maxX, double maxY, double paddingMm)

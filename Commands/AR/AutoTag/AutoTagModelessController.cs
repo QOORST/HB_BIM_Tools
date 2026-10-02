@@ -2,6 +2,8 @@
 using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using Autodesk.Revit.UI.Selection;
 
 namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 {
@@ -39,7 +41,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 _mode = mode;
                 _handler = new AutoTagExternalEventHandler(mode);
                 _externalEvent = ExternalEvent.Create(_handler);
-                _form = new AutoTagOptionsForm(uiDoc.Document, mode, RequestApply, RequestRefresh);
+                _form = new AutoTagOptionsForm(uiDoc.Document, mode, RequestApply, RequestRefresh, RequestPick);
+                _form.SetSelectionCount(uiDoc.Selection.GetElementIds().Count);
                 _handler.Attach(_form, uiDoc.Document);
                 _form.FormClosed += (sender, args) => DisposeWindow();
                 _form.Show();
@@ -78,6 +81,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             RaiseExternalEvent();
         }
 
+        private static void RequestPick()
+        {
+            if (_handler == null) { _form?.SetRequestCompleted("標籤事件尚未初始化。", true); return; }
+            _handler.RequestPick();
+            RaiseExternalEvent();
+        }
+
         private static void RaiseExternalEvent()
         {
             if (_externalEvent == null || _externalEvent.Raise() != ExternalEventRequest.Accepted)
@@ -104,6 +114,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         {
             None,
             Refresh,
+            Pick,
             Apply
         }
 
@@ -125,6 +136,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             {
                 _form = form;
                 _sourceDocument = doc;
+            }
+
+            public void RequestPick()
+            {
+                _requestKind = RequestKind.Pick;
+                _options = null;
+                _rules = null;
             }
 
             public void RequestRefresh()
@@ -153,6 +171,36 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     }
 
                     Document doc = uiDoc.Document;
+                    _form?.SetSelectionCount(uiDoc.Selection.GetElementIds().Count);
+                    if (_requestKind == RequestKind.Pick)
+                    {
+                        if (!ReferenceEquals(doc, _sourceDocument))
+                        {
+                            RefreshSources(doc, "文件已切換；請確認族型設定後重新選取。");
+                            return;
+                        }
+                        var previous = uiDoc.Selection.GetElementIds().ToList();
+                        _form?.Hide();
+                        try
+                        {
+                            var picked = uiDoc.Selection.PickObjects(ObjectType.Element, new TagTargetFilter(), "選取要標註的構件，按完成；Esc 保留原選取。");
+                            var ids = picked.Select(r => r.ElementId).Distinct().ToList();
+                            uiDoc.Selection.SetElementIds(ids);
+                            _form?.SetSelectionCount(ids.Count);
+                            Complete($"已選取 {ids.Count} 個構件。");
+                        }
+                        catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                        {
+                            uiDoc.Selection.SetElementIds(previous);
+                            _form?.SetSelectionCount(previous.Count);
+                            Complete("已取消選取，保留原選取。");
+                        }
+                        finally
+                        {
+                            if (_form != null && !_form.IsDisposed) { _form.Show(); _form.Activate(); }
+                        }
+                        return;
+                    }
                     if (_requestKind == RequestKind.Refresh)
                     {
                         RefreshSources(doc, "已重新讀取目前文件的標籤族型。");
@@ -209,6 +257,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             public string GetName()
             {
                 return "HB_BIM Auto Tag";
+            }
+
+            private sealed class TagTargetFilter : ISelectionFilter
+            {
+                public bool AllowElement(Element element) => element.Category != null && !(element is ElementType) &&
+                    AutoTagService.CategoryRules.Any(rule => element.Category.Id == new ElementId(rule.ElementCategory));
+                public bool AllowReference(Reference reference, XYZ point) => false;
             }
 
             private void RefreshSources(Document doc, string status)

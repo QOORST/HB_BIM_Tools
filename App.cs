@@ -437,9 +437,29 @@ namespace YD_RevitTools.LicenseManager
                 SetButtonIcon(selectRelatedTagsData, "tag_related");
                 autoDimensionPulldown.AddPushButton(selectRelatedTagsData);
 
+                var tagAlignHorizontal = new PushButtonData("TagAlignHorizontal", "標籤水平對齊", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlignHorizontal");
+                tagAlignHorizontal.ToolTip = "選取基準標籤或水平線，再批次選取標籤；只調整上下位置。";
+                SetButtonIcon(tagAlignHorizontal, "auto_tag_horizontal");
+                autoDimensionPulldown.AddPushButton(tagAlignHorizontal);
+                var tagAlignVertical = new PushButtonData("TagAlignVertical", "標籤垂直對齊", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlignVertical");
+                tagAlignVertical.ToolTip = "選取基準標籤或垂直線，再批次選取標籤；只調整左右位置。";
+                SetButtonIcon(tagAlignVertical, "auto_tag_vertical");
+                autoDimensionPulldown.AddPushButton(tagAlignVertical);
+                var tagBatchHorizontal = new PushButtonData("TagAlignBatchHorizontal", "結構標籤批次水平對齊", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlignBatchHorizontal");
+                tagBatchHorizontal.ToolTip = "框選基準及待對齊標籤，依梁、柱、牆、樓板、基礎分類及上下順序配對；支援 1 對 1。";
+                SetButtonIcon(tagBatchHorizontal, "auto_tag_horizontal");
+                autoDimensionPulldown.AddPushButton(tagBatchHorizontal);
+                var tagBatchVertical = new PushButtonData("TagAlignBatchVertical", "結構標籤批次垂直對齊", assemblyPath,
+                    "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlignBatchVertical");
+                tagBatchVertical.ToolTip = "框選基準及待對齊標籤，依結構標籤分類及左右順序配對，只調整左右位置；支援 1 對 1。";
+                SetButtonIcon(tagBatchVertical, "auto_tag_vertical");
+                autoDimensionPulldown.AddPushButton(tagBatchVertical);
                 PushButtonData tagAlignData = new PushButtonData(
                     "TagAlign",
-                    "標籤\n對齊",
+                    "標籤進階排列",
                     assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlign");
                 tagAlignData.ToolTip = "標籤輔助對齊";

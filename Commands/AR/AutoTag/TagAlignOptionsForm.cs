@@ -12,12 +12,16 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private readonly Forms.ComboBox _baseCombo = new Forms.ComboBox();
         private readonly Forms.TextBox _spacingText = new Forms.TextBox();
         private readonly Forms.CheckBox _avoidOverlapCheck = new Forms.CheckBox();
+        private readonly Forms.CheckBox _advanced = new Forms.CheckBox();
 
         public TagAlignOptionsForm()
         {
             Text = "HB_BIM 標籤輔助對齊";
             AutoScaleMode = Forms.AutoScaleMode.Dpi;
-            ClientSize = new Size(440, 260);
+            ClientSize = new Size(480, 180);
+            MinimumSize = new Size(480, 0);
+            AutoSize = true;
+            AutoSizeMode = Forms.AutoSizeMode.GrowAndShrink;
             BackColor = Color.White;
             FormBorderStyle = Forms.FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -34,10 +38,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         {
             var root = new Forms.TableLayoutPanel
             {
-                Dock = Forms.DockStyle.Fill,
+                Dock = Forms.DockStyle.Top,
+                AutoSize = true,
+                MinimumSize = new Size(460, 0),
                 Padding = new Forms.Padding(14),
                 ColumnCount = 2,
-                RowCount = 6
+                RowCount = 7
             };
             root.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Absolute, 120));
             root.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
@@ -47,6 +53,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 34));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 34));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 100));
+            root.RowStyles.Clear();
+            for (int i = 0; i < 7; i++) root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             Controls.Add(root);
 
             AddLabel(root, "作用範圍", 0);
@@ -54,7 +62,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             root.Controls.Add(_scopeCombo, 1, 0);
 
             AddLabel(root, "對齊方式", 1);
-            ConfigureCombo(_modeCombo, new[] { "水平對齊", "垂直對齊", "等距水平", "等距垂直" }, 0);
+            ConfigureCombo(_modeCombo, new[] { "水平對齊", "垂直對齊" }, 0);
             root.Controls.Add(_modeCombo, 1, 1);
 
             AddLabel(root, "對齊基準", 2);
@@ -74,10 +82,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             var buttons = new Forms.FlowLayoutPanel
             {
                 Dock = Forms.DockStyle.Fill,
+                AutoSize = true,
                 FlowDirection = Forms.FlowDirection.RightToLeft,
                 WrapContents = false
             };
-            root.Controls.Add(buttons, 0, 5);
+            _advanced.Text = "進階：原有排列模式";
+            _advanced.AutoSize = true;
+            root.Controls.Add(_advanced, 0, 5);
+            root.SetColumnSpan(_advanced, 2);
+            root.Controls.Add(buttons, 0, 6);
             root.SetColumnSpan(buttons, 2);
 
             var cancel = new Forms.Button
@@ -90,8 +103,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
             var ok = new Forms.Button
             {
-                Text = "執行對齊",
-                Width = 86,
+                Text = "選取基準",
+                Width = 110,
                 Height = 30,
                 DialogResult = Forms.DialogResult.OK
             };
@@ -106,11 +119,25 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
             AcceptButton = ok;
             CancelButton = cancel;
+            Action update = () => {
+                foreach (Forms.Control control in root.Controls) {
+                    int row = root.GetRow(control);
+                    if (row == 0 || row == 2 || row == 3 || row == 4) control.Visible = _advanced.Checked;
+                }
+                int selected = Math.Max(0, _modeCombo.SelectedIndex);
+                _modeCombo.Items.Clear();
+                _modeCombo.Items.AddRange(_advanced.Checked ? new[] { "水平對齊", "垂直對齊", "等距水平", "等距垂直" } : new[] { "水平對齊", "垂直對齊" });
+                _modeCombo.SelectedIndex = Math.Min(selected, _modeCombo.Items.Count - 1);
+                ok.Text = _advanced.Checked ? "執行排列" : "選取基準";
+            };
+            _advanced.CheckedChanged += (_, __) => update();
+            update();
         }
 
         private void OkClicked(object sender, EventArgs e)
         {
-            if (!TryParseSpacing(_spacingText.Text, out double spacing))
+            double spacing = 300;
+            if (_advanced.Checked && !TryParseSpacing(_spacingText.Text, out spacing))
             {
                 Forms.MessageBox.Show("間距請輸入 0 到 10000 mm 之間的數值。", Text, Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Warning);
                 DialogResult = Forms.DialogResult.None;
@@ -119,6 +146,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
             Options = new TagAlignOptions
             {
+                PickReference = !_advanced.Checked,
                 Scope = _scopeCombo.SelectedIndex == 1 ? TagAlignScope.ActiveView : TagAlignScope.Selection,
                 Mode = IndexToMode(_modeCombo.SelectedIndex),
                 Base = _baseCombo.SelectedIndex == 1 ? TagAlignBase.First : TagAlignBase.Average,

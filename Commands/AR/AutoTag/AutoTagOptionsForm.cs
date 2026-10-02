@@ -15,6 +15,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private int _viewScale;
         private readonly Action<AutoTagOptions, IReadOnlyList<AutoTagRuleSelection>> _applyAction;
         private readonly Action _refreshAction;
+        private readonly Action _pickAction;
+        private readonly Forms.Button _pickButton = new Forms.Button { Text = "選取構件", AutoSize = true, MinimumSize = new Size(100, 30) };
+        private readonly Forms.Label _selectionLabel = new Forms.Label { Text = "尚未讀取選取數量", AutoSize = true, Margin = new Forms.Padding(8, 8, 0, 0) };
         private readonly string _windowTitle;
         private readonly Forms.ComboBox _templateCombo = new Forms.ComboBox();
         private readonly Forms.NumericUpDown _maxMove = new Forms.NumericUpDown();
@@ -22,6 +25,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private readonly Forms.CheckBox _presentOnly = new Forms.CheckBox();
         private readonly Forms.Label _categoryHint = new Forms.Label();
         private bool _refreshingSources;
+        private bool _applyingOptions;
+        private Forms.TableLayoutPanel _sourceGrid;
+        private readonly Forms.Label _offsetLabel = new Forms.Label { Dock = Forms.DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoSize = true };
         private HashSet<RevitDB.BuiltInCategory> _presentCategories = new HashSet<RevitDB.BuiltInCategory>();
         private readonly Forms.ComboBox _linkCombo = new Forms.ComboBox();
         private readonly Forms.ComboBox _scopeCombo = new Forms.ComboBox();
@@ -48,13 +54,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             RevitDB.Document doc,
             AutoTagMode mode,
             Action<AutoTagOptions, IReadOnlyList<AutoTagRuleSelection>> applyAction,
-            Action refreshAction)
+            Action refreshAction, Action pickAction = null)
         {
             _doc = doc ?? throw new ArgumentNullException(nameof(doc));
             _mode = mode;
             _viewScale = Math.Max(1, doc.ActiveView.Scale);
             _applyAction = applyAction ?? throw new ArgumentNullException(nameof(applyAction));
             _refreshAction = refreshAction ?? throw new ArgumentNullException(nameof(refreshAction));
+            _pickAction = pickAction;
             _windowTitle = mode == AutoTagMode.Unified ? "HB_BIM 自動標籤" : mode == AutoTagMode.Vertical ? "自動標籤 - 垂直元素" : "自動標籤 - 水平元素";
 
             Text = _windowTitle;
@@ -139,15 +146,22 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             UpdateSummary();
         }
 
+        public void SetSelectionCount(int count)
+        {
+            if (!IsDisposed) _selectionLabel.Text = $"選取結果：{count} 個";
+        }
+
         public void SetRequestCompleted(string status = null, bool isError = false)
         {
             if (IsDisposed)
                 return;
 
             _applyButton.Enabled = true;
+            _pickButton.Enabled = _pickAction != null;
             _refreshButton.Enabled = true;
             _saveDefaultButton.Enabled = true;
             _resetButton.Enabled = true;
+            UpdateSummary();
             _statusLabel.ForeColor = isError ? Color.FromArgb(176, 45, 45) : Color.FromArgb(75, 88, 105);
             _statusLabel.Text = status ?? "完成。可繼續調整並再次執行。";
         }
@@ -175,8 +189,19 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             var oldTop = BuildTopPanel();
             var oldFlags = BuildFlagPanel();
             var source = SettingsGrid();
+            _sourceGrid = source;
             AddLabel(source, "標註範圍", 0, 0); source.Controls.Add(_scopeCombo, 1, 0); source.SetColumnSpan(_scopeCombo, 3);
             AddLabel(source, "連結實例", 0, 1); source.Controls.Add(_linkCombo, 1, 1); source.SetColumnSpan(_linkCombo, 3);
+            var selection = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Fill, AutoSize = true, WrapContents = true };
+            selection.Controls.Add(_pickButton);
+            selection.Controls.Add(_selectionLabel);
+            source.Controls.Add(selection, 1, 2); source.SetColumnSpan(selection, 3);
+            _pickButton.Enabled = _pickAction != null;
+            _pickButton.Click += (_, __) => {
+                if (_pickAction == null) return;
+                SetPending("等待選取構件。");
+                _pickAction();
+            };
             root.Controls.Add(Section("來源與範圍", source), 0, 0);
 
             var rules = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, RowCount = 2, ColumnCount = 1 };
@@ -212,9 +237,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
             var placement = SettingsGrid();
             AddLabel(placement, "放置位置", 0, 0); placement.Controls.Add(_placementCombo, 1, 0);
-            AddLabel(placement, "偏移距離", 2, 0); placement.Controls.Add(_offsetText, 3, 0);
-            AddLabel(placement, "距離單位", 0, 1); placement.Controls.Add(_unitsCombo, 1, 1);
-            _leaderCheck.AutoSize = true; placement.Controls.Add(_leaderCheck, 3, 1);
+            placement.Controls.Add(_offsetLabel, 2, 0); placement.Controls.Add(_offsetText, 3, 0);
+            var mainFlags = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Fill, AutoSize = true, WrapContents = true };
+            foreach (var flag in new[] { _avoidOverlapCheck, _leaderCheck, _skipExistingCheck }) { flag.AutoSize = true; mainFlags.Controls.Add(flag); }
+            placement.Controls.Add(mainFlags, 0, 1); placement.SetColumnSpan(mainFlags, 4);
             root.Controls.Add(Section("放置設定", placement), 0, 2);
 
             var advanced = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 2 };
@@ -222,8 +248,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             var detail = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, Visible = false };
             _directionCombo.Dock = Forms.DockStyle.None; _directionCombo.Width = 180;
             detail.Controls.Add(new Forms.Label { Text = "梁／管線方向", AutoSize = true, Margin = new Forms.Padding(0, 7, 6, 0) });
-            detail.Controls.Add(_directionCombo); detail.Controls.Add(_skipExistingCheck); detail.Controls.Add(_avoidOverlapCheck);
-            detail.SetFlowBreak(_avoidOverlapCheck, true);
+            detail.Controls.Add(_directionCombo);
+            detail.SetFlowBreak(_directionCombo, true);
+            detail.Controls.Add(new Forms.Label { Text = "距離單位", AutoSize = true });
+            _unitsCombo.Dock = Forms.DockStyle.None; _unitsCombo.Width = 180;
+            detail.Controls.Add(_unitsCombo); detail.SetFlowBreak(_unitsCombo, true);
             detail.Controls.Add(new Forms.Label { Text = "文字方向", AutoSize = true, Margin = new Forms.Padding(0, 7, 6, 0) });
             ConfigureCombo(_textDirectionCombo, new[] { "水平", "垂直", "跟隨管線方向" });
             _textDirectionCombo.Dock = Forms.DockStyle.None;
@@ -257,7 +286,6 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             detail.Controls.Add(_maxMove);
             _crossSide.Text = "允許跨側"; _crossSide.AutoSize = true;
             detail.Controls.Add(_crossSide);
-            detail.Controls.Add(new Forms.Label { Text = "無引線最多移動 3 mm；中心固定；無空位保留原位。", AutoSize = true, Margin = new Forms.Padding(8, 7, 0, 0) });
             toggle.Click += (_, __) => { detail.Visible = !detail.Visible; toggle.Text = detail.Visible ? "▾ 進階設定" : "▸ 進階設定"; };
             advanced.Controls.Add(toggle, 0, 0); advanced.Controls.Add(detail, 0, 1);
             root.Controls.Add(advanced, 0, 3);
@@ -380,7 +408,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             top.Controls.Add(_scopeCombo, 3, 0);
 
             AddLabel(top, "標籤位置", 0, 1);
-            ConfigureCombo(_placementCombo, new[] { "元素中心（固定，不避讓）", "上方", "下方", "左側", "右側" });
+            ConfigureCombo(_placementCombo, new[] { "元素中心（依避讓設定）", "上方", "下方", "左側", "右側" });
             _placementCombo.SelectedIndex = 1;
             _placementCombo.SelectedIndexChanged += (sender, args) => { _offsetText.Enabled = _placementCombo.SelectedIndex != 0; UpdateSummary(); };
             top.Controls.Add(_placementCombo, 1, 1);
@@ -428,7 +456,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _leaderCheck.Text = "建立引線";
             _leaderCheck.Checked = true;
             _leaderCheck.Width = 120;
-            _leaderCheck.CheckedChanged += (sender, args) => UpdateSummary();
+            _leaderCheck.CheckedChanged += (sender, args) => {
+                if (!_applyingOptions && !_leaderCheck.Checked && _placementCombo.SelectedIndex == 0) _avoidOverlapCheck.Checked = false;
+                UpdateSummary();
+            };
             flags.Controls.Add(_leaderCheck);
 
             _skipExistingCheck.Text = "略過已有標籤的元素";
@@ -611,7 +642,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private bool TryReadOptions(out AutoTagOptions options)
         {
             options = null;
-            if (!double.TryParse(_offsetText.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double offset) || double.IsNaN(offset) || double.IsInfinity(offset) || offset < 0 || offset > 10000)
+            UpdateSummary();
+            double offset = 0;
+            if (_placementCombo.SelectedIndex != 0 && (!double.TryParse(_offsetText.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out offset) || double.IsNaN(offset) || double.IsInfinity(offset) || offset < 0 || offset > 10000))
             {
                 Forms.MessageBox.Show("偏移距離請輸入 0 到 10000 mm 之間的數值。", _windowTitle, Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Warning);
                 return false;
@@ -670,6 +703,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private void SetPending(string status)
         {
+            _pickButton.Enabled = false;
             _applyButton.Enabled = false;
             _refreshButton.Enabled = false;
             _saveDefaultButton.Enabled = false;
@@ -728,6 +762,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private void ApplyOptions(AutoTagOptions options)
         {
+            _applyingOptions = true;
+            try {
             _templateCombo.SelectedIndex = Math.Max(0, Math.Min(2, (int)options.Template));
             _scopeCombo.SelectedIndex = (int)options.Scope < _scopeCombo.Items.Count ? (int)options.Scope : 0;
             SelectLink(options.LinkInstanceUniqueId);
@@ -744,6 +780,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _bankLeader.Value = double.IsNaN(options.BankLeaderPaperMm) ? 5 : (decimal)Math.Max(2, Math.Min(100, options.BankLeaderPaperMm));
             _skipExistingCheck.Checked = options.SkipExistingTags;
             _avoidOverlapCheck.Checked = options.AvoidTagOverlap;
+            } finally { _applyingOptions = false; }
+            UpdateSummary();
         }
 
         private IReadOnlyList<AutoTagSavedRule> GetSavedRules()
@@ -862,11 +900,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             if (_summaryLabel == null || _summaryLabel.IsDisposed)
                 return;
 
+            bool center = _placementCombo.SelectedIndex == 0;
+            if (!_applyingOptions && center && _avoidOverlapCheck.Checked) _leaderCheck.Checked = true;
+            _offsetText.Enabled = !center;
+            _offsetLabel.Text = _unitsCombo.SelectedIndex == 1 ? "偏移（紙面 mm）" : "偏移（模型 mm）";
+            if (_sourceGrid != null) {
+                bool linked = _scopeCombo.SelectedIndex == 2;
+                foreach (Forms.Control control in _sourceGrid.Controls)
+                {
+                    if (_sourceGrid.GetRow(control) == 1) control.Visible = linked;
+                    if (_sourceGrid.GetRow(control) == 2) control.Visible = _scopeCombo.SelectedIndex == 1;
+                }
+            }
             int enabled = _rows.Count(row => row.CheckBox.Checked);
-            string scope = _scopeCombo.SelectedItem as string ?? string.Empty;
-            string placement = _placementCombo.SelectedItem as string ?? string.Empty;
-            string overlap = _avoidOverlapCheck.Checked ? "避讓開" : "避讓關";
-            _summaryLabel.Text = $"{scope} / {placement} / {overlap} / 已選 {enabled} 類";
+            int missing = _rows.Count(row => row.CheckBox.Checked && row.SelectedTagTypeId == RevitDB.ElementId.InvalidElementId);
+            _summaryLabel.Text = $"已選 {enabled} 類 · 缺少族型 {missing} 類";
         }
 
         private static int FindTagTypeIndex(Forms.ComboBox comboBox, RevitDB.ElementId id)

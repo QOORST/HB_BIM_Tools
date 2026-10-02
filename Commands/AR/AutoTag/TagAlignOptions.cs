@@ -22,6 +22,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
     internal sealed class TagAlignOptions
     {
+        public bool PickReference { get; set; }
         public TagAlignScope Scope { get; set; } = TagAlignScope.Selection;
 
         public TagAlignMode Mode { get; set; } = TagAlignMode.Horizontal;
