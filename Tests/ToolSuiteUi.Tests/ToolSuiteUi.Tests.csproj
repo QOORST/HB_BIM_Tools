@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="../../Helpers/Data/CsvRecordReader.cs" Link="CsvRecordReader.cs" />
     <Compile Include="../../Commands/MEP/PipeSleeveSettings.cs" Link="PipeSleeveSettings.cs" />
+    <Compile Include="../../Commands/MEP/SleeveLevelPolicy.Choice.cs" Link="SleeveLevelPolicy.Choice.cs" />
     <Compile Include="../../Commands/MEP/SleeveBeamReferencePanel.cs" Link="SleeveBeamReferencePanel.cs" />
     <Compile Include="../../Commands/MEP/PipeSleeveNominalRules.cs" Link="PipeSleeveNominalRules.cs" />
     <Compile Include="../../Commands/MEP/PipeSleeveSettingsForm.cs" Link="PipeSleeveSettingsForm.cs" />

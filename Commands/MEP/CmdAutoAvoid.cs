@@ -58,6 +58,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 int successCount = 0;
                 int failCount = 0;
 
+                bool transactionPending = false;
                 bool usePreselectedOnce = preselectedElements.Count > 0;
                 do
                 {
@@ -100,15 +101,34 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                             using (var trans = new Transaction(_doc, $"避讓管線-{targetId}"))
                             {
                                 trans.Start();
+                                FailureHandlingOptions failureOptions = trans.GetFailureHandlingOptions();
+                                failureOptions.SetFailuresPreprocessor(new RollbackOnFailure());
+                                failureOptions.SetClearAfterRollback(true);
+                                failureOptions.SetForcedModalHandling(true);
+                                trans.SetFailureHandlingOptions(failureOptions);
                                 try
                                 {
                                     Result bendResult = ExecuteBendByPoints(targetElement, point1, point2, opt);
 
                                     if (bendResult == Result.Succeeded)
                                     {
-                                        trans.Commit();
-                                        successCount++;
-                                        Logger.Info($"元素 {targetId} 避讓成功");
+                                        TransactionStatus status = trans.Commit();
+                                        if (status == TransactionStatus.Committed)
+                                        {
+                                            successCount++;
+                                            Logger.Info($"元素 {targetId} 避讓成功");
+                                        }
+                                        else
+                                        {
+                                            failCount++;
+                                            Logger.Warning($"元素 {targetId} 避讓未提交：{status}");
+                                            // Pending failure processing must finish before any new transaction.
+                                            if (status == TransactionStatus.Pending)
+                                            {
+                                                transactionPending = true;
+                                                break;
+                                            }
+                                        }
                                     }
                                     else
                                     {
@@ -141,7 +161,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         break;
                     }
                 }
-                while (repeatMode);
+                while (repeatMode && !transactionPending);
 
                 // 顯示最終結果
                 if (successCount > 0 || failCount > 0)
@@ -167,6 +187,18 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 Logger.Error("操作失敗", ex);
                 TaskDialog.Show("錯誤", $"操作失敗: {ex.Message}");
                 return Result.Failed;
+            }
+        }
+
+        private sealed class RollbackOnFailure : IFailuresPreprocessor
+        {
+            public FailureProcessingResult PreprocessFailures(FailuresAccessor accessor)
+            {
+                // Revit repairs must not silently change the graph validated before Commit.
+                // Fail closed even on warnings, which may discard constraints/connections.
+                return accessor.GetFailureMessages().Count == 0
+                    ? FailureProcessingResult.Continue
+                    : FailureProcessingResult.ProceedWithRollBack;
             }
         }
 

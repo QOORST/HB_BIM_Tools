@@ -1,4 +1,7 @@
-# Build Installer Script
+﻿# Build Installer Script
+[CmdletBinding()]
+param([string]$FamilyLibraryProject)
+$ErrorActionPreference = 'Stop'
 # Compiles the Inno Setup installer for HB_BIM Tools
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -12,7 +15,11 @@ $issFile = Join-Path $installerDir "HB_BIM_Setup.iss"
 $prepareScript = Join-Path $installerDir "Prepare_Files_Simple.ps1"
 $publicSigningCertificatePath = Join-Path $installerDir "LAN_CodeSigning.cer"
 $revitApiRoot = Split-Path (Split-Path $projectRoot -Parent) -Parent
-$familyLibraryProject = Join-Path $revitApiRoot "Codex\work\family-library-management\addin\CompanyFamilyLibraryMvp.csproj"
+if ([string]::IsNullOrWhiteSpace($FamilyLibraryProject)) {
+    $FamilyLibraryProject = Join-Path $revitApiRoot "Codex\work\family-library-management\addin\CompanyFamilyLibraryMvp.csproj"
+}
+$mainProject = Join-Path $projectRoot 'YD_RevitTools.LicenseManager.csproj'
+$supportedVersions = @('2022', '2024', '2025', '2026')
 
 function Get-LanCodeSigningCertificate {
     if (-not (Test-Path -LiteralPath $publicSigningCertificatePath)) {
@@ -95,36 +102,64 @@ if (-not (Test-Path $prepareScript)) {
 Write-Host "Setup script: $issFile" -ForegroundColor Gray
 Write-Host ""
 
-# Build optional companion add-ins that are packaged beside the main add-in.
-if (Test-Path $familyLibraryProject) {
-    Write-Host "Building Company Family Library payload..." -ForegroundColor Yellow
-    foreach ($configuration in @("Release2022", "Release2024", "Release2025", "Release2026")) {
-        Write-Host "  dotnet build CompanyFamilyLibraryMvp ($configuration)" -ForegroundColor Gray
-        $buildOutput = dotnet build $familyLibraryProject --no-restore -c $configuration -p:Platform=x64 -v:minimal
-        if ($LASTEXITCODE -ne 0) {
-            $buildOutput | Select-Object -Last 20
-            Write-Host ""
-            Write-Host "[ERROR] Company Family Library build failed: $configuration" -ForegroundColor Red
-            exit 1
+# Check metadata without rewriting versions or implying a published release.
+$version = (Get-Content (Join-Path $projectRoot 'version.json') -Raw | ConvertFrom-Json).version
+$issText = Get-Content -LiteralPath $issFile -Raw
+$issVersion = [regex]::Match($issText, '#define MyAppVersion "([^"\r\n]+)"').Groups[1].Value
+$assemblyText = Get-Content (Join-Path $projectRoot 'Properties\AssemblyInfo.cs') -Raw
+$assemblyVersion = [regex]::Match($assemblyText, 'AssemblyInformationalVersion\("([^"\r\n]+)"\)').Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($version) -or $version -ne $issVersion -or $version -ne $assemblyVersion) {
+    throw 'version.json, installer version and AssemblyInformationalVersion must agree.'
+}
+foreach ($project in @($mainProject, $FamilyLibraryProject)) {
+    if (-not (Test-Path -LiteralPath $project -PathType Leaf)) {
+        throw "Required project missing: $project. Existing installed or staged binaries cannot be used."
+    }
+}
+$null = Get-Command dotnet -ErrorAction Stop
+foreach ($year in $supportedVersions) {
+    foreach ($api in @('RevitAPI.dll', 'RevitAPIUI.dll')) {
+        $apiPath = "C:\Program Files\Autodesk\Revit $year\$api"
+        if (-not (Test-Path -LiteralPath $apiPath -PathType Leaf)) {
+            throw "Required Revit $year SDK reference missing: $apiPath"
         }
     }
-    Write-Host "[OK] Company Family Library payload built" -ForegroundColor Green
-    Write-Host ""
-} else {
-    Write-Host "[WARNING] Company Family Library project not found. Installer will use any existing packaged DLLs only." -ForegroundColor Yellow
-    Write-Host "Path: $familyLibraryProject" -ForegroundColor Gray
-    Write-Host ""
 }
 
-# Prepare installer payload before compiling
-Write-Host "Preparing installer payload..." -ForegroundColor Yellow
-Write-Host "" 
-
-& $prepareScript
-if (-not $?) {
-    Write-Host "" 
-    Write-Host "[ERROR] Prepare step failed. Installer build aborted." -ForegroundColor Red
-    exit 1
+# An empty, unique output directory plus Rebuild prevents stale main/companion
+# binaries from passing as the current build. No use of existing bin or Addins.
+$buildRoot = Join-Path ([IO.Path]::GetTempPath()) ("HB_BIM_Installer_" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $buildRoot -ErrorAction Stop | Out-Null
+try {
+    $receipt = @()
+    foreach ($year in $supportedVersions) {
+        foreach ($kind in @('main', 'family')) {
+            $project = if ($kind -eq 'main') { $mainProject } else { $FamilyLibraryProject }
+            $dllName = if ($kind -eq 'main') { 'YD_RevitTools.LicenseManager.dll' } else { 'CompanyFamilyLibraryMvp.dll' }
+            $output = Join-Path $buildRoot "$year\$kind"
+            Write-Host "Rebuilding $kind for Revit $year..." -ForegroundColor Yellow
+            & dotnet build $project -t:Rebuild -c "Release$year" -p:Platform=x64 -p:RevitVersion=$year --output $output -v:minimal
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $kind Release$year" }
+            $artifact = Join-Path $output $dllName
+            if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
+                throw "Build did not produce expected artifact: $artifact"
+            }
+            if ($kind -eq 'main') {
+                $fileVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($artifact).FileVersion
+                if ($fileVersion -ne "$version.0") { throw "Main DLL version mismatch: $artifact ($fileVersion)" }
+            }
+            $receipt += [pscustomobject]@{
+                Key = "$year/$kind"; Configuration = "Release$year"
+                Sha256 = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash
+            }
+        }
+    }
+    $receipt | ConvertTo-Json | Set-Content (Join-Path $buildRoot 'build-receipt.json') -Encoding UTF8
+    & $prepareScript -BuildRoot $buildRoot -FamilyLibraryProject $FamilyLibraryProject
+    if (-not $?) { throw 'Prepare step failed. Installer build aborted.' }
+} finally {
+    # Only remove the unique temporary directory allocated by this invocation.
+    if (Test-Path -LiteralPath $buildRoot) { Remove-Item -LiteralPath $buildRoot -Recurse -Force }
 }
 
 Write-Host ""
@@ -132,9 +167,9 @@ Write-Host ""
 $signingCertificate = Get-LanCodeSigningCertificate
 if ($signingCertificate) {
     Write-Host "Signing installer payload with LAN certificate..." -ForegroundColor Yellow
-    foreach ($version in @("2022", "2024", "2025", "2026")) {
-        Sign-FileWithLanCertificate -Path (Join-Path $installerDir "$version\YD_RevitTools.LicenseManager.dll") -Certificate $signingCertificate
-        Sign-FileWithLanCertificate -Path (Join-Path $installerDir "$version\CompanyFamilyLibraryMvp.dll") -Certificate $signingCertificate
+    foreach ($year in $supportedVersions) {
+        Sign-FileWithLanCertificate -Path (Join-Path $installerDir "$year\YD_RevitTools.LicenseManager.dll") -Certificate $signingCertificate
+        Sign-FileWithLanCertificate -Path (Join-Path $installerDir "$year\CompanyFamilyLibraryMvp.dll") -Certificate $signingCertificate
     }
     Write-Host ""
 } else {
@@ -146,19 +181,22 @@ if ($signingCertificate) {
 Write-Host "Compiling installer..." -ForegroundColor Yellow
 Write-Host ""
 
+$compileStartedUtc = [DateTime]::UtcNow
 $process = Start-Process -FilePath $iscc -ArgumentList "`"$issFile`"" -NoNewWindow -Wait -PassThru
 
 if ($process.ExitCode -eq 0) {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "Build Successful!" -ForegroundColor Green
+    Write-Host "Installer compiler completed; checking output..." -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
     
     # Find the output file
     $outputDir = Join-Path $projectRoot "Output"
+    if (-not (Test-Path $outputDir)) { throw "Installer output directory missing: $outputDir" }
     if (Test-Path $outputDir) {
-        $setupFiles = Get-ChildItem $outputDir -Filter "HB_BIM_Tools_v*_Setup.exe" | Sort-Object LastWriteTime -Descending
+        $setupFiles = @(Get-ChildItem $outputDir -Filter "HB_BIM_Tools_v${version}*_Setup.exe" | Where-Object { $_.LastWriteTimeUtc -ge $compileStartedUtc } | Sort-Object LastWriteTime -Descending)
+        if ($setupFiles.Count -ne 1) { throw 'Expected exactly one freshly compiled installer.' }
         if ($setupFiles.Count -gt 0) {
             $setupFile = $setupFiles[0]
 
@@ -181,7 +219,7 @@ if ($process.ExitCode -eq 0) {
             
             Write-Host "Next steps:" -ForegroundColor Yellow
             Write-Host "  1. Test the installer on a clean machine" -ForegroundColor White
-            Write-Host "  2. Distribute to users" -ForegroundColor White
+            Write-Host "  2. Complete the per-version release checklist before distribution" -ForegroundColor White
             Write-Host ""
         }
     }

@@ -2,7 +2,7 @@
 
 **專業的 Revit 工具集 - 提升 BIM 工作效率**
 
-[![Version](https://img.shields.io/badge/version-2.5.12-blue.svg)](https://github.com/QOORST/HB_BIM_Tools/releases)
+[![Source Version](https://img.shields.io/badge/source-2.5.17--unreleased-orange.svg)](version.json)
 [![Revit](https://img.shields.io/badge/Revit-2022%20|%202024%20|%202025%20|%202026-orange.svg)](https://www.autodesk.com/products/revit)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
 
@@ -11,6 +11,14 @@
 ## 📋 概述
 
 HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實用功能，包括自動更新、AR 裝修檢查、釋疑簡報快速產出、COBie 匯出等，大幅提升 BIM 工作效率。
+
+### 版本與驗證狀態
+
+- 本分支原始碼版本為 **2.5.17 本地驗證版**；本次安全性改善屬於 **Unreleased**，尚未產生或發布安裝檔。
+- 截至 2026-10-03，最新公開安裝版為 [v2.5.14](https://github.com/QOORST/HB_BIM_Tools/releases/tag/v2.5.14)。原始碼、已發布安裝版及電腦實際安裝版本必須分別確認。
+- 支援的 Revit 年版不代表各年版功能完全相同。2025 未提供房間裝修；2025／2026 未提供族參數滑桿與選取族型資訊。
+- 編譯、離線測試及介面抽驗不能替代 Revit 模型驗收。模型寫入工具請先在可復原副本驗證取消、部分失敗、Undo、重跑與連結座標。
+- 詳細狀態見 [現有實機驗收紀錄](Docs/qa/tool-suite-acceptance.md)；未勾選項目不得視為通過。
 
 ---
 
@@ -27,7 +35,7 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 ### 📊 數據工具
 - **自訂 COBie** - 依自訂欄位與參數對照匯出，支援連結模型
-- **標準 COBie** - 依標準工作表與必要欄位檢核規則匯出
+- **標準 COBie** - 依標準工作表與必要欄位檢核規則匯出；Assembly、Connection、Spare、Resource、Job、Document 目前為空表，需另行補充，並非完整多表往返交付
 - **CSV 匯出** - 批量匯出元素參數到 CSV
 
 ### 📝 釋疑工具
@@ -37,10 +45,10 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 - **同檔追加/更新** - 同一專案可追加投影片，也可從歷史紀錄更新既有投影片
 
 ### 🏗️ AR 模板工具
-- **房間裝修** - 依房間設定建立牆、地板、天花與踢腳板，並同步模型實際裝修牆高
+- **房間裝修** - 依房間設定建立牆、地板、天花與踢腳板，並同步模型實際裝修牆高（2025 未提供此入口）
 - **房間裝修交付報表** - Revit 2026 匯出格式已對齊其他版本，提供「明細表／統計表／施工明細表」，並以模型實際粉刷元素數量作為可驗算交付量
 - **面生面** - 從選取面快速建立裝修元素
-- **參數滑桿** - 視覺化調整族群參數
+- **參數滑桿** - 在族群編輯器中調整參數（2022／2024）；專案內的「選取族型資訊」僅顯示資訊，不提供參數滑桿編輯
 
 ---
 
@@ -57,7 +65,7 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 
 1. **下載安裝程式**
    - 前往 [Releases](https://github.com/QOORST/HB_BIM_Tools/releases) 頁面
-   - 下載最新版本的 `HB_BIM_Tools_v2.5.12_Setup.exe`
+   - 下載該 Release 附帶的 `HB_BIM_Tools_v<版本>_Setup.exe`，並核對發布說明；勿將本分支版本號當成已發布安裝檔
 
 2. **執行安裝**
    - 關閉所有 Revit 實例
@@ -196,7 +204,6 @@ HB_BIM Tools 是一套專為 Revit 設計的專業工具集，整合了多個實
 - 修正穿梁套管中心點，改以管線與梁實體交段中心放置，避免偏到梁定位線。
 - 修正豎井/樓板開口誤判與同來源殘留套管清理，管理清單預設跟隨目前視圖範圍。
 - 更新管線套管使用手冊、圖文手冊、安裝說明、手動部署說明與部署包 README。
-
 
 
 
