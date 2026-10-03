@@ -8,464 +8,259 @@ using Autodesk.Revit.DB.Electrical;
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.Core
 {
-    /// <summary>
-    /// Revit MEP 元素操作工具（整合優化版）
-    /// 功能：管線/風管/電管的自動避讓替換、連接器管理、彎頭創建
-    /// </summary>
+    /// <summary>建立避讓管線；任何不完整連接皆失敗，由呼叫端回復整個交易。</summary>
     public static class RevitUtils
     {
+        private const double ConnectorTolerance = 1.0 / 304.8; // 1 mm
+
+        // Do not retain live connector wrappers across regeneration/deletion.
+        private sealed class ConnectorReference
+        {
+            public ElementId OwnerId { get; }
+            public int ConnectorId { get; }
+
+            public ConnectorReference(Connector connector)
+            {
+                OwnerId = connector.Owner.Id;
+                ConnectorId = connector.Id;
+            }
+
+            public Connector Resolve(Document doc)
+            {
+                Connector connector = GetConnectorManager(doc.GetElement(OwnerId))?.Lookup(ConnectorId);
+                if (connector == null)
+                    throw new InvalidOperationException($"連接器已不存在：{OwnerId}/{ConnectorId}");
+                return connector;
+            }
+        }
+
         /// <summary>
-        /// 用避讓路徑替換原始元素
+        /// 必須在交易內呼叫；false 代表呼叫端必須 RollBack，不可提交部分結果。
         /// </summary>
         public static bool ReplaceWithDetour(Document doc, Element target, DetourPlan plan, AvoidOptions opt)
         {
-            if (target == null || plan == null || !plan.IsValid)
+            if (doc == null || !doc.IsModifiable || target == null || plan == null || !plan.IsValid ||
+                plan.Path == null || plan.Path.Count < 2 ||
+                !(target is Pipe || target is Duct || target is Conduit))
             {
-                Logger.Warning("無效的替換參數");
+                Logger.Warning("無效的替換參數或未啟動交易");
                 return false;
             }
 
+            ElementId originalId = target.Id;
             try
             {
-                if (target is Pipe p) return ReplacePipe(doc, p, plan);
-                if (target is Duct d) return ReplaceDuct(doc, d, plan);
-                if (target is Conduit c) return ReplaceConduit(doc, c, plan);
-                
-                Logger.Warning($"不支援的元素類型: {target.GetType().Name}");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"替換元素 {target.Id} 時發生錯誤", ex);
-                return false;
-            }
-        }
+                var source = (MEPCurve)target;
+                var line = (source.Location as LocationCurve)?.Curve as Line;
+                if (line == null)
+                    throw new InvalidOperationException("僅支援直線管線");
 
-        private static bool ReplacePipe(Document doc, Pipe pipe, DetourPlan plan)
-        {
-            var lc = pipe.Location as LocationCurve;
-            if (lc == null) 
-            {
-                Logger.Warning($"管線 {pipe.Id} 沒有 LocationCurve");
-                return false;
-            }
+                XYZ start = line.GetEndPoint(0);
+                XYZ end = line.GetEndPoint(1);
+                if (plan.Path.First().DistanceTo(start) > ConnectorTolerance ||
+                    plan.Path.Last().DistanceTo(end) > ConnectorTolerance)
+                    throw new InvalidOperationException("避讓路徑必須保留原始兩端位置");
 
-            try
-            {
-                ElementId oldPipeId = pipe.Id;
-                Line pipeLine = lc.Curve as Line;
-                if (pipeLine == null)
+                Connector sourceStart = RequireConnectorAtPoint(source, start);
+                Connector sourceEnd = RequireConnectorAtPoint(source, end);
+                // A branch/tap cannot be silently discarded by replacing only the two endpoints.
+                foreach (Connector connector in source.ConnectorManager.Connectors)
                 {
-                    Logger.Warning($"管線 {pipe.Id} 不是直線");
-                    return false;
+                    if (connector.ConnectorType != ConnectorType.Logical && connector.IsConnected &&
+                        connector.Id != sourceStart.Id && connector.Id != sourceEnd.Id)
+                        throw new InvalidOperationException("來源有中途分支連接，無法安全替換");
                 }
 
-                XYZ pStart = pipeLine.GetEndPoint(0);
-                XYZ pEnd = pipeLine.GetEndPoint(1);
+                var externalStart = CaptureExternalConnections(sourceStart);
+                var externalEnd = CaptureExternalConnections(sourceEnd);
+                Disconnect(doc, sourceStart, externalStart);
+                Disconnect(doc, sourceEnd, externalEnd);
 
-                // 關鍵步驟1：獲取原管線兩端的連接器（參考風管避讓邏輯）
-                Connector conStart = ConnectorAtPoint(pipe, pStart);
-                Connector conEnd = ConnectorAtPoint(pipe, pEnd);
-                
-                // 獲取與管線兩端相連的管件連接器（可能為 null）
-                Connector fittingConStart = GetConnectorToFitting(conStart);
-                Connector fittingConEnd = GetConnectorToFitting(conEnd);
-                
-                Logger.Debug($"管線 {oldPipeId} 端點連接: 起點={fittingConStart != null}, 終點={fittingConEnd != null}");
-
-                // 關鍵步驟2：先斷開原管線兩端的連接（參考風管避讓邏輯）
-                if (fittingConStart != null)
-                {
-                    conStart.DisconnectFrom(fittingConStart);
-                    Logger.Debug($"已斷開起點連接");
-                }
-                if (fittingConEnd != null)
-                {
-                    conEnd.DisconnectFrom(fittingConEnd);
-                    Logger.Debug($"已斷開終點連接");
-                }
-
-                // 關鍵步驟3：建立多段新管線（複製原管線屬性）
-                var segments = new List<Pipe>();
+                var segments = new List<MEPCurve>();
                 for (int i = 0; i < plan.Path.Count - 1; i++)
-                {
-                    // 使用 CopyElement 保留所有屬性
-                    XYZ offset = new XYZ(1000, 0, 0);
-                    var copiedIds = ElementTransformUtils.CopyElement(doc, pipe.Id, offset);
-                    if (copiedIds.Count == 0)
-                    {
-                        Logger.Error($"複製管線段 {i} 失敗");
-                        return false;
-                    }
-                    
-                    Pipe seg = doc.GetElement(copiedIds.First()) as Pipe;
-                    if (seg == null)
-                    {
-                        Logger.Error($"取得複製的管線段 {i} 失敗");
-                        return false;
-                    }
-                    
-                    // 修改位置為新路徑
-                    LocationCurve segLc = seg.Location as LocationCurve;
-                    Line newLine = Line.CreateBound(plan.Path[i], plan.Path[i + 1]);
-                    segLc.Curve = newLine;
-                    
-                    segments.Add(seg);
-                    Logger.Debug($"建立管線段 {i}: ({plan.Path[i].X * GeometryUtils.FT_TO_MM:F0}, {plan.Path[i].Y * GeometryUtils.FT_TO_MM:F0}, {plan.Path[i].Z * GeometryUtils.FT_TO_MM:F0}) → ({plan.Path[i + 1].X * GeometryUtils.FT_TO_MM:F0}, {plan.Path[i + 1].Y * GeometryUtils.FT_TO_MM:F0}, {plan.Path[i + 1].Z * GeometryUtils.FT_TO_MM:F0})");
-                }
+                    segments.Add(CreateSegment(doc, source, plan.Path[i], plan.Path[i + 1]));
 
-                // 關鍵步驟4：刪除原管線（在建立新管線後）
-                doc.Delete(pipe.Id);
-                Logger.Debug($"已刪除舊管線 {oldPipeId}");
+                doc.Regenerate();
+                List<FamilyInstance> elbows = CreateElbowsForSegments(doc, segments);
+                RestoreExternalConnections(doc, segments.First(), start, externalStart);
+                RestoreExternalConnections(doc, segments.Last(), end, externalEnd);
+                doc.Regenerate();
+                ValidateConnections(doc, segments, elbows, start, end, externalStart, externalEnd);
 
-                // 關鍵步驟5：建立彎頭連接新管線段
-                CreateElbowsForSegments(doc, segments.Cast<MEPCurve>().ToList());
+                // Delay deletion until the complete replacement exists. Still verify afterwards:
+                // deletion may cascade to dependent elements, including original neighbours.
+                ICollection<ElementId> deletedIds = doc.Delete(originalId);
+                if (deletedIds.Count != 1 || !deletedIds.Contains(originalId))
+                    throw new InvalidOperationException("刪除原管線會連帶刪除其他元素，取消避讓以保留相依資料");
+                doc.Regenerate();
+                ValidateConnections(doc, segments, elbows, start, end, externalStart, externalEnd);
 
-                // 關鍵步驟6：恢復原兩端連接（參考風管避讓邏輯）
-                Connector newConStart = ConnectorAtPoint(segments.First(), pStart);
-                Connector newConEnd = ConnectorAtPoint(segments.Last(), pEnd);
-                
-                if (fittingConStart != null && newConStart != null)
-                {
-                    newConStart.ConnectTo(fittingConStart);
-                    Logger.Debug($"已恢復起點連接");
-                }
-                if (fittingConEnd != null && newConEnd != null)
-                {
-                    newConEnd.ConnectTo(fittingConEnd);
-                    Logger.Debug($"已恢復終點連接");
-                }
-
-                Logger.Info($"成功替換管線 {oldPipeId}，建立 {segments.Count} 段");
+                Logger.Info($"元素 {originalId} 替換及連接驗證完成，等待交易提交（{segments.Count} 段）");
                 return true;
             }
             catch (Exception ex)
             {
-                Logger.Error($"替換管線 {pipe.Id} 失敗", ex);
+                Logger.Error($"替換元素 {originalId} 失敗，必須回復交易", ex);
                 return false;
             }
         }
 
-        private static bool ReplaceDuct(Document doc, Duct duct, DetourPlan plan)
+        private static MEPCurve CreateSegment(Document doc, MEPCurve source, XYZ start, XYZ end)
         {
-            var lc = duct.Location as LocationCurve;
-            if (lc == null) 
+            if (source is Conduit conduit)
             {
-                Logger.Warning($"風管 {duct.Id} 沒有 LocationCurve");
-                return false;
+                if (conduit.LevelId == ElementId.InvalidElementId)
+                    throw new InvalidOperationException("電管沒有參考樓層");
+                Conduit segment = Conduit.Create(doc, conduit.GetTypeId(), start, end, conduit.LevelId);
+                if (segment == null)
+                    throw new InvalidOperationException("建立電管段失敗");
+                Parameter diameter = conduit.get_Parameter(BuiltInParameter.RBS_CONDUIT_DIAMETER_PARAM);
+                Parameter newDiameter = segment.get_Parameter(BuiltInParameter.RBS_CONDUIT_DIAMETER_PARAM);
+                if (diameter == null || newDiameter == null ||
+                    (Math.Abs(newDiameter.AsDouble() - diameter.AsDouble()) > 1e-9 &&
+                     (newDiameter.IsReadOnly || !newDiameter.Set(diameter.AsDouble()))))
+                    throw new InvalidOperationException("無法保留電管直徑");
+                return segment;
             }
 
-            try
+            // Preserve the existing pipe/duct copy-based parameter behaviour.
+            var copiedIds = ElementTransformUtils.CopyElement(doc, source.Id, new XYZ(1000, 0, 0));
+            if (copiedIds.Count != 1)
+                throw new InvalidOperationException("複製管線未產生唯一管線段");
+            var copy = doc.GetElement(copiedIds.Single()) as MEPCurve;
+            var location = copy?.Location as LocationCurve;
+            if (location == null)
+                throw new InvalidOperationException("複製的管線段沒有 LocationCurve");
+            location.Curve = Line.CreateBound(start, end);
+            return copy;
+        }
+
+        /// <summary>依路徑順序連接相鄰段。缺少任何彎頭/連接即拋出，禁止部分成功。</summary>
+        public static List<FamilyInstance> CreateElbowsForSegments(Document doc, List<MEPCurve> segments)
+        {
+            if (segments == null || segments.Count == 0)
+                throw new InvalidOperationException("沒有可連接的管線段");
+
+            // Snapshot expected adjacent pairs before any elbow trims the segment endpoints.
+            var pairs = new List<Tuple<ConnectorReference, ConnectorReference>>();
+            for (int i = 0; i < segments.Count - 1; i++)
             {
-                // 使用 CopyElement 保留所有屬性
-                ElementId oldDuctId = duct.Id;
-                
-                // 建立多段風管（複製原風管）
-                var segments = new List<Duct>();
-                for (int i = 0; i < plan.Path.Count - 1; i++)
-                {
-                    // 複製原風管到臨時位置
-                    XYZ offset = new XYZ(1000, 0, 0);
-                    var copiedIds = ElementTransformUtils.CopyElement(doc, duct.Id, offset);
-                    if (copiedIds.Count == 0)
-                    {
-                        Logger.Error($"複製風管段 {i} 失敗");
-                        return false;
-                    }
-                    
-                    Duct seg = doc.GetElement(copiedIds.First()) as Duct;
-                    if (seg == null)
-                    {
-                        Logger.Error($"取得複製的風管段 {i} 失敗");
-                        return false;
-                    }
-                    
-                    // 修改位置為新路徑
-                    LocationCurve segLc = seg.Location as LocationCurve;
-                    Line newLine = Line.CreateBound(plan.Path[i], plan.Path[i + 1]);
-                    segLc.Curve = newLine;
-                    
-                    segments.Add(seg);
-                }
-
-                // 刪除原風管
-                doc.Delete(duct.Id);
-                Logger.Debug($"已刪除舊風管 {oldDuctId}");
-
-                // 建立彎頭連接（使用新方法）
-                CreateElbowsForSegments(doc, segments.Cast<MEPCurve>().ToList());
-
-                Logger.Info($"成功替換風管 {oldDuctId}，建立 {segments.Count} 段");
-                return true;
+                XYZ joint = ((LocationCurve)segments[i].Location).Curve.GetEndPoint(1);
+                pairs.Add(Tuple.Create(
+                    new ConnectorReference(RequireConnectorAtPoint(segments[i], joint)),
+                    new ConnectorReference(RequireConnectorAtPoint(segments[i + 1], joint))));
             }
-            catch (Exception ex)
+
+            var elbows = new List<FamilyInstance>();
+            for (int i = 0; i < pairs.Count; i++)
             {
-                Logger.Error($"替換風管 {duct.Id} 失敗", ex);
-                return false;
+                Connector first = pairs[i].Item1.Resolve(doc);
+                Connector second = pairs[i].Item2.Resolve(doc);
+                if (first.IsConnected || second.IsConnected)
+                    throw new InvalidOperationException($"第 {i + 1} 個轉折的連接器已被占用");
+                FamilyInstance elbow = doc.Create.NewElbowFitting(first, second);
+                if (elbow == null || !elbow.IsValidObject)
+                    throw new InvalidOperationException($"第 {i + 1} 個彎頭建立失敗");
+                elbows.Add(elbow);
+                doc.Regenerate();
+                ValidateElbow(elbow, segments[i], segments[i + 1]);
+            }
+            return elbows;
+        }
+
+        private static List<ConnectorReference> CaptureExternalConnections(Connector source)
+        {
+            var references = new List<ConnectorReference>();
+            foreach (Connector other in source.AllRefs)
+            {
+                if (other.Owner.Id != source.Owner.Id && other.ConnectorType != ConnectorType.Logical &&
+                    source.IsConnectedTo(other))
+                    references.Add(new ConnectorReference(other));
+            }
+            if (source.IsConnected && references.Count == 0)
+                throw new InvalidOperationException("無法辨識原有實體連接");
+            return references;
+        }
+
+        private static void Disconnect(Document doc, Connector source, List<ConnectorReference> references)
+        {
+            foreach (var reference in references)
+            {
+                Connector external = reference.Resolve(doc);
+                source.DisconnectFrom(external);
+                if (source.IsConnectedTo(external))
+                    throw new InvalidOperationException("無法斷開原有連接");
             }
         }
 
-        private static bool ReplaceConduit(Document doc, Conduit cdt, DetourPlan plan)
+        private static void RestoreExternalConnections(Document doc, MEPCurve segment, XYZ point,
+            List<ConnectorReference> references)
         {
-            var lc = cdt.Location as LocationCurve;
-            if (lc == null) 
+            foreach (var reference in references)
             {
-                Logger.Warning($"電管 {cdt.Id} 沒有 LocationCurve");
-                return false;
-            }
-
-            try
-            {
-                ElementId oldConduitId = cdt.Id;
-                ElementId levelId = cdt.LevelId;
-                ElementId typeId = cdt.GetTypeId();
-
-                if (levelId == ElementId.InvalidElementId)
-                {
-                    Logger.Warning($"電管 {cdt.Id} 沒有參考樓層");
-                    return false;
-                }
-
-                // 保存電管直徑（刪除前）
-                double diameter = 0;
-                try
-                {
-                    Parameter diamParam = cdt.get_Parameter(BuiltInParameter.RBS_CONDUIT_DIAMETER_PARAM);
-                    if (diamParam != null)
-                        diameter = diamParam.AsDouble();
-                }
-                catch { }
-
-                // 刪除舊電管
-                doc.Delete(cdt.Id);
-                Logger.Debug($"已刪除舊電管 {oldConduitId}");
-
-                // 建立新電管段
-                var segments = new List<Conduit>();
-                for (int i = 0; i < plan.Path.Count - 1; i++)
-                {
-                    var seg = Conduit.Create(doc, typeId, plan.Path[i], plan.Path[i + 1], levelId);
-                    if (seg == null)
-                    {
-                        Logger.Error($"建立電管段 {i} 失敗");
-                        return false;
-                    }
-                    segments.Add(seg);
-                    
-                    // 設定電管直徑
-                    if (diameter > 0)
-                    {
-                        try
-                        {
-                            Parameter diamParam = seg.get_Parameter(BuiltInParameter.RBS_CONDUIT_DIAMETER_PARAM);
-                            if (diamParam != null && !diamParam.IsReadOnly)
-                                diamParam.Set(diameter);
-                        }
-                        catch { }
-                    }
-                }
-
-                // 建立彎頭連接
-                CreateElbowsForSegments(doc, segments.Cast<MEPCurve>().ToList());
-
-                Logger.Info($"成功替換電管 {oldConduitId}，建立 {segments.Count} 段");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"替換電管 {cdt.Id} 失敗", ex);
-                return false;
+                Connector endpoint = RequireConnectorAtPoint(segment, point);
+                Connector external = reference.Resolve(doc);
+                if (!endpoint.IsConnectedTo(external))
+                    endpoint.ConnectTo(external);
             }
         }
 
-        /// <summary>
-        /// 為多段管線建立彎頭連接（參考 Revit 定點翻彎邏輯）
-        /// </summary>
-        public static void CreateElbowsForSegments(Document doc, List<MEPCurve> segments)
+        private static void ValidateConnections(Document doc, List<MEPCurve> segments,
+            List<FamilyInstance> elbows, XYZ start, XYZ end,
+            List<ConnectorReference> externalStart, List<ConnectorReference> externalEnd)
         {
-            if (segments == null || segments.Count < 2)
-            {
-                Logger.Debug("管線段數不足，無需建立彎頭");
-                return;
-            }
-
-            try
-            {
-                Logger.Info($"開始為 {segments.Count} 段管線建立彎頭");
-
-                // 收集所有未連接的 Connector（參考程式碼邏輯）
-                List<Connector> allConnectors = new List<Connector>();
-                foreach (var seg in segments)
-                {
-                    if (seg?.ConnectorManager == null) continue;
-                    
-                    foreach (Connector cn in seg.ConnectorManager.Connectors)
-                    {
-                        // 只收集未連接的連接器
-                        if (!cn.IsConnected)
-                        {
-                            allConnectors.Add(cn);
-                            Logger.Debug($"Connector: Owner={cn.Owner.Id}, 位置=({cn.Origin.X * GeometryUtils.FT_TO_MM:F0}, {cn.Origin.Y * GeometryUtils.FT_TO_MM:F0}, {cn.Origin.Z * GeometryUtils.FT_TO_MM:F0}), 方向={cn.CoordinateSystem.BasisZ}");
-                        }
-                    }
-                }
-
-                Logger.Debug($"收集到 {allConnectors.Count} 個未連接的 Connector");
-
-                // 找出相近的 Connector 配對並建立彎頭
-                List<Connector> processed = new List<Connector>();
-                int elbowCount = 0;
-
-                for (int i = 0; i < allConnectors.Count; i++)
-                {
-                    if (processed.Contains(allConnectors[i])) continue;
-
-                    for (int j = i + 1; j < allConnectors.Count; j++)
-                    {
-                        if (processed.Contains(allConnectors[j])) continue;
-
-                        // 檢查是否來自不同元素且位置相近
-                        if (allConnectors[i].Owner.Id != allConnectors[j].Owner.Id &&
-                            allConnectors[i].Origin.IsAlmostEqualTo(allConnectors[j].Origin, 0.01))
-                        {
-                            try
-                            {
-                                // 建立彎頭
-                                FamilyInstance elbow = doc.Create.NewElbowFitting(allConnectors[i], allConnectors[j]);
-                                processed.Add(allConnectors[i]);
-                                processed.Add(allConnectors[j]);
-                                elbowCount++;
-                                
-                                Logger.Debug($"彎頭 #{elbowCount}: Id={elbow.Id}, 名稱={elbow.Name}, 位置=({allConnectors[i].Origin.X * GeometryUtils.FT_TO_MM:F0}, {allConnectors[i].Origin.Y * GeometryUtils.FT_TO_MM:F0}, {allConnectors[i].Origin.Z * GeometryUtils.FT_TO_MM:F0})");
-                                
-                                // 驗證連接狀態（參考程式碼邏輯）
-                                if (allConnectors[i].IsConnected && allConnectors[j].IsConnected)
-                                {
-                                    Logger.Debug($"  ✓ 兩個連接器已成功連接");
-                                    
-                                    // 驗證弯頭本身的連接器狀態
-                                    ConnectorSet elbowConnectors = elbow.MEPModel.ConnectorManager.Connectors;
-                                    int connectedCount = 0;
-                                    foreach (Connector elbowConn in elbowConnectors)
-                                    {
-                                        if (elbowConn.IsConnected)
-                                        {
-                                            connectedCount++;
-                                            // 檢查連接的管線（參考 AllRefs 邏輯）
-                                            foreach (Connector refConn in elbowConn.AllRefs)
-                                            {
-                                                if (refConn.Owner is MEPCurve)
-                                                {
-                                                    Logger.Debug($"  → 連接到管線: Id={refConn.Owner.Id}");
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Logger.Debug($"  彎頭的 {connectedCount}/2 個連接器已連接");
-                                }
-                                else
-                                {
-                                    Logger.Warning($"  ⚠ 連接器狀態異常: cn1.IsConnected={allConnectors[i].IsConnected}, cn2.IsConnected={allConnectors[j].IsConnected}");
-                                }
-                                
-                                break;
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.Warning($"建立彎頭失敗: {ex.Message}");
-                            }
-                        }
-                    }
-                }
-
-                Logger.Info($"共建立 {elbowCount} 個彎頭（預期 {segments.Count - 1} 個）");
-                
-                // 檢查是否有未配對的連接器
-                if (elbowCount < segments.Count - 1)
-                {
-                    Logger.Warning($"⚠ 彎頭數量不足！可能有連接器未正確配對");
-                    
-                    var unprocessed = allConnectors.Where(c => !processed.Contains(c)).ToList();
-                    if (unprocessed.Any())
-                    {
-                        Logger.Warning($"未配對的連接器: {unprocessed.Count} 個");
-                        foreach (var c in unprocessed)
-                        {
-                            Logger.Debug($"  未配對: Owner={c.Owner.Id}, 位置=({c.Origin.X * GeometryUtils.FT_TO_MM:F0}, {c.Origin.Y * GeometryUtils.FT_TO_MM:F0}, {c.Origin.Z * GeometryUtils.FT_TO_MM:F0})");
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("建立彎頭過程發生錯誤", ex);
-            }
+            if (segments.Any(segment => !segment.IsValidObject) || elbows.Count != segments.Count - 1)
+                throw new InvalidOperationException("避讓管線或彎頭數量不完整");
+            for (int i = 0; i < elbows.Count; i++)
+                ValidateElbow(elbows[i], segments[i], segments[i + 1]);
+            ValidateEndpoint(doc, RequireConnectorAtPoint(segments.First(), start), externalStart);
+            ValidateEndpoint(doc, RequireConnectorAtPoint(segments.Last(), end), externalEnd);
         }
 
-        /// <summary>
-        /// 獲取指定點位置的連接器（參考風管避讓邏輯）
-        /// </summary>
-        private static Connector ConnectorAtPoint(Element element, XYZ point)
+        private static void ValidateElbow(FamilyInstance elbow, MEPCurve first, MEPCurve second)
         {
-            if (element == null || point == null) return null;
+            if (elbow == null || !elbow.IsValidObject || elbow.MEPModel?.ConnectorManager == null)
+                throw new InvalidOperationException("彎頭不存在或沒有連接器");
+            var ends = elbow.MEPModel.ConnectorManager.Connectors.Cast<Connector>()
+                .Where(c => c.ConnectorType == ConnectorType.End).ToList();
+            if (ends.Count != 2 || ends.Any(c => !c.IsConnected || CaptureExternalConnections(c).Count != 1) ||
+                !((IsConnectedToCurve(ends[0], first) && IsConnectedToCurve(ends[1], second)) ||
+                  (IsConnectedToCurve(ends[1], first) && IsConnectedToCurve(ends[0], second))))
+                throw new InvalidOperationException($"彎頭 {elbow.Id} 未連接預期的兩個相鄰管線段");
+        }
 
-            ConnectorSet connectorSet = null;
+        private static bool IsConnectedToCurve(Connector connector, MEPCurve curve)
+        {
+            return curve.ConnectorManager.Connectors.Cast<Connector>()
+                .Any(other => other.ConnectorType == ConnectorType.End && connector.IsConnectedTo(other));
+        }
 
-            // 風管連接器集合
-            if (element is Duct duct)
-                connectorSet = duct.ConnectorManager?.Connectors;
-            // 管線連接器集合
-            else if (element is Pipe pipe)
-                connectorSet = pipe.ConnectorManager?.Connectors;
-            // 電纜架連接器集合
-            else if (element is CableTray cableTray)
-                connectorSet = cableTray.ConnectorManager?.Connectors;
-            // 線槽連接器集合
-            else if (element is Conduit conduit)
-                connectorSet = conduit.ConnectorManager?.Connectors;
-            // 管件等可載入族的連接器集合
-            else if (element is FamilyInstance fi)
-                connectorSet = fi.MEPModel?.ConnectorManager?.Connectors;
+        private static void ValidateEndpoint(Document doc, Connector endpoint,
+            List<ConnectorReference> expected)
+        {
+            foreach (var reference in expected)
+                if (!endpoint.IsConnectedTo(reference.Resolve(doc)))
+                    throw new InvalidOperationException("原有端點連接未恢復");
+            if (CaptureExternalConnections(endpoint).Count != expected.Count)
+                throw new InvalidOperationException("端點出現非預期連接");
+        }
 
-            if (connectorSet == null) return null;
-
-            // 遍歷連接器集合，找到距離目標點最近的連接器
-            const double tolerance = 1.0 / 304.8; // 1mm 容差
-            foreach (Connector connector in connectorSet)
-            {
-                if (connector.Origin.DistanceTo(point) < tolerance)
-                {
-                    return connector;
-                }
-            }
-
+        private static ConnectorManager GetConnectorManager(Element element)
+        {
+            if (element is MEPCurve curve) return curve.ConnectorManager;
+            if (element is FamilyInstance instance) return instance.MEPModel?.ConnectorManager;
             return null;
         }
 
-        /// <summary>
-        /// 獲取與管線相連的管件連接器（參考風管避讓邏輯）
-        /// </summary>
-        private static Connector GetConnectorToFitting(Connector connector)
+        private static Connector RequireConnectorAtPoint(Element element, XYZ point)
         {
-            if (connector == null || !connector.IsConnected) return null;
-
-            try
-            {
-                foreach (Connector con in connector.AllRefs)
-                {
-                    // 只選擇管件（FamilyInstance）
-                    if (con.Owner is FamilyInstance)
-                    {
-                        return con;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning($"獲取連接管件失敗: {ex.Message}");
-            }
-
-            return null;
+            Connector connector = GetConnectorManager(element)?.Connectors.Cast<Connector>()
+                .Where(c => c.ConnectorType == ConnectorType.End)
+                .OrderBy(c => c.Origin.DistanceTo(point))
+                .FirstOrDefault(c => c.Origin.DistanceTo(point) <= ConnectorTolerance);
+            if (connector == null)
+                throw new InvalidOperationException($"元素 {element?.Id} 缺少預期的端點連接器");
+            return connector;
         }
     }
 }

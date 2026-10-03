@@ -6,15 +6,9 @@ using Autodesk.Revit.DB.ExtensibleStorage;
 
 namespace YD_RevitTools.LicenseManager.Commands.MEP
 {
-    internal static class SleeveLevelPolicy
+    internal static partial class SleeveLevelPolicy
     {
         private static readonly Guid SchemaId = new Guid("c136c68d-2e9b-4580-b19b-d392f46d9988");
-        internal sealed class Choice
-        {
-            public string Key { get; set; }
-            public string Name { get; set; }
-        }
-
         internal static List<Choice> Choices(Document doc)
         {
             var result = new List<Choice> { new Choice { Key = "", Name = "依來源管線樓層" } };

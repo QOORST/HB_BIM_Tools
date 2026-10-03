@@ -46,6 +46,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 var walls = wallRefs
                     .Select(r => doc.GetElement(r) as Wall)
                     .Where(w => w != null)
+                    .GroupBy(w => w.Id).Select(g => g.First())
                     .ToList();
 
                 if (walls.Count == 0)
@@ -72,7 +73,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
                 var result = SplitEngine.RunSplitWall(doc, walls, cutters);
                 TaskDialog.Show("分割牆結果", BuildSummary(result));
-                return Result.Succeeded;
+                // Preserve any committed originals on a partial success. Returning
+                // Failed for the entire command would let Revit undo that work.
+                if (result.OriginalDeleted > 0) return Result.Succeeded;
+                if (result.FailedOperations > 0)
+                {
+                    message = "分割未提交任何變更；請查看結果中的失敗原因。";
+                    return Result.Failed;
+                }
+                return Result.Cancelled;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
@@ -91,7 +100,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             sb.AppendLine($"目標牆數量：{result.TargetElements}");
             sb.AppendLine($"已分割牆數量：{result.OriginalDeleted}");
             sb.AppendLine($"新建牆段數量：{result.NewElementsCreated}");
-            sb.AppendLine($"跳過（無需分割）：{result.Skipped}");
+            sb.AppendLine($"跳過（無需分割或不支援，原構件保留）：{result.Skipped}");
             sb.AppendLine($"失敗數量：{result.FailedOperations}");
             sb.AppendLine();
             sb.AppendLine("切割來源：結構柱、結構構架、牆");
@@ -99,7 +108,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             if (result.FailureSamples.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("失敗範例（最多 5 筆）：");
+                sb.AppendLine("跳過／失敗原因（最多 5 筆）：");
                 foreach (var sample in result.FailureSamples)
                     sb.AppendLine($"  - {sample}");
             }

@@ -73,413 +73,324 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     internal static class SplitEngine
     {
-        // 最短段落長度：約 30 mm（Revit 內部單位為英尺）
+        private const double Tolerance = 1e-6;
         private const double MinSegmentLength = 0.1;
 
-        /// <summary>
-        /// 依結構構架（梁）分割樓板。
-        /// 邏輯參考 SplitFloorByBeam：先接合再取頂面封閉環，逐環建立新樓板。
-        /// </summary>
+        // Only simple, disjoint rectangular regions are supported. A face with
+        // multiple loops can contain holes: never treat each loop as a new host.
         public static SplitResult RunSplitFloor(Document doc, IList<Floor> floors, IList<Element> cutters)
         {
-            var result = new SplitResult { TargetElements = floors.Count };
-
-            // 第一步：將切割構件接合到樓板（SwitchJoinOrder 讓構件切穿樓板）
-            using (var tran = new Transaction(doc, "分割樓板 - 接合"))
-            {
-                tran.Start();
-                foreach (var floor in floors)
-                {
-                    foreach (var cutter in cutters)
-                    {
-                        try
-                        {
-                            if (!JoinGeometryUtils.AreElementsJoined(doc, floor, cutter))
-                            {
-                                JoinGeometryUtils.JoinGeometry(doc, floor, cutter);
-                                JoinGeometryUtils.SwitchJoinOrder(doc, floor, cutter);
-                            }
-                        }
-                        catch { /* 忽略接合失敗，繼續下一對 */ }
-                    }
-                }
-                tran.Commit();
-            }
-
-            // 第二步：取頂面封閉環，依環數重建樓板
-            using (var tran = new Transaction(doc, "分割樓板 - 重建"))
-            {
-                tran.Start();
-                foreach (var floor in floors)
-                {
-                    try
-                    {
-                        var faceRefs = HostObjectUtils.GetTopFaces(floor);
-                        if (!faceRefs.Any()) { result.Skipped++; continue; }
-
-                        var topFace = floor.GetGeometryObjectFromReference(faceRefs[0]) as Face;
-                        var loops = topFace?.GetEdgesAsCurveLoops();
-
-                        // 只有多於一個封閉環才代表已被切割
-                        if (loops == null || loops.Count <= 1) { result.Skipped++; continue; }
-
-                        var level = doc.GetElement(floor.LevelId) as Level;
-                        var floorType = doc.GetElement(floor.GetTypeId()) as FloorType;
-
-                        doc.Delete(floor.Id);
-                        result.OriginalDeleted++;
-
-                        foreach (var loop in loops)
-                        {
-                            try
-                            {
-                                var newFloor = CreateFloorFromLoop(doc, loop, floorType, level);
-                                if (newFloor != null) result.NewElementsCreated++;
-                                else result.FailedOperations++;
-                            }
-                            catch (Exception ex)
-                            {
-                                result.FailedOperations++;
-                                if (result.FailureSamples.Count < 5)
-                                    result.FailureSamples.Add($"建立樓板失敗: {ex.Message}");
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        result.FailedOperations++;
-                        if (result.FailureSamples.Count < 5)
-                            result.FailureSamples.Add($"Floor({floor.Id}): {ex.Message}");
-                    }
-                }
-                tran.Commit();
-            }
-
-            return result;
+            return Run(doc, floors.Cast<Element>().ToList(), cutters, RebuildFloor);
         }
 
-        /// <summary>
-        /// 依接合後外側面封閉環重建牆段（邏輯同樓板分割）。
-        /// 第一步：SwitchJoinOrder 使切割構件切穿牆體。
-        /// 第二步：取外側面 CurveLoops，多個封閉環即代表已被切割；依各環範圍建立新牆段。
-        /// </summary>
         public static SplitResult RunSplitWall(Document doc, IList<Wall> walls, IList<Element> cutters)
         {
-            var result = new SplitResult { TargetElements = walls.Count };
+            // No bounding-box height shortcut: a partial beam overlap must not
+            // remove a band across the full length or thickness of a wall.
+            return Run(doc, walls.Cast<Element>().ToList(), cutters, RebuildWall);
+        }
 
-            // 第一步：將切割構件接合到牆（SwitchJoinOrder 讓構件切穿牆體）
-            using (var tran = new Transaction(doc, "分割牆 - 接合"))
+        private static SplitResult Run(Document doc, IList<Element> originals, IList<Element> cutters,
+            Func<Document, Element, IList<Element>> rebuild)
+        {
+            var result = new SplitResult { TargetElements = originals.Count };
+            foreach (var original in originals)
             {
-                tran.Start();
-                foreach (var wall in walls)
-                {
-                    foreach (var cutter in cutters)
-                    {
-                        try
-                        {
-                            if (!JoinGeometryUtils.AreElementsJoined(doc, wall, cutter))
-                            {
-                                JoinGeometryUtils.JoinGeometry(doc, wall, cutter);
-                                JoinGeometryUtils.SwitchJoinOrder(doc, wall, cutter);
-                            }
-                        }
-                        catch { /* 忽略接合失敗，繼續下一對 */ }
-                    }
-                }
-                tran.Commit();
-            }
-
-            // 第二步：取外側面封閉環，依環數重建牆段
-            using (var tran = new Transaction(doc, "分割牆 - 重建"))
-            {
-                tran.Start();
-                foreach (var wall in walls)
+                var originalId = original.Id;
+                using (var transaction = new Transaction(doc, "安全分割構件"))
                 {
                     try
                     {
-                        if (!TrySplitWall(doc, wall, cutters, result))
-                            result.Skipped++;
+                        RequireSafeHost(doc, original, cutters);
+                        if (transaction.Start() != TransactionStatus.Started)
+                            throw new InvalidOperationException("無法開始分割交易。");
+                        transaction.SetFailureHandlingOptions(transaction.GetFailureHandlingOptions()
+                            .SetFailuresPreprocessor(new RollbackOnFailure())
+                            .SetClearAfterRollback(true)
+                            .SetForcedModalHandling(true));
+                        foreach (var cutter in cutters.Where(c => c != null && c.Id != originalId))
+                        {
+                            if (!JoinGeometryUtils.AreElementsJoined(doc, original, cutter))
+                            {
+                                // Selected batch cutters need not intersect every
+                                // host. Preserve pre-existing joins regardless of
+                                // the intersection filter's post-cut geometry.
+                                if (!new ElementIntersectsElementFilter(original).PassesFilter(cutter)) continue;
+                                JoinGeometryUtils.JoinGeometry(doc, original, cutter);
+                            }
+                            if (!JoinGeometryUtils.IsCuttingElementInJoin(doc, cutter, original))
+                                JoinGeometryUtils.SwitchJoinOrder(doc, original, cutter);
+                        }
+                        doc.Regenerate();
+                        var expectedSolids = GetSolids(original);
+                        var replacements = rebuild(doc, original);
+                        if (replacements.Count < 2)
+                            throw new UnsupportedSplitException("未形成至少兩個可安全重建的區域。");
+                        foreach (var replacement in replacements)
+                            CopyParameters(original, replacement);
+
+                        // Inspect the actual deletion cascade. Hosted inserts,
+                        // annotations, constraints and analytical elements must
+                        // never silently disappear with the original host.
+                        var allowed = GetOwnedSketchElements(doc, original);
+                        var deleted = doc.Delete(originalId);
+                        if (!deleted.Contains(originalId) || deleted.Any(id => !allowed.Contains(id)))
+                            throw new UnsupportedSplitException("刪除會影響相依構件，已保留原構件。");
+                        doc.Regenerate();
+                        VerifyGeometry(expectedSolids, replacements);
+                        var status = transaction.Commit();
+                        if (status != TransactionStatus.Committed)
+                            throw new InvalidOperationException("分割交易未提交：" + status);
+                        // Publish counts only after the complete original's
+                        // joins, replacements and deletion have committed.
+                        result.OriginalDeleted++;
+                        result.NewElementsCreated += replacements.Count;
+                    }
+                    catch (UnsupportedSplitException ex)
+                    {
+                        RollBack(transaction);
+                        result.Skipped++;
+                        AddSample(result, originalId, ex.Message);
                     }
                     catch (Exception ex)
                     {
+                        RollBack(transaction);
                         result.FailedOperations++;
-                        if (result.FailureSamples.Count < 5)
-                            result.FailureSamples.Add($"Wall({wall.Id}): {ex.Message}");
+                        AddSample(result, originalId, ex.Message);
                     }
                 }
-                tran.Commit();
             }
-
             return result;
         }
 
-        // ─── 私有輔助方法 ────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// 依接合後外側面的 CurveLoops 分割牆（同 CreateFloorFromLoop 邏輯）。
-        /// 接合使切割構件切穿牆體後，外側面會出現多個獨立封閉環，每環對應一段新牆。
-        /// </summary>
-        private static bool TrySplitWall(Document doc, Wall wall, IList<Element> cutters, SplitResult result)
+        private static void RollBack(Transaction transaction)
         {
-            if (TrySplitWallByBeamHeights(doc, wall, cutters, result))
-                return true;
-
-            return TrySplitWallByProfile(doc, wall, result);
+            if (transaction.GetStatus() == TransactionStatus.Started &&
+                transaction.RollBack() != TransactionStatus.RolledBack)
+                throw new InvalidOperationException("無法確認交易已回復，請停止操作並檢查文件。");
+            if (transaction.GetStatus() == TransactionStatus.Pending)
+                throw new InvalidOperationException("交易仍等待 Revit 處理，不能繼續分割。");
         }
 
-        /// <summary>
-        /// 依梁的實際高度區間分割牆。梁需與牆的長度投影及牆厚範圍重疊，才會作為分割來源。
-        /// </summary>
-        private static bool TrySplitWallByBeamHeights(Document doc, Wall wall, IList<Element> cutters, SplitResult result)
+        private static void AddSample(SplitResult result, ElementId id, string message)
         {
-            var locationCurve = wall.Location as LocationCurve;
-            if (!(locationCurve?.Curve is Line wallLine)) return false;
+            if (result.FailureSamples.Count < 5)
+                result.FailureSamples.Add($"Element({id}): {message}");
+        }
 
+        private static void RequireSafeHost(Document doc, Element original, IList<Element> cutters)
+        {
+            if (original.Pinned || original.GroupId != ElementId.InvalidElementId ||
+                original.AssemblyInstanceId != ElementId.InvalidElementId || original.DesignOption != null ||
+                original.GetEntitySchemaGuids().Count != 0 || original.GetMaterialIds(true).Count != 0)
+                throw new UnsupportedSplitException("固定、群組、組合、設計選項、面塗料或自訂資料構件不支援重建。");
+            var cutterIds = new HashSet<ElementId>(cutters.Where(c => c != null).Select(c => c.Id));
+            if (JoinGeometryUtils.GetJoinedElements(doc, original).Any(id => !cutterIds.Contains(id)))
+                throw new UnsupportedSplitException("構件含其他既有接合，無法安全保留。");
+            var allowed = GetOwnedSketchElements(doc, original);
+            if (original.GetDependentElements(null).Any(id => !allowed.Contains(id)))
+                throw new UnsupportedSplitException("構件具有宿主、標註或其他相依元素，無法安全重建。");
+        }
+
+        private static HashSet<ElementId> GetOwnedSketchElements(Document doc, Element original)
+        {
+            var allowed = new HashSet<ElementId> { original.Id };
+            foreach (var id in original.GetDependentElements(new ElementClassFilter(typeof(Sketch))))
+            {
+                allowed.Add(id);
+                // Only model curves belonging to this sketch are intrinsic.
+                // Do not whitelist dimensions or other downstream dependencies.
+                var sketch = doc.GetElement(id) as Sketch;
+                if (sketch == null) continue;
+                foreach (var curveId in sketch.GetDependentElements(new ElementClassFilter(typeof(CurveElement))))
+                    allowed.Add(curveId);
+                allowed.Add(sketch.SketchPlane.Id);
+            }
+            return allowed;
+        }
+
+        private static IList<Element> RebuildFloor(Document doc, Element original)
+        {
+            var floor = (Floor)original;
+            var references = HostObjectUtils.GetTopFaces(floor);
+            if (references.Count < 2)
+                throw new UnsupportedSplitException("頂面未形成多個獨立面；孔洞或巢狀環不視為分割。");
+            var level = doc.GetElement(floor.LevelId) as Level;
+            var type = doc.GetElement(floor.GetTypeId()) as FloorType;
+            if (level == null || type == null) throw new UnsupportedSplitException("樓板樓層或類型無效。");
+            var replacements = new List<Element>();
+            foreach (var reference in references)
+            {
+                var face = floor.GetGeometryObjectFromReference(reference) as PlanarFace;
+                if (face == null || Math.Abs(face.FaceNormal.DotProduct(XYZ.BasisZ) - 1) > Tolerance)
+                    throw new UnsupportedSplitException("僅支援水平、無孔洞的矩形樓板區域。");
+                var loop = GetRectangle(face, XYZ.BasisX, XYZ.BasisY);
+                var elevation = loop.First().GetEndPoint(0).Z;
+                var levelLoop = CurveLoop.CreateViaTransform(loop,
+                    Transform.CreateTranslation(new XYZ(0, 0, level.Elevation - elevation)));
+                // Source height offset is restored by CopyParameters below.
+                replacements.Add(CreateFloorFromLoop(doc, levelLoop, type, level));
+            }
+            return replacements;
+        }
+
+        private static IList<Element> RebuildWall(Document doc, Element original)
+        {
+            var wall = (Wall)original;
+            var location = wall.Location as LocationCurve;
+            var line = location?.Curve as Line;
+            var type = doc.GetElement(wall.GetTypeId()) as WallType;
             var level = doc.GetElement(wall.LevelId) as Level;
-            if (level == null) return false;
-
-            var wallStart = wallLine.GetEndPoint(0);
-            var wallEnd = wallLine.GetEndPoint(1);
-            var wallDir = (wallEnd - wallStart).Normalize();
-            var wallLength = wallStart.DistanceTo(wallEnd);
-            if (wallLength < MinSegmentLength) return false;
-
-            var wallNormal = wallDir.CrossProduct(XYZ.BasisZ).Normalize();
-            var wallType = doc.GetElement(wall.GetTypeId()) as WallType;
-            var wallWidth = wallType?.Width ?? 0.0;
-            var horizontalTolerance = Math.Max(wallWidth * 0.5 + 0.2, 0.35);
-            var baseOffset = wall.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET)?.AsDouble() ?? 0.0;
-            var unconnectedHeight = wall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM)?.AsDouble() ?? 10.0;
-            var wallBottom = level.Elevation + baseOffset;
-            var wallTop = wallBottom + unconnectedHeight;
-            if (wallTop - wallBottom < MinSegmentLength) return false;
-
-            var blockedIntervals = new List<Tuple<double, double>>();
-            foreach (var cutter in cutters)
+            if (line == null || type == null || type.Kind != WallKind.Basic || level == null ||
+                Math.Abs(line.Direction.Z) > Tolerance ||
+                wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE)?.AsElementId() != ElementId.InvalidElementId ||
+                (wall.get_Parameter(BuiltInParameter.WALL_TOP_IS_ATTACHED)?.AsInteger() ?? 0) != 0 ||
+                (wall.get_Parameter(BuiltInParameter.WALL_BOTTOM_IS_ATTACHED)?.AsInteger() ?? 0) != 0)
+                throw new UnsupportedSplitException("僅支援直線、垂直、未附著且未連接頂部的基本牆。");
+            var references = HostObjectUtils.GetSideFaces(wall, ShellLayerType.Exterior);
+            if (references.Count < 2)
+                throw new UnsupportedSplitException("外側面未形成獨立區域；局部梁重疊、孔洞或巢狀環不支援。");
+            var start = line.GetEndPoint(0);
+            var direction = line.Direction;
+            var replacements = new List<Element>();
+            foreach (var reference in references)
             {
-                if (!IsStructuralFraming(cutter)) continue;
-
-                var box = cutter.get_BoundingBox(null);
-                if (box == null) continue;
-                if (!DoesBoxOverlapWallFootprint(box, wallStart, wallDir, wallNormal, wallLength, horizontalTolerance))
-                    continue;
-
-                var cutBottom = Math.Max(box.Min.Z, wallBottom);
-                var cutTop = Math.Min(box.Max.Z, wallTop);
-                if (cutTop - cutBottom < MinSegmentLength) continue;
-
-                blockedIntervals.Add(Tuple.Create(cutBottom, cutTop));
+                var face = wall.GetGeometryObjectFromReference(reference) as PlanarFace;
+                if (face == null || Math.Abs(face.FaceNormal.Z) > Tolerance ||
+                    Math.Abs(face.FaceNormal.DotProduct(direction)) > Tolerance)
+                    throw new UnsupportedSplitException("牆面不是垂直平面。");
+                var loop = GetRectangle(face, direction, XYZ.BasisZ);
+                var points = loop.Select(c => c.GetEndPoint(0)).ToList();
+                var min = points.Min(p => direction.DotProduct(p - start));
+                var max = points.Max(p => direction.DotProduct(p - start));
+                var bottom = points.Min(p => p.Z);
+                var top = points.Max(p => p.Z);
+                var segment = Line.CreateBound(start + direction.Multiply(min), start + direction.Multiply(max));
+                var structural = (wall.get_Parameter(BuiltInParameter.WALL_STRUCTURAL_USAGE_PARAM)?.AsInteger() ?? 0) != 0;
+                var replacement = Wall.Create(doc, segment, type.Id, level.Id, top - bottom,
+                    bottom - level.Elevation, wall.Flipped, structural);
+                WallUtils.DisallowWallJoinAtEnd(replacement, 0);
+                WallUtils.DisallowWallJoinAtEnd(replacement, 1);
+                replacements.Add(replacement);
             }
-
-            if (blockedIntervals.Count == 0) return false;
-
-            var merged = MergeIntervals(blockedIntervals);
-            var segments = new List<Tuple<double, double>>();
-            var cursor = wallBottom;
-            foreach (var interval in merged)
-            {
-                if (interval.Item1 - cursor >= MinSegmentLength)
-                    segments.Add(Tuple.Create(cursor, interval.Item1));
-
-                if (interval.Item2 > cursor)
-                    cursor = interval.Item2;
-            }
-
-            if (wallTop - cursor >= MinSegmentLength)
-                segments.Add(Tuple.Create(cursor, wallTop));
-
-            if (segments.Count <= 1) return false;
-
-            var wallTypeId = wall.GetTypeId();
-            var levelId = wall.LevelId;
-            var flipped = wall.Flipped;
-            var structuralParam = wall.get_Parameter(BuiltInParameter.WALL_STRUCTURAL_USAGE_PARAM);
-            var isStructural = structuralParam != null && structuralParam.AsInteger() != 0;
-
-            doc.Delete(wall.Id);
-            result.OriginalDeleted++;
-
-            foreach (var segment in segments)
-            {
-                try
-                {
-                    var segmentBaseOffset = segment.Item1 - level.Elevation;
-                    var segmentHeight = segment.Item2 - segment.Item1;
-                    if (segmentHeight < MinSegmentLength) continue;
-
-                    Wall.Create(doc, wallLine, wallTypeId, levelId, segmentHeight, segmentBaseOffset, flipped, isStructural);
-                    result.NewElementsCreated++;
-                }
-                catch (Exception ex)
-                {
-                    result.FailedOperations++;
-                    if (result.FailureSamples.Count < 5)
-                        result.FailureSamples.Add($"依梁位建立牆段失敗: {ex.Message}");
-                }
-            }
-
-            return true;
+            return replacements;
         }
 
-        private static bool TrySplitWallByProfile(Document doc, Wall wall, SplitResult result)
+        private static CurveLoop GetRectangle(PlanarFace face, XYZ axisX, XYZ axisY)
         {
-            // 僅處理直線形基本牆
-            var locationCurve = wall.Location as LocationCurve;
-            if (!(locationCurve?.Curve is Line wallLine)) return false;
-
-            var wallStart = wallLine.GetEndPoint(0);
-            var wallDir   = wallLine.Direction;
-
-            // 取外側面參考（若無則改取內側面）
-            IList<Reference> sideRefs = HostObjectUtils.GetSideFaces(wall, ShellLayerType.Exterior);
-            if (!sideRefs.Any())
-                sideRefs = HostObjectUtils.GetSideFaces(wall, ShellLayerType.Interior);
-            if (!sideRefs.Any()) return false;
-
-            var face  = wall.GetGeometryObjectFromReference(sideRefs[0]) as Face;
-            var loops = face?.GetEdgesAsCurveLoops();
-
-            // 只有多於一個封閉環才代表已被切割（同樓板分割邏輯）
-            if (loops == null || loops.Count <= 1) return false;
-
-            // 讀取原始牆體參數
-            var wallTypeId        = wall.GetTypeId();
-            var levelId           = wall.LevelId;
-            var baseOffset        = wall.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET)?.AsDouble() ?? 0.0;
-            var unconnectedHeight = wall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM)?.AsDouble() ?? 10.0;
-            var flipped           = wall.Flipped;
-            var structuralParam   = wall.get_Parameter(BuiltInParameter.WALL_STRUCTURAL_USAGE_PARAM);
-            var isStructural      = structuralParam != null && structuralParam.AsInteger() != 0;
-
-            doc.Delete(wall.Id);
-            result.OriginalDeleted++;
-
-            foreach (var loop in loops)
+            var loops = face.GetEdgesAsCurveLoops();
+            if (loops.Count != 1)
+                throw new UnsupportedSplitException("孔洞或巢狀環不支援，已保留原構件。");
+            var edges = loops[0].ToList();
+            if (edges.Count != 4 || edges.Any(c => !(c is Line) || c.Length < MinSegmentLength))
+                throw new UnsupportedSplitException("目前僅支援矩形區域，曲線或複雜輪廓已跳過。");
+            var xEdges = 0;
+            var yEdges = 0;
+            foreach (Line edge in edges)
             {
-                try
-                {
-                    // 將各環所有端點投影到牆方向，求段落的起終範圍
-                    double loopMin = double.MaxValue;
-                    double loopMax = double.MinValue;
-                    foreach (var curve in loop)
-                    {
-                        for (int e = 0; e < 2; e++)
-                        {
-                            var p = wallDir.DotProduct(curve.GetEndPoint(e) - wallStart);
-                            if (p < loopMin) loopMin = p;
-                            if (p > loopMax) loopMax = p;
-                        }
-                    }
-
-                    if (loopMax - loopMin < MinSegmentLength) continue;
-
-                    var segLine = Line.CreateBound(
-                        wallStart + wallDir.Multiply(loopMin),
-                        wallStart + wallDir.Multiply(loopMax));
-
-                    Wall.Create(doc, segLine, wallTypeId, levelId, unconnectedHeight, baseOffset, flipped, isStructural);
-                    result.NewElementsCreated++;
-                }
-                catch (Exception ex)
-                {
-                    result.FailedOperations++;
-                    if (result.FailureSamples.Count < 5)
-                        result.FailureSamples.Add($"建立牆段失敗: {ex.Message}");
-                }
+                if (Math.Abs(Math.Abs(edge.Direction.DotProduct(axisX)) - 1) < Tolerance) xEdges++;
+                else if (Math.Abs(Math.Abs(edge.Direction.DotProduct(axisY)) - 1) < Tolerance) yEdges++;
+                else throw new UnsupportedSplitException("斜向或非矩形區域不支援。");
             }
-
-            return true;
+            if (xEdges != 2 || yEdges != 2)
+                throw new UnsupportedSplitException("輪廓不是矩形。");
+            return loops[0];
         }
 
-        private static bool IsStructuralFraming(Element element)
+        private static void CopyParameters(Element original, Element replacement)
         {
-            var id = element?.Category?.Id;
-            if (id == null) return false;
-            return (BuiltInCategory)(int)id.GetIdValue() == BuiltInCategory.OST_StructuralFraming;
-        }
-
-        private static bool DoesBoxOverlapWallFootprint(
-            BoundingBoxXYZ box,
-            XYZ wallStart,
-            XYZ wallDir,
-            XYZ wallNormal,
-            double wallLength,
-            double tolerance)
-        {
-            double minAlong = double.MaxValue;
-            double maxAlong = double.MinValue;
-            double minNormal = double.MaxValue;
-            double maxNormal = double.MinValue;
-
-            foreach (var corner in GetBoxCorners(box))
+            foreach (Parameter source in original.Parameters)
             {
-                var relative = corner - wallStart;
-                var along = wallDir.DotProduct(relative);
-                var normal = wallNormal.DotProduct(relative);
-
-                if (along < minAlong) minAlong = along;
-                if (along > maxAlong) maxAlong = along;
-                if (normal < minNormal) minNormal = normal;
-                if (normal > maxNormal) maxNormal = normal;
-            }
-
-            var overlapsLength = maxAlong >= -tolerance && minAlong <= wallLength + tolerance;
-            var overlapsThickness = maxNormal >= -tolerance && minNormal <= tolerance;
-            return overlapsLength && overlapsThickness;
-        }
-
-        private static IEnumerable<XYZ> GetBoxCorners(BoundingBoxXYZ box)
-        {
-            yield return new XYZ(box.Min.X, box.Min.Y, box.Min.Z);
-            yield return new XYZ(box.Min.X, box.Min.Y, box.Max.Z);
-            yield return new XYZ(box.Min.X, box.Max.Y, box.Min.Z);
-            yield return new XYZ(box.Min.X, box.Max.Y, box.Max.Z);
-            yield return new XYZ(box.Max.X, box.Min.Y, box.Min.Z);
-            yield return new XYZ(box.Max.X, box.Min.Y, box.Max.Z);
-            yield return new XYZ(box.Max.X, box.Max.Y, box.Min.Z);
-            yield return new XYZ(box.Max.X, box.Max.Y, box.Max.Z);
-        }
-
-        private static List<Tuple<double, double>> MergeIntervals(List<Tuple<double, double>> intervals)
-        {
-            var sorted = intervals
-                .OrderBy(i => i.Item1)
-                .ThenBy(i => i.Item2)
-                .ToList();
-
-            var merged = new List<Tuple<double, double>>();
-            foreach (var interval in sorted)
-            {
-                if (merged.Count == 0 || interval.Item1 > merged[merged.Count - 1].Item2 + 0.02)
+                if (source.IsReadOnly || !source.HasValue || source.StorageType == StorageType.None) continue;
+                var isBuiltIn = source.Id.GetIdValue() < 0;
+                var builtIn = isBuiltIn ? (BuiltInParameter)(int)source.Id.GetIdValue() : default(BuiltInParameter);
+                // These values describe the new region, not the source's region.
+                if (original is Wall && isBuiltIn && (builtIn == BuiltInParameter.WALL_BASE_OFFSET ||
+                    builtIn == BuiltInParameter.WALL_USER_HEIGHT_PARAM)) continue;
+                Parameter target;
+                if (source.IsShared) target = replacement.get_Parameter(source.GUID);
+                else if (isBuiltIn) target = replacement.get_Parameter(builtIn);
+                else target = replacement.get_Parameter(source.Definition);
+                if (target == null || target.IsReadOnly || target.StorageType != source.StorageType)
+                    throw new UnsupportedSplitException("無法保留參數：" + source.Definition.Name);
+                bool saved;
+                switch (source.StorageType)
                 {
-                    merged.Add(interval);
-                    continue;
+                    case StorageType.Double: saved = target.AsDouble() == source.AsDouble() || target.Set(source.AsDouble()); break;
+                    case StorageType.Integer: saved = target.AsInteger() == source.AsInteger() || target.Set(source.AsInteger()); break;
+                    case StorageType.String: saved = target.AsString() == source.AsString() || target.Set(source.AsString() ?? ""); break;
+                    case StorageType.ElementId: saved = target.AsElementId() == source.AsElementId() || target.Set(source.AsElementId()); break;
+                    default: saved = false; break;
                 }
-
-                var last = merged[merged.Count - 1];
-                if (interval.Item2 > last.Item2)
-                    merged[merged.Count - 1] = Tuple.Create(last.Item1, interval.Item2);
+                if (!saved) throw new UnsupportedSplitException("參數寫入失敗：" + source.Definition.Name);
             }
-
-            return merged;
         }
 
-        private static Floor CreateFloorFromLoop(Document doc, CurveLoop loop, FloorType floorType, Level level)
+        private static IList<Solid> GetSolids(Element element)
+        {
+            var solids = new List<Solid>();
+            var geometry = element.get_Geometry(new Options { DetailLevel = ViewDetailLevel.Fine });
+            if (geometry != null)
+                foreach (var item in geometry)
+                {
+                    if (item is Solid solid && solid.Volume > Tolerance)
+                        solids.Add(SolidUtils.CreateTransformed(solid, Transform.Identity));
+                    else if (item is GeometryInstance)
+                        throw new UnsupportedSplitException("巢狀幾何不支援安全驗證。");
+                }
+            if (solids.Count == 0) throw new UnsupportedSplitException("無法驗證構件實體。");
+            return solids;
+        }
+
+        private static void VerifyGeometry(IList<Solid> expected, IList<Element> replacements)
+        {
+            var actual = replacements.SelectMany(GetSolids).ToList();
+            var expectedVolume = expected.Sum(s => s.Volume);
+            var tolerance = Math.Max(Tolerance, expectedVolume * 1e-6);
+            var actualVolume = actual.Sum(s => s.Volume);
+            var covered = 0.0;
+            foreach (var solid in actual)
+                foreach (var source in expected)
+                    covered += BooleanOperationsUtils.ExecuteBooleanOperation(solid, source,
+                        BooleanOperationsType.Intersect).Volume;
+            // Equal volume alone does not establish equal shape or placement.
+            if (Math.Abs(expectedVolume - actualVolume) > tolerance ||
+                Math.Abs(covered - expectedVolume) > tolerance)
+                throw new UnsupportedSplitException("新舊實體形狀不一致，分割已回復。");
+            for (int i = 0; i < actual.Count; i++)
+                for (int j = i + 1; j < actual.Count; j++)
+                    if (BooleanOperationsUtils.ExecuteBooleanOperation(actual[i], actual[j],
+                        BooleanOperationsType.Intersect).Volume > tolerance)
+                        throw new UnsupportedSplitException("重建區域互相重疊，分割已回復。");
+        }
+
+        private static Floor CreateFloorFromLoop(Document doc, CurveLoop loop, FloorType type, Level level)
         {
 #if REVIT2022
-            // Revit 2022 使用舊式 API
-            var curveArray = new CurveArray();
-            foreach (var curve in loop)
-                curveArray.Append(curve);
+            var array = new CurveArray();
+            foreach (var curve in loop) array.Append(curve);
 #pragma warning disable CS0618
-            return doc.Create.NewFloor(curveArray, floorType, level, false);
+            return doc.Create.NewFloor(array, type, level, false);
 #pragma warning restore CS0618
 #else
-            // Revit 2023+ 使用 Floor.Create
-            return Floor.Create(doc, new List<CurveLoop> { loop }, floorType.Id, level.Id);
+            return Floor.Create(doc, new List<CurveLoop> { loop }, type.Id, level.Id);
 #endif
         }
 
+        private sealed class UnsupportedSplitException : Exception
+        {
+            public UnsupportedSplitException(string message) : base(message) { }
+        }
 
+        private sealed class RollbackOnFailure : IFailuresPreprocessor
+        {
+            public FailureProcessingResult PreprocessFailures(FailuresAccessor accessor)
+            {
+                // Do not accept warnings that may detach hosts, discard constraints
+                // or otherwise repair the document by deleting more elements.
+                return accessor.GetFailureMessages().Count == 0
+                    ? FailureProcessingResult.Continue : FailureProcessingResult.ProceedWithRollBack;
+            }
+        }
     }
 }
