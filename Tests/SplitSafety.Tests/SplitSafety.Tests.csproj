@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><LangVersion>9.0</LangVersion></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Commands/AutoJoin/SplitEngine.cs" Link="SplitEngine.cs" />
+    <Compile Include="Program.cs" /><Compile Include="RevitStubs.cs" />
+  </ItemGroup>
+</Project>

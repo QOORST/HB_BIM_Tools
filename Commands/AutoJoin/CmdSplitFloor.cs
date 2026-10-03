@@ -10,7 +10,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 {
     /// <summary>
     /// 分割樓板工具
-    /// 依選取的結構構架（梁）將樓板分割為多塊，邏輯參考 SplitFloorByBeam。
+    /// 依選取的結構構架（梁）將樓板分割為多塊，僅支援可安全驗證的矩形區域。
     /// </summary>
     [Transaction(TransactionMode.Manual)]
     public sealed class CmdSplitFloor : IExternalCommand
@@ -44,6 +44,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 var floors = refs
                     .Select(r => doc.GetElement(r) as Floor)
                     .Where(f => f != null)
+                    .GroupBy(f => f.Id).Select(g => g.First())
                     .ToList();
 
                 var cutters = refs
@@ -65,7 +66,15 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
                 var result = SplitEngine.RunSplitFloor(doc, floors, cutters);
                 TaskDialog.Show("分割樓板結果", BuildSummary(result));
-                return Result.Succeeded;
+                // Preserve any committed originals on a partial success. Returning
+                // Failed for the entire command would let Revit undo that work.
+                if (result.OriginalDeleted > 0) return Result.Succeeded;
+                if (result.FailedOperations > 0)
+                {
+                    message = "分割未提交任何變更；請查看結果中的失敗原因。";
+                    return Result.Failed;
+                }
+                return Result.Cancelled;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
@@ -84,13 +93,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             sb.AppendLine($"目標樓板數量：{result.TargetElements}");
             sb.AppendLine($"已分割樓板數量：{result.OriginalDeleted}");
             sb.AppendLine($"新建樓板數量：{result.NewElementsCreated}");
-            sb.AppendLine($"跳過（無需分割）：{result.Skipped}");
+            sb.AppendLine($"跳過（無需分割或不支援，原構件保留）：{result.Skipped}");
             sb.AppendLine($"失敗數量：{result.FailedOperations}");
 
             if (result.FailureSamples.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("失敗範例（最多 5 筆）：");
+                sb.AppendLine("跳過／失敗原因（最多 5 筆）：");
                 foreach (var sample in result.FailureSamples)
                     sb.AppendLine($"  - {sample}");
             }

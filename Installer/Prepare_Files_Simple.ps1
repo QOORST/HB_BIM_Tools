@@ -1,4 +1,11 @@
-# Prepare Installer Files
+﻿# Stage only the isolated outputs of the current Build_Installer invocation.
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$BuildRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$FamilyLibraryProject
+)
 $ErrorActionPreference = 'Stop'
 Write-Host "===============================================================" -ForegroundColor Cyan
 Write-Host "  Preparing Installer Files" -ForegroundColor Cyan
@@ -8,7 +15,7 @@ Write-Host ""
 $installerDir = $PSScriptRoot
 $projectRoot = Split-Path $installerDir -Parent
 $revitApiRoot = Split-Path (Split-Path $projectRoot -Parent) -Parent
-$familyLibraryProjectRoot = Join-Path $revitApiRoot "Codex\work\family-library-management\addin"
+$familyLibraryProjectRoot = Split-Path $FamilyLibraryProject -Parent
 $supportedVersions = @("2022", "2024", "2025", "2026")
 $netStandardOpenXmlVersions = @("2025", "2026")
 $runtimeResourceExtensions = @(".png", ".ico", ".jpg", ".jpeg", ".rfa")
@@ -24,41 +31,34 @@ if (-not (Test-Path -LiteralPath (Join-Path $familyRoot 'database\family_library
     throw 'Family library SQLite database is missing.'
 }
 
-function Resolve-FamilyLibraryDll {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Version,
-        [string]$FallbackVersion
-    )
-
-    $candidatePaths = @(
-        (Join-Path $familyLibraryProjectRoot "bin\x64\Release$Version\net48\CompanyFamilyLibraryMvp.dll"),
-        (Join-Path $projectRoot "bin\Release$Version\CompanyFamilyLibraryMvp.dll"),
-        "C:\ProgramData\Autodesk\Revit\Addins\$Version\HB_BIM\CompanyFamilyLibraryMvp.dll"
-    )
-
-    foreach ($candidatePath in $candidatePaths) {
-        if (Test-Path $candidatePath) {
-            return $candidatePath
+# A receipt is written only after all eight builds succeed. Never use installed
+# add-ins, a prior staging directory, or another Revit year's DLL as a fallback.
+$receiptPath = Join-Path $BuildRoot 'build-receipt.json'
+if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
+    throw 'Fresh build receipt missing. Run Build_Installer.ps1.'
+}
+$receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+foreach ($version in $supportedVersions) {
+    foreach ($kind in @('main', 'family')) {
+        $relative = "$version/$kind"
+        $entry = @($receipt | Where-Object { $_.Key -eq $relative })
+        if ($entry.Count -ne 1 -or $entry[0].Configuration -ne "Release$version") {
+            throw "Missing or invalid build receipt entry: $relative"
+        }
+        $dllName = if ($kind -eq 'main') { 'YD_RevitTools.LicenseManager.dll' } else { 'CompanyFamilyLibraryMvp.dll' }
+        $dllPath = Join-Path (Join-Path $BuildRoot $relative) $dllName
+        if (-not (Test-Path -LiteralPath $dllPath -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $dllPath -Algorithm SHA256).Hash -ne $entry[0].Sha256) {
+            throw "Fresh build artifact missing or changed: $dllPath"
         }
     }
-
-    if (-not [string]::IsNullOrWhiteSpace($FallbackVersion)) {
-        $fallbackPath = Resolve-FamilyLibraryDll -Version $FallbackVersion
-        if ($fallbackPath) {
-            Write-Host "[INFO] Using Revit $FallbackVersion CompanyFamilyLibraryMvp.dll for Revit $Version" -ForegroundColor Yellow
-            return $fallbackPath
-        }
-    }
-
-    return $null
 }
 
 # Check source files
 Write-Host "Checking source files..." -ForegroundColor Yellow
 
-# Use Release2024 as the base for dependency DLLs (they are the same across versions)
-$baseBinDir = Join-Path $projectRoot "bin\Release2024"
+# Shared installer dependencies must be byte-identical across all four fresh outputs.
+$baseBinDir = Join-Path $BuildRoot "2024\main"
 $sourceResources = Join-Path $projectRoot "Resources"
 
 # Define dependency DLLs. Revit API and .NET Framework built-in assemblies are excluded.
@@ -93,48 +93,50 @@ $mainDlls = @{}
 $familyLibraryDlls = @{}
 
 foreach ($version in $supportedVersions) {
-    $sourceDll = Join-Path $projectRoot "bin\Release$version\YD_RevitTools.LicenseManager.dll"
-    if ($version -eq "2026" -and -not (Test-Path $sourceDll)) {
-        $sourceDll = Join-Path $projectRoot "bin\Release2025\YD_RevitTools.LicenseManager.dll"
-        Write-Host "[INFO] Using Revit 2025 DLL for Revit 2026 (Release2026 not found)" -ForegroundColor Yellow
-    }
-
-    if (-not (Test-Path $sourceDll)) {
-        Write-Host "[ERROR] Cannot find YD_RevitTools.LicenseManager.dll for Revit $version" -ForegroundColor Red
-        Write-Host "Path: $sourceDll" -ForegroundColor Gray
-        exit 1
-    }
-
-    $mainDlls[$version] = $sourceDll
-    $fallbackVersion = if ($version -eq "2026") { "2025" } else { $null }
-    $familyLibraryDlls[$version] = Resolve-FamilyLibraryDll -Version $version -FallbackVersion $fallbackVersion
-
-    if ([string]::IsNullOrWhiteSpace($familyLibraryDlls[$version]) -or -not (Test-Path $familyLibraryDlls[$version])) {
-        throw "CompanyFamilyLibraryMvp.dll not found for Revit $version."
-    }
+    $mainDlls[$version] = Join-Path $BuildRoot "$version\main\YD_RevitTools.LicenseManager.dll"
+    $familyLibraryDlls[$version] = Join-Path $BuildRoot "$version\family\CompanyFamilyLibraryMvp.dll"
 }
 
-# Check dependency DLLs exist
-$missingDlls = @()
+# Missing or differing shared dependencies are fatal, before touching staging.
+# Native SQLite normally lives under runtimes in SDK-style build outputs.
+foreach ($version in $supportedVersions) {
+    $binDir = Join-Path $BuildRoot "$version\main"
+    $nativeSqlite = Join-Path $binDir 'runtimes\win-x64\native\e_sqlite3.dll'
+    if (-not (Test-Path -LiteralPath $nativeSqlite -PathType Leaf)) {
+        throw "Required x64 SQLite runtime missing: $nativeSqlite"
+    }
+    Copy-Item -LiteralPath $nativeSqlite -Destination (Join-Path $binDir 'e_sqlite3.dll') -Force
+}
 foreach ($dll in $dependencyDlls) {
-    $dllPath = Join-Path $baseBinDir $dll
-    if (-not (Test-Path $dllPath)) {
-        $missingDlls += $dll
+    $basePath = Join-Path $baseBinDir $dll
+    if (-not (Test-Path -LiteralPath $basePath -PathType Leaf)) {
+        throw "Required dependency missing: $basePath"
+    }
+    $baseHash = (Get-FileHash -LiteralPath $basePath -Algorithm SHA256).Hash
+    foreach ($version in $supportedVersions) {
+        $candidate = Join-Path $BuildRoot "$version\main\$dll"
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            throw "Required dependency missing: $candidate"
+        }
+        if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash -ne $baseHash) {
+            throw "Shared dependency differs for Revit ${version}: $dll. Update installer to use version-specific dependencies."
+        }
     }
 }
-
-if ($missingDlls.Count -gt 0) {
-    Write-Host "[WARNING] Some dependency DLLs not found:" -ForegroundColor Yellow
-    foreach ($dll in $missingDlls) {
-        Write-Host "  - $dll" -ForegroundColor Gray
+foreach ($name in @('README.txt', 'LICENSE.txt', 'version.json')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $projectRoot $name) -PathType Leaf)) {
+        throw "Required installer document missing: $name"
     }
-    Write-Host ""
 }
-
-if (-not (Test-Path $sourceResources)) {
-    Write-Host "[WARNING] Resources directory not found: $sourceResources" -ForegroundColor Yellow
-    Write-Host "Resources will not be included in the installer." -ForegroundColor Yellow
-    Write-Host ""
+if (-not (Test-Path -LiteralPath $sourceResources -PathType Container)) {
+    throw "Required Resources directory missing: $sourceResources"
+}
+$openXmlNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\documentformat.openxml\2.20.0\lib\netstandard2.0\DocumentFormat.OpenXml.dll"
+$packagingNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\system.io.packaging\4.7.0\lib\netstandard2.0\System.IO.Packaging.dll"
+foreach ($path in @($openXmlNetStandard, $packagingNetStandard)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Required Revit 2025/2026 dependency missing: $path"
+    }
 }
 
 Write-Host "[OK] Main DLL found ($($supportedVersions -join ', '))" -ForegroundColor Green
@@ -192,10 +194,8 @@ Write-Host "[OK] Shared resources ready: $resourceFileCount files" -ForegroundCo
 $copiedCount = 0
 foreach ($dll in $dependencyDlls) {
     $sourceDll = Join-Path $baseBinDir $dll
-    if (Test-Path $sourceDll) {
-        Copy-Item $sourceDll -Destination $installerDir -Force
-        $copiedCount++
-    }
+    Copy-Item $sourceDll -Destination $installerDir -Force
+    $copiedCount++
 }
 Write-Host "[OK] Copied $copiedCount dependency DLLs" -ForegroundColor Green
 
@@ -226,11 +226,6 @@ if (Test-Path $versionSource) {
 Write-Host "[OK] Synced README.txt, LICENSE.txt, and version.json" -ForegroundColor Green
 
 Write-Host ""
-
-# Revit 2025/2026 run in the newer .NET host. Package the netstandard OpenXML build
-# with System.IO.Packaging for those versions to avoid load failures.
-$openXmlNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\documentformat.openxml\2.20.0\lib\netstandard2.0\DocumentFormat.OpenXml.dll"
-$packagingNetStandard = Join-Path $env:USERPROFILE ".nuget\packages\system.io.packaging\4.7.0\lib\netstandard2.0\System.IO.Packaging.dll"
 
 # Create version directories
 Write-Host "Creating version directories..." -ForegroundColor Yellow
@@ -339,5 +334,5 @@ Write-Host "  Preparation Complete!" -ForegroundColor Green
 Write-Host "===============================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
-Write-Host "  Run .\Installer\Build_Installer.ps1 to compile and sign the installer." -ForegroundColor White
+Write-Host "  Payload staged; Build_Installer.ps1 can now continue. Live acceptance is still required." -ForegroundColor White
 Write-Host ""

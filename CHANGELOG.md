@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+### 安全性修正（2026-10-03，未發布／待實機驗收）
+
+- 分割樓板／牆改為逐原件原子交易；失敗不保留原件刪除，僅在成功提交後計數。移除以梁包圍盒高程切除整條牆的近似做法，對不支援的輪廓、相依元素與無法確認的幾何保守略過。
+- 管線避讓要求完整內部接頭及原有外部連接，連接不完整即回報失敗並由呼叫端回復；成功統計要求交易實際提交。
+- COBie 匯入增加唯讀預檢與確認：識別碼衝突、過期 ID、重複 Mark 及互相衝突的寫入不得任意選取目標；顯示型別參數影響範圍，不再靜默由實例欄位改寫型別。
+- 發版準備採用各年版獨立的新建置與雜湊核對；必要相依檔案缺少或錯版時中止，不再以 2025 DLL 代替 2026。
+- 新增離線安全回歸案例及功能／年版驗收矩陣；測試程式存在不等於已執行，實際結果以本次交付驗證紀錄為準。
+
+這些變更未更新公開 Release，也未安裝至使用者電腦。需完成適用的 C# 編譯、離線測試、Windows 打包與 Revit 原生模型驗收後才能判定可發布。
+
 ## [2.5.17] - 2026-09-10（本地驗證版）
 
 ### 模板工具
@@ -416,7 +426,6 @@
 - GenericModel/DirectShape output is reserved for Face-to-Face/manual irregular-face workflows.
 - Face-to-Face: ambiguous multi-room generated faces no longer receive AR_RoomId automatically.
 - Includes v2.5.1 room-finish column-side face generation, Sync Model opt-in behavior, non-room-bounding finish walls, and validation report improvements.
-
 
 
 

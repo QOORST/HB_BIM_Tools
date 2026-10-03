@@ -20,7 +20,33 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
     {
         private class FailRow
         {
-            public string Reason, UniqueId, ElementId, Mark, FamilyName, TypeName, FamilyType, Field, Value;
+            public string Reason, SourceRow, UniqueId, ElementId, Mark, FamilyName, TypeName, FamilyType, Field, Value;
+        }
+
+        private sealed class PlannedWrite
+        {
+            public Element Owner;
+            public Parameter Parameter;
+            public object Value;
+            public bool IsType;
+            public FailRow Source;
+            public string Key => Owner.UniqueId + ":" + ParamTypeCompat.ElementIdToString(Parameter.Id);
+        }
+
+        private sealed class RollbackImportErrors : IFailuresPreprocessor
+        {
+            public readonly List<string> Messages = new List<string>();
+            public FailureProcessingResult PreprocessFailures(FailuresAccessor accessor)
+            {
+                bool hasError = false;
+                foreach (var failure in accessor.GetFailureMessages())
+                {
+                    if (failure.GetSeverity() == FailureSeverity.Warning) continue;
+                    Messages.Add(failure.GetDescriptionText());
+                    hasError = true;
+                }
+                return hasError ? FailureProcessingResult.ProceedWithRollBack : FailureProcessingResult.Continue;
+            }
         }
 
         public Result Execute(ExternalCommandData cd, ref string msg, ElementSet set)
@@ -85,6 +111,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 // 根據檔案類型讀取資料
                 List<string> headers;
                 List<List<string>> rows;
+                int firstDataRow = 2;
 
                 string fileExt = Path.GetExtension(ofd.FileName).ToLower();
                 if (fileExt == ".xls")
@@ -96,7 +123,7 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                 if (fileExt == ".xlsx")
                 {
                     // 讀取 Excel 檔案
-                    var excelData = ReadExcelFile(ofd.FileName);
+                    var excelData = ReadExcelFile(ofd.FileName, out firstDataRow);
                     if (excelData == null || excelData.Count == 0)
                     {
                         TaskDialog.Show("COBie 匯入", "Excel 檔案無內容或讀取失敗");
@@ -128,209 +155,258 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                     return Result.Cancelled;
                 }
 
+                var duplicateHeaders = headers.Where(h => !string.IsNullOrWhiteSpace(h))
+                    .GroupBy(h => h, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+                if (duplicateHeaders.Count > 0)
+                {
+                    TaskDialog.Show("COBie 匯入", "欄位名稱重複，無法安全判定識別或更新欄位。請修正後重試：\n" +
+                        string.Join(", ", duplicateHeaders));
+                    return Result.Cancelled;
+                }
+
                 int idxUnique = headers.FindIndex(h => h.Equals("UniqueId", StringComparison.OrdinalIgnoreCase));
                 int idxElemId = headers.FindIndex(h => h.Equals("ElementId", StringComparison.OrdinalIgnoreCase));
                 int idxMark = headers.FindIndex(h => h.Equals("Mark", StringComparison.OrdinalIgnoreCase));
                 int idxFam = headers.FindIndex(h => h.Equals("FamilyName", StringComparison.OrdinalIgnoreCase));
                 int idxTyp = headers.FindIndex(h => h.Equals("TypeName", StringComparison.OrdinalIgnoreCase));
 
-                int updated = 0, skipped = 0;
+                int updated = 0, skipped = 0, matched = 0;
                 var fails = new List<FailRow>();
+                var plan = new List<PlannedWrite>();
+                var elements = new FilteredElementCollector(doc).WhereElementIsNotElementType().ToElements();
+                var byUniqueId = elements.ToDictionary(e => e.UniqueId, StringComparer.OrdinalIgnoreCase);
+                var matcher = new CobieImportMatcher(elements.Select(e =>
+                {
+                    var names = GetFamilyAndType(doc, e);
+                    return new CobieImportIdentity
+                    {
+                        UniqueId = e.UniqueId, ElementId = ParamTypeCompat.ElementIdToString(e.Id),
+                        Mark = TryGetStringParam(e, BuiltInParameter.ALL_MODEL_MARK),
+                        FamilyName = names.family, TypeName = names.type
+                    };
+                }));
+                var matchedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var explicitFields = new HashSet<string>(headers.Where(h => map.ContainsKey(h))
+                    .Select(h => map[h].CobieName ?? ""), StringComparer.OrdinalIgnoreCase);
+
+                // Complete read-only preflight before starting any transaction.
+                for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+                {
+                    var r = rows[rowIndex];
+                    var identity = new CobieImportIdentity
+                    {
+                        UniqueId = Safe(r, idxUnique), ElementId = Safe(r, idxElemId), Mark = Safe(r, idxMark),
+                        FamilyName = Safe(r, idxFam), TypeName = Safe(r, idxTyp)
+                    };
+                    var source = new FailRow
+                    {
+                        SourceRow = (rowIndex + firstDataRow).ToString(CultureInfo.InvariantCulture),
+                        UniqueId = identity.UniqueId, ElementId = identity.ElementId, Mark = identity.Mark,
+                        FamilyName = identity.FamilyName, TypeName = identity.TypeName,
+                        FamilyType = identity.FamilyName + ":" + identity.TypeName
+                    };
+                    if (r.Count > headers.Count)
+                    {
+                        source.Reason = "Row contains more cells than the header; check CSV quoting or column alignment";
+                        fails.Add(source); skipped++; continue;
+                    }
+                    var match = matcher.Match(identity, out var reason);
+                    if (match == null)
+                    {
+                        source.Reason = reason;
+                        fails.Add(source); skipped++; continue;
+                    }
+                    var elem = byUniqueId[match.UniqueId];
+                    matched++; matchedIds.Add(elem.UniqueId);
+                    for (int c = 0; c < headers.Count; c++)
+                    {
+                        var head = headers[c];
+                        if (IsIdentityHeader(head) || !map.TryGetValue(head, out var cfg)) continue;
+                        PlanValue(elem, cfg, Safe(r, c), head, source, plan, fails);
+                    }
+
+                    // Preserve room-derived defaults, but respect import enablement and explicit file values.
+                    var room = GetRoomFromElement(doc, elem);
+                    if (room != null)
+                    {
+                        foreach (var cfg in cfgs.Where(c => c.ImportEnabled &&
+                            (c.CobieName == "Space.Name" || c.CobieName == "Component.Space") &&
+                            !explicitFields.Contains(c.CobieName)))
+                            PlanValue(elem, cfg, cfg.CobieName == "Space.Name" ? room.Name : room.Number,
+                                cfg.CobieName + " (room default)", source, plan, fails);
+                    }
+                }
+
+                // Never let the last row silently win, including multiple instances sharing a type.
+                var safePlan = CobieImportWritePlan.Resolve(plan, w => w.Key, w => w.Value,
+                    out var conflicts, out var duplicates);
+                foreach (var write in conflicts)
+                {
+                    write.Source.Reason = "Conflicting values for the same target parameter; all conflicting writes skipped";
+                    fails.Add(write.Source);
+                }
+                var typeIds = new HashSet<string>(safePlan.Where(w => w.IsType).Select(w =>
+                    ParamTypeCompat.ElementIdToString(w.Owner.Id)));
+                var affected = elements.Where(e => typeIds.Contains(ParamTypeCompat.ElementIdToString(e.GetTypeId()))).ToList();
+                var outside = affected.Count(e => !matchedIds.Contains(e.UniqueId));
+                var preview = new TaskDialog("COBie 匯入預檢")
+                {
+                    MainInstruction = safePlan.Count == 0 ? "沒有可安全寫入的資料" : "請確認匯入範圍，再寫入模型",
+                    MainContent = $"來源資料列：{rows.Count}\n匹配列：{matched}；略過列：{skipped}\n" +
+                        $"可寫入欄位：{safePlan.Count}（實例 {safePlan.Count(w => !w.IsType)}；型別 {safePlan.Count(w => w.IsType)}）\n" +
+                        $"重複同值寫入已合併：{duplicates}；問題項目：{fails.Count}\n" +
+                        $"型別變更影響：{typeIds.Count} 個型別、{affected.Count} 個實例（其中 {outside} 個不在匹配列中）。\n\n" +
+                        "預檢尚未更動模型。問題項目將略過，僅寫入上述安全項目。型別參數會影響共用該型別的所有實例。\n" +
+                        "ElementId / Mark 為模型內識別，請確認檔案來自目前模型；提供 UniqueId 最可靠。",
+                    ExpandedContent = string.Join("\n", fails.Take(30).Select(f =>
+                        $"列 {f.SourceRow} [{f.Field}]：{f.Reason}")) +
+                        (fails.Count > 30 ? "\n（更多問題可另存完整 CSV）" : ""),
+                    CommonButtons = safePlan.Count == 0 ? TaskDialogCommonButtons.Close :
+                        TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No,
+                    DefaultButton = safePlan.Count == 0 ? TaskDialogResult.Close : TaskDialogResult.No
+                };
+                var choice = preview.Show();
+                if (safePlan.Count == 0 || choice != TaskDialogResult.Yes)
+                {
+                    OfferFailCsv(fails, false);
+                    return Result.Cancelled;
+                }
 
                 using (var tx = new Transaction(doc, "COBie 匯入"))
                 {
-                    tx.Start();
-
-                    foreach (var r in rows)
+                    if (tx.Start() != TransactionStatus.Started)
+                        throw new InvalidOperationException("無法啟動 COBie 匯入交易。");
+                    var failureHandler = new RollbackImportErrors();
+                    tx.SetFailureHandlingOptions(tx.GetFailureHandlingOptions()
+                        .SetFailuresPreprocessor(failureHandler).SetClearAfterRollback(true).SetForcedModalHandling(true));
+                    foreach (var write in safePlan)
                     {
-                        Element elem = null;
-                        string u = Safe(r, idxUnique);
-                        string id = Safe(r, idxElemId);
-                        string mk = Safe(r, idxMark);
-                        string fam = Safe(r, idxFam);
-                        string typ = Safe(r, idxTyp);
-
-                        // 1) UniqueId
-                        if (!string.IsNullOrWhiteSpace(u)) { try { elem = doc.GetElement(u); } catch { } }
-
-                        // 2) ElementId
-                        if (elem == null && !string.IsNullOrWhiteSpace(id))
-                        {
-                            var eid = ParamTypeCompat.ParseElementId(id);
-                            if (eid != null) elem = doc.GetElement(eid);
-                        }
-
-                        // 3) Mark
-                        if (elem == null && !string.IsNullOrWhiteSpace(mk))
-                        {
-                            elem = new FilteredElementCollector(doc).WhereElementIsNotElementType()
-                                .FirstOrDefault(e =>
-                                {
-                                    var p = e.get_Parameter(BuiltInParameter.ALL_MODEL_MARK);
-                                    var s = p?.AsString() ?? p?.AsValueString();
-                                    return string.Equals(s, mk, StringComparison.OrdinalIgnoreCase);
-                                });
-                        }
-
-                        if (elem == null)
-                        {
-                            fails.Add(new FailRow { Reason = "Element not found", UniqueId = u, ElementId = id, Mark = mk, FamilyName = fam, TypeName = typ, FamilyType = $"{fam}:{typ}" });
-                            skipped++; continue;
-                        }
-
-                        // 先自動寫入空間名稱與空間代碼（不需CSV提供）
                         try
                         {
-                            var room = GetRoomFromElement(doc, elem);
-                            if (room != null)
+                            // Write only the exact parameter/scope reviewed in preflight; never fallback.
+                            if (SetPlannedValue(write)) updated++;
+                            else
                             {
-                                var cfgSpaceName = cfgs.FirstOrDefault(c => c.CobieName == "Space.Name");
-                                var cfgSpaceCode = cfgs.FirstOrDefault(c => c.CobieName == "Component.Space");
-                                if (cfgSpaceName != null) ApplyValue(elem, cfgSpaceName, room.Name);
-                                if (cfgSpaceCode != null) ApplyValue(elem, cfgSpaceCode, room.Number);
+                                write.Source.Reason = "Revit rejected the planned parameter value";
+                                fails.Add(write.Source);
                             }
                         }
-                        catch { }
-
-                        for (int c = 0; c < headers.Count; c++)
+                        catch (Exception ex)
                         {
-                            var head = headers[c];
-                            // 識別與人工對照欄：一律忽略
-                            if (head.Equals("UniqueId", StringComparison.OrdinalIgnoreCase) ||
-                                head.Equals("ElementId", StringComparison.OrdinalIgnoreCase) ||
-                                head.Equals("Mark", StringComparison.OrdinalIgnoreCase) ||
-                                head.Equals("FamilyName", StringComparison.OrdinalIgnoreCase) ||
-                                head.Equals("TypeName", StringComparison.OrdinalIgnoreCase) ||
-                                head.Equals("FamilyType", StringComparison.OrdinalIgnoreCase))
-                                continue;
-
-                            if (!map.TryGetValue(head, out var cfg)) continue;
-
-                            string val = Safe(r, c);
-                            try
-                            {
-                                bool ok = ApplyValue(elem, cfg, val);
-                                if (ok) updated++;
-                                else
-                                {
-                                    var (ff, tt) = GetFamilyAndType(doc, elem);
-                                    fails.Add(new FailRow
-                                    {
-                                        Reason = "Parameter not writable or type mismatch",
-                                        UniqueId = elem.UniqueId,
-                                        ElementId = ParamTypeCompat.ElementIdToString(elem.Id),
-                                        Mark = TryGetStringParam(elem, BuiltInParameter.ALL_MODEL_MARK),
-                                        FamilyName = ff,
-                                        TypeName = tt,
-                                        FamilyType = $"{ff}:{tt}",
-                                        Field = head,
-                                        Value = val
-                                    });
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                var (ff, tt) = GetFamilyAndType(doc, elem);
-                                fails.Add(new FailRow { Reason = ex.Message, UniqueId = elem.UniqueId, ElementId = ParamTypeCompat.ElementIdToString(elem.Id), Mark = TryGetStringParam(elem, BuiltInParameter.ALL_MODEL_MARK), FamilyName = ff, TypeName = tt, FamilyType = $"{ff}:{tt}", Field = head, Value = val });
-                            }
+                            write.Source.Reason = ex.Message;
+                            fails.Add(write.Source);
                         }
                     }
-
                     if (tx.Commit() != TransactionStatus.Committed)
                     {
-                        TaskDialog.Show("COBie 匯入未完成", "Revit 未成功提交資料更新，請檢查失敗訊息；本次更新數量不列為成功。");
+                        foreach (var write in safePlan)
+                        {
+                            write.Source.Reason = "Transaction not committed; planned value was not imported. " +
+                                string.Join("; ", failureHandler.Messages);
+                            if (!fails.Contains(write.Source)) fails.Add(write.Source);
+                        }
+                        TaskDialog.Show("COBie 匯入未完成", "Revit 未成功提交資料更新，本次更新數量不列為成功。\n" +
+                            string.Join("\n", failureHandler.Messages));
+                        OfferFailCsv(fails, false);
                         return Result.Failed;
                     }
                 }
-
-                TaskDialog.Show("COBie 匯入", $"更新成功：{updated}\n略過：{skipped}\n失敗：{fails.Count}\n\n可另存失敗清單 CSV 以利後續查核。");
-
-                if (fails.Count > 0)
-                {
-                    var ask = MessageBox.Show("是否另存「更新失敗清單」CSV？", "COBie 匯入", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                    if (ask == DialogResult.Yes)
-                    {
-                        var sfd = new SaveFileDialog { Filter = "CSV (逗號分隔)|*.csv", FileName = $"COBie_Import_Fail_{DateTime.Now:yyyyMMdd_HHmm}.csv" };
-                        if (sfd.ShowDialog() == DialogResult.OK)
-                        {
-                            try { SaveFailCsv(sfd.FileName, fails); }
-                            catch (Exception ex)
-                            {
-                                TaskDialog.Show("失敗清單未儲存", "模型匯入已提交，但無法儲存失敗清單：\n" + ex.Message);
-                            }
-                        }
-                    }
-                }
+                TaskDialog.Show("COBie 匯入", $"更新成功欄位：{updated}\n略過識別列：{skipped}\n問題項目：{fails.Count}\n\n可另存問題清單 CSV 以利後續查核。");
+                OfferFailCsv(fails, true);
 
                 return Result.Succeeded;
             }
             catch (Exception ex) { msg = ex.ToString(); return Result.Failed; }
         }
 
-        private static bool ApplyValue(Element e, CmdCobieFieldManager.CobieFieldConfig cfg, string raw)
+        private static bool IsIdentityHeader(string header)
         {
-            // 優先寫入共用參數，寫入順序依 IsInstance（true: 實例→型別；false: 型別→實例）
-            if (!string.IsNullOrWhiteSpace(cfg.SharedParameterName))
-            {
-                if (cfg.IsInstance)
-                {
-                    var pInst = e.Parameters.Cast<Parameter>().FirstOrDefault(x => x.Definition?.Name == cfg.SharedParameterName);
-                    if (SetParam(pInst, cfg.DataType, raw)) return true;
-
-                    // 若指定為實例但失敗，嘗試型別層級
-                    var et = e.Document.GetElement(e.GetTypeId()) as ElementType;
-                    var pType = et?.Parameters.Cast<Parameter>().FirstOrDefault(x => x.Definition?.Name == cfg.SharedParameterName);
-                    if (SetParam(pType, cfg.DataType, raw)) return true;
-                }
-                else
-                {
-                    var et = e.Document.GetElement(e.GetTypeId()) as ElementType;
-                    var pType = et?.Parameters.Cast<Parameter>().FirstOrDefault(x => x.Definition?.Name == cfg.SharedParameterName);
-                    if (SetParam(pType, cfg.DataType, raw)) return true;
-
-                    var pInst = e.Parameters.Cast<Parameter>().FirstOrDefault(x => x.Definition?.Name == cfg.SharedParameterName);
-                    if (SetParam(pInst, cfg.DataType, raw)) return true;
-                }
-
-                // 如果有共用參數設定但寫入失敗，直接返回 false，不要回退到內建參數
-                return false;
-            }
-
-            // 只有在沒有設定共用參數時，才使用內建參數（用於向後相容）
-            if (cfg.IsBuiltIn && cfg.BuiltInParam.HasValue)
-            {
-                if (cfg.IsInstance)
-                {
-                    var pInst = e.get_Parameter(cfg.BuiltInParam.Value);
-                    if (SetParam(pInst, cfg.DataType, raw)) return true;
-
-                    var et = e.Document.GetElement(e.GetTypeId()) as ElementType;
-                    var pType = et?.get_Parameter(cfg.BuiltInParam.Value);
-                    return SetParam(pType, cfg.DataType, raw);
-                }
-                else
-                {
-                    var et = e.Document.GetElement(e.GetTypeId()) as ElementType;
-                    var pType = et?.get_Parameter(cfg.BuiltInParam.Value);
-                    if (SetParam(pType, cfg.DataType, raw)) return true;
-
-                    var pInst = e.get_Parameter(cfg.BuiltInParam.Value);
-                    return SetParam(pInst, cfg.DataType, raw);
-                }
-            }
-            return false;
+            return new[] { "UniqueId", "ElementId", "Mark", "FamilyName", "TypeName", "FamilyType" }
+                .Contains(header, StringComparer.OrdinalIgnoreCase);
         }
 
-        private static bool SetParam(Parameter p, string dataType, string raw)
+        private static void PlanValue(Element element, CmdCobieFieldManager.CobieFieldConfig cfg,
+            string raw, string field, FailRow row, List<PlannedWrite> plan, List<FailRow> fails)
         {
-            if (p == null || p.IsReadOnly) return false;
+            var source = new FailRow
+            {
+                SourceRow = row.SourceRow, UniqueId = row.UniqueId, ElementId = row.ElementId,
+                Mark = row.Mark, FamilyName = row.FamilyName, TypeName = row.TypeName,
+                FamilyType = row.FamilyType, Field = field, Value = raw
+            };
+            try
+            {
+                var owner = cfg.IsInstance ? element : element.Document.GetElement(element.GetTypeId());
+                Parameter parameter = null;
+                if (owner != null && !string.IsNullOrWhiteSpace(cfg.SharedParameterName))
+                {
+                    var candidates = owner.GetParameters(cfg.SharedParameterName);
+                    if (candidates.Count > 1)
+                        throw new InvalidOperationException("Ambiguous parameter name in configured scope: " + cfg.SharedParameterName);
+                    parameter = candidates.SingleOrDefault();
+                }
+                else if (owner != null && cfg.IsBuiltIn && cfg.BuiltInParam.HasValue)
+                    parameter = owner.get_Parameter(cfg.BuiltInParam.Value);
+
+                if (parameter == null || parameter.IsReadOnly)
+                    throw new InvalidOperationException("Parameter missing/read-only in configured " +
+                        (cfg.IsInstance ? "instance" : "type") + " scope; cross-scope fallback disabled");
+                if (!TryPrepareValue(parameter, cfg.DataType, raw, out var value))
+                    throw new InvalidOperationException("Invalid value or storage type mismatch in configured scope");
+                plan.Add(new PlannedWrite { Owner = owner, Parameter = parameter, Value = value,
+                    IsType = owner is ElementType, Source = source });
+            }
+            catch (Exception ex)
+            {
+                source.Reason = ex.Message;
+                fails.Add(source);
+            }
+        }
+
+        private static bool TryPrepareValue(Parameter parameter, string dataType, string raw, out object value)
+        {
+            value = null;
             switch ((dataType ?? "Text").Trim())
             {
-                case "Number": if (TryParseDouble(raw, out double d)) return p.Set(d); return false;
-                case "Integer": if (TryParseInteger(raw, out int i)) return p.Set(i); return false;
-                case "YesNo": if (TryParseBool(raw, out int b)) return p.Set(b); return false;
-                case "Date": return p.Set(raw ?? "");
-                default: return p.Set(raw ?? "");
+                case "Number":
+                    if (parameter.StorageType != StorageType.Double || !TryParseDouble(raw, out double number) ||
+                        double.IsNaN(number) || double.IsInfinity(number)) return false;
+                    value = number; return true;
+                case "Integer":
+                    if (parameter.StorageType != StorageType.Integer || !TryParseInteger(raw, out int integer)) return false;
+                    value = integer; return true;
+                case "YesNo":
+                    if (parameter.StorageType != StorageType.Integer || !TryParseBool(raw, out int boolean)) return false;
+                    value = boolean; return true;
+                default:
+                    if (parameter.StorageType != StorageType.String) return false;
+                    value = raw ?? ""; return true;
+            }
+        }
+
+        private static bool SetPlannedValue(PlannedWrite write)
+        {
+            if (write.Parameter.IsReadOnly) return false;
+            if (write.Value is double number) return write.Parameter.Set(number);
+            if (write.Value is int integer) return write.Parameter.Set(integer);
+            return write.Parameter.Set((string)write.Value);
+        }
+
+        private static void OfferFailCsv(List<FailRow> fails, bool committed)
+        {
+            if (fails.Count == 0) return;
+            if (MessageBox.Show("是否另存「匯入問題清單」CSV？", "COBie 匯入",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            using (var sfd = new SaveFileDialog { Filter = "CSV (逗號分隔)|*.csv",
+                FileName = $"COBie_Import_Fail_{DateTime.Now:yyyyMMdd_HHmm}.csv" })
+            {
+                if (sfd.ShowDialog() != DialogResult.OK) return;
+                try { SaveFailCsv(sfd.FileName, fails); }
+                catch (Exception ex)
+                {
+                    TaskDialog.Show("問題清單未儲存", (committed ? "模型匯入已提交。" : "模型未變更。") +
+                        "無法儲存問題清單：\n" + ex.Message);
+                }
             }
         }
 
@@ -394,13 +470,13 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
         private static void SaveFailCsv(string path, List<FailRow> fails)
         {
-            var headers = new[] { "Reason", "UniqueId", "ElementId", "Mark", "FamilyName", "TypeName", "FamilyType", "Field", "Value" };
+            var headers = new[] { "Reason", "SourceRow", "UniqueId", "ElementId", "Mark", "FamilyName", "TypeName", "FamilyType", "Field", "Value" };
             using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
             using (var sw = new StreamWriter(fs, new UTF8Encoding(true)))
             {
                 sw.WriteLine(Csv(headers));
                 foreach (var f in fails)
-                    sw.WriteLine(Csv(new[] { f.Reason, f.UniqueId, f.ElementId, f.Mark, f.FamilyName, f.TypeName, f.FamilyType, f.Field, f.Value }));
+                    sw.WriteLine(Csv(new[] { f.Reason, f.SourceRow, f.UniqueId, f.ElementId, f.Mark, f.FamilyName, f.TypeName, f.FamilyType, f.Field, f.Value }));
             }
         }
 
@@ -440,9 +516,10 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
         /// <summary>
         /// 讀取 Excel 檔案並轉換為字串列表
         /// </summary>
-        private static List<List<string>> ReadExcelFile(string filePath)
+        private static List<List<string>> ReadExcelFile(string filePath, out int firstDataRow)
         {
             var result = new List<List<string>>();
+            firstDataRow = 2;
 
             try
             {
@@ -466,12 +543,12 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
 
                     var start = worksheet.Dimension.Start;
                     var end = worksheet.Dimension.End;
+                    firstDataRow = start.Row + 1;
 
                     // 讀取每一列
                     for (int row = start.Row; row <= end.Row; row++)
                     {
                         var rowData = new List<string>();
-                        bool hasData = false;
 
                         // 讀取每一欄
                         for (int col = start.Column; col <= end.Column; col++)
@@ -480,17 +557,9 @@ namespace YD_RevitTools.LicenseManager.Commands.Data
                             var value = cell.Value?.ToString() ?? "";
                             rowData.Add(value.Trim());
 
-                            if (!string.IsNullOrWhiteSpace(value))
-                            {
-                                hasData = true;
-                            }
                         }
 
-                        // 只加入有資料的列（跳過空白列）
-                        if (hasData)
-                        {
-                            result.Add(rowData);
-                        }
+                        result.Add(rowData);
                     }
                 }
             }
