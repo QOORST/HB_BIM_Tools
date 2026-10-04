@@ -99,7 +99,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         Rebase,
         Focus,
         Delete,
-        Update
+        Update,
+        QuantitySchedule,
+        Revision,
+        Issue
     }
 
     internal sealed class PipeSleeveManagerRequestHandler : IExternalEventHandler
@@ -223,6 +226,15 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                         break;
                     case PipeSleeveManagerAction.Update:
                         window.UpdateSelectedInternal();
+                        break;
+                    case PipeSleeveManagerAction.QuantitySchedule:
+                        window.CreateQuantityScheduleInternal();
+                        break;
+                    case PipeSleeveManagerAction.Revision:
+                        window.ShowRevisionInternal();
+                        break;
+                    case PipeSleeveManagerAction.Issue:
+                        window.IssueInternal();
                         break;
                 }
             }
@@ -432,10 +444,13 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 if (button.Text == "刪除") button.FlatAppearance.BorderSize = 0;
             }
             tools.Controls.Add(MakeButton("重新檢查", 110, (s, e) => Raise(PipeSleeveManagerAction.Reload)));
+            tools.Controls.Add(MakeButton("發圖作業", 110, (s, e) => Raise(PipeSleeveManagerAction.Issue)));
             var moreMenu = new WinForms.ContextMenuStrip();
+            moreMenu.Items.Add("套管數量表／放入圖紙", null, (s,e) => Raise(PipeSleeveManagerAction.QuantitySchedule));
+            moreMenu.Items.Add("版本基準／差量圖表", null, (s,e) => Raise(PipeSleeveManagerAction.Revision));
             var rebaseItem = moreMenu.Items.Add("變更約束樓層", null, (s,e) => Raise(PipeSleeveManagerAction.Rebase));
-            moreMenu.Items.Add("整理編號", null, (s, e) => {
-                if (WinForms.MessageBox.Show(this, "重新整理目前視圖的套管編號？此操作會寫入模型。", "整理編號",
+            moreMenu.Items.Add("補齊編號（保留既有編號）", null, (s, e) => {
+                if (WinForms.MessageBox.Show(this, "補齊目前視圖的套管編號？既有編號保留，新增套管接續模型台帳補號。無法判定原件的重號會取消操作。", "補齊編號",
                     WinForms.MessageBoxButtons.OKCancel, WinForms.MessageBoxIcon.Question,
                     WinForms.MessageBoxDefaultButton.Button2) == WinForms.DialogResult.OK)
                     Raise(PipeSleeveManagerAction.Organize);
@@ -955,6 +970,41 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             ReloadRowsInternal();
         }
 
+        internal void IssueInternal()
+        {
+            var selected = _uidoc.Selection.GetElementIds().Select(id => _doc.GetElement(id)).OfType<FamilyInstance>()
+                .Where(SleeveQuantityData.Supported).Select(fi => fi.Id.GetIdValue()).ToList();
+            SleeveIssueResult result = null;
+            using (var dialog = new SleeveQuantityForm(_doc, selected, true, request => result = SleeveIssueService.Execute(_doc, request)))
+            {
+                if (dialog.ShowDialog(this) != WinForms.DialogResult.OK) return;
+                TaskDialog.Show("套管發圖作業", "已完成統計設定與補號，建立／更新「" + result.Schedule.Name + "」。\n" +
+                    (dialog.Options.SheetId == ElementId.InvalidElementId ? "明細表可從專案瀏覽器拖曳至圖紙。" : "明細表已放入選定圖紙。") +
+                    "\n已保存整案基準「" + result.Baseline.Name + "」。請儲存 RVT 保留此次結果。\n模型量含待確認項目，不代表施工核准。");
+            }
+            ReloadRowsInternal();
+        }
+
+        internal void ShowRevisionInternal()
+        {
+            using (var dialog = new SleeveRevisionForm(_doc)) dialog.ShowDialog(this);
+            ReloadRowsInternal();
+        }
+
+        internal void CreateQuantityScheduleInternal()
+        {
+            var selected = _uidoc.Selection.GetElementIds().Select(id => _doc.GetElement(id)).OfType<FamilyInstance>()
+                .Where(SleeveQuantityData.Supported).Select(fi => fi.Id.GetIdValue()).ToList();
+            using (var dialog = new SleeveQuantityForm(_doc, selected))
+            {
+                if (dialog.ShowDialog(this) != WinForms.DialogResult.OK) return;
+                var result = SleeveQuantitySchedule.CreateOrUpdate(_doc, dialog.Options);
+                TaskDialog.Show("套管數量表", "已建立／更新「" + result.Name + "」。\n" +
+                    (dialog.Options.SheetId == ElementId.InvalidElementId ? "可從專案瀏覽器拖曳至圖紙。" : "已放入選定圖紙；既有放置位置保持不變。") +
+                    "\n表內含待確認項目，請依檢核狀態核對。模型編輯時由 HB_BIM Tools 同步。");
+            }
+        }
+
         private static bool IsElementOfCategory(Element element, BuiltInCategory category)
         {
             return element?.Category != null && element.Category.Id.GetIdValue() == (long)category;
@@ -1230,7 +1280,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out id) ? id : -1;
         }
 
-        private sealed class PipeSleeveManagerRow
+        internal sealed class PipeSleeveManagerRow
         {
             public long ElementIdValue { get; set; }
             public long SourcePipeIdValue { get; set; }
@@ -1382,8 +1432,23 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     .Where(c => c.ConnectorType == ConnectorType.End).ToList();
                 if (ports == null || ports.Count != 2)
                 {
+                    string connectorNote = $"端點接點 {ports?.Count ?? 0} 個，需 2 個；淨空仍待確認，更新位置不會補建接點。";
+                    var box = sleeve.get_BoundingBox(null);
+                    if (box != null)
+                    {
+                        XYZ center = box.Transform.OfPoint((box.Min + box.Max) * .5);
+                        double along = (center - line.GetEndPoint(0)).DotProduct(line.Direction);
+                        XYZ nearest = line.GetEndPoint(0) + line.Direction * Math.Max(0, Math.Min(line.Length, along));
+                        double offsetMm = center.DistanceTo(nearest) * 304.8;
+                        if (offsetMm > 1)
+                        {
+                            brief = $"中心偏離來源 {offsetMm:0.##} mm";
+                            info = brief + "，請更新位置。" + connectorNote;
+                            return "需更新";
+                        }
+                    }
                     brief = $"端點接點 {ports?.Count ?? 0} 個，需 2 個";
-                    info = brief + "。請檢查目前模型中的套管族群；更新套管位置不會重新載入族群接點。";
+                    info = connectorNote;
                     return "待確認";
                 }
                 if (ports.Any(c => c.Shape != ConnectorProfileType.Round))
@@ -1399,11 +1464,14 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     info = "套管兩端接點位置重疊，無法確認穿越方向。";
                     return "待確認";
                 }
-                if (Math.Abs(axis.Normalize().DotProduct(line.Direction)) < 0.999999)
+                XYZ sleeveAxis = axis.Normalize();
+                double cosine = sleeveAxis.DotProduct(line.Direction);
+                double angleDegrees = Math.Acos(Math.Min(1, Math.Abs(cosine))) * 180 / Math.PI;
+                if (Math.Abs(cosine) < 1e-6)
                 {
-                    info = "管線與套管不同向，斜穿淨空需人工確認。";
-                    brief = "斜穿，待確認";
-                    return "待確認";
+                    brief = $"軸向夾角 {angleDegrees:0.###}°，請更新方向";
+                    info = "兩端接點軸線與來源管線接近垂直，無法形成完整穿越。請按更新確認套管方向與穿越點。";
+                    return "需更新";
                 }
                 if (InsulationLiningBase.GetInsulationIds(pipe.Document, pipe.Id).Count > 0)
                 {
@@ -1442,22 +1510,25 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     return "待確認";
                 }
                 double offset = 0;
+                double axialMargin = outer / 304.8 / 2 * Math.Sqrt(Math.Max(0, 1 - cosine * cosine)) / Math.Abs(cosine);
                 foreach (var port in ports)
                 {
-                    double along = (port.Origin - line.GetEndPoint(0)).DotProduct(line.Direction);
-                    if (along < -1.0 / 304.8 || along > line.Length + 1.0 / 304.8)
+                    // Intersect the pipe centerline with each plane normal to the sleeve axis.
+                    double along = (port.Origin - line.GetEndPoint(0)).DotProduct(sleeveAxis) / cosine;
+                    if (along - axialMargin < -1.0 / 304.8 || along + axialMargin > line.Length + 1.0 / 304.8)
                     {
                         info = "來源管段未涵蓋套管兩端，請確認管線是否縮短或移離。";
                         brief = "管段未涵蓋套管兩端";
                         return "需處理";
                     }
-                    offset = Math.Max(offset, line.Project(port.Origin).Distance * 304.8);
+                    XYZ crossing = line.GetEndPoint(0) + line.Direction * along;
+                    offset = Math.Max(offset, crossing.DistanceTo(port.Origin) * 304.8);
                 }
-                double remaining = (inner - outer) / 2.0 - offset;
-                info = $"有效內徑 {inner:0.##}／管外徑 {outer:0.##}／偏心 {offset:0.##}／最小淨空 {remaining:0.##} mm；未含防火、防水封堵要求。";
+                double remaining = SleeveRoundClearancePolicy.Remaining(inner, outer, cosine, offset);
+                info = $"軸向夾角 {angleDegrees:0.###}°；有效內徑 {inner:0.##}／管外徑 {outer:0.##}／端面最大偏心 {offset:0.##}／保守淨空 {remaining:0.##} mm。依直線、等內徑圓形套管估算；未含防火、防水封堵要求。";
                 if (derivedInner) info += " 內徑依套管外徑減兩倍單側壁厚推算。";
-                brief = remaining < 0 ? $"淨空不足 {-remaining:0.##} mm" :
-                    $"偏心 {offset:0.##} mm，剩餘淨空 {remaining:0.##} mm";
+                brief = remaining < 0 ? $"夾角 {angleDegrees:0.###}°，淨空不足 {-remaining:0.##} mm" :
+                    $"夾角 {angleDegrees:0.###}°，保守淨空 {remaining:0.##} mm";
                 if (remaining < 0) return "需處理";
                 return offset > 1.0 ? "偏心可容納" : "正常";
             }

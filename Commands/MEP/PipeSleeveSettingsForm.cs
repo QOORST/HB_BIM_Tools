@@ -256,10 +256,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             summary.AutoSize=true;
-            footer.Controls.Add(summary,0,0);
+            var statusPanel = new FlowLayoutPanel { AutoSize=true, Dock=DockStyle.Top, FlowDirection=FlowDirection.TopDown, WrapContents=false };
+            statusPanel.Controls.Add(summary);
+            statusPanel.Controls.Add(Caption("關閉不建立套管；已載入的族群及已儲存的預設仍保留。"));
+            footer.Controls.Add(statusPanel,0,0);
             var actions=new FlowLayoutPanel { Dock=DockStyle.Top,AutoSize=true,FlowDirection=FlowDirection.RightToLeft,WrapContents=false,Margin=Padding.Empty };
             var run=new Button { Text="檢查並建立",Size=new Size(140,36),FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(32,113,206),ForeColor=Color.White };
-            var cancel=new Button { Text="取消",Size=new Size(94,36),FlatStyle=FlatStyle.Flat,DialogResult=DialogResult.Cancel };
+            var cancel=new Button { Text="關閉",Size=new Size(94,36),FlatStyle=FlatStyle.Flat,DialogResult=DialogResult.Cancel };
             run.Click+=(sender,e)=> {
                 try { ValidateLevelRule?.Invoke(CreationLevelUniqueId); }
                 catch(Exception ex) { MessageBox.Show(this,ex.Message,Text); levelRule.Focus(); return; }
@@ -270,7 +273,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 DialogResult=DialogResult.OK; Close();
             };
             var save=new Button { Text="儲存預設",Size=new Size(100,36),FlatStyle=FlatStyle.Flat };
-            save.Click+=(sender,e)=> { try { SaveSettings(); MessageBox.Show(this,"已儲存，與 2024 共用設定。",Text); } catch(Exception ex) { MessageBox.Show(this,ex.Message,Text); } };
+            save.Click+=(sender,e)=> { try { SaveSettings(); MessageBox.Show(this,"已儲存本機共用預設，供其他專案與 2024 使用；套管族型會依目前模型重新配對。",Text); } catch(Exception ex) { MessageBox.Show(this,ex.Message,Text); } };
             actions.Controls.Add(run); actions.Controls.Add(save); actions.Controls.Add(cancel); footer.Controls.Add(actions,1,0); root.Controls.Add(footer,0,2);
             Controls.Add(root); AcceptButton=run; CancelButton=cancel; RefreshSummary();
             Shown+=(sender,e)=> {

@@ -123,6 +123,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                 // 開啟 UI 視窗進行設定
                 var sleeveWindow = new PipeSleeveWindow(doc, pipes);
+                new System.Windows.Interop.WindowInteropHelper(sleeveWindow).Owner = commandData.Application.MainWindowHandle;
+                sleeveWindow.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner;
+                sleeveWindow.ShowInTaskbar = false;
                 sleeveWindow.ShowDialog();
                 if (sleeveWindow.HasUnrecoveredFailure)
                     return Result.Failed;

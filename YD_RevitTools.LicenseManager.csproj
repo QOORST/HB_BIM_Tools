@@ -24,7 +24,7 @@
     <OutputPath>bin\$(Configuration)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <!-- 排除備份資料夾 -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);**/Backup_*/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/Backup_*/**;**/bin/**;**/obj/**;artifacts/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- 條件編譯符號 -->

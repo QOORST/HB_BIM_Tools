@@ -20,6 +20,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private readonly List<Element> _pipes;
         private readonly List<SleeveInfo> _sleeveInfos;
         private readonly PipeSleeveSettings _settings;
+        private bool _executing;
 
         public ObservableCollection<SleeveSymbolChoice> SleeveSymbolChoices { get; } = new ObservableCollection<SleeveSymbolChoice>();
         public ObservableCollection<PipeSleeveSizeRow> SleeveSizeRows { get; } = new ObservableCollection<PipeSleeveSizeRow>();
@@ -39,6 +40,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             LoadDefaultSizeRows();
             ApplySettings(_settings);
             UpdatePreview();
+            Closing += (sender, args) => { if (_executing) args.Cancel = true; };
+        }
+
+        private void ShowExecutionProgress(string message)
+        {
+            txtPreview.Text = message + "\n處理中，請稍候。完成後會顯示結果。";
+            // Render the status without pumping user input into an active Revit transaction.
+            Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.Render);
         }
 
         private bool? _compactLayout;
@@ -242,6 +251,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         /// </summary>
         private void BtnExecute_Click(object sender, RoutedEventArgs e)
         {
+            if (_executing) return;
             if (HasUnrecoveredFailure)
             {
                 MessageBox.Show("前次交易狀態未確認，請關閉視窗，讓 Revit 回復後再重試。", "套管建立／更新未完成");
@@ -251,7 +261,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             {
                 double clearance = ReadMillimeterTextBox(txtClearance, "間隙距離");
                 string levelKey = cmbCreationLevel.SelectedValue as string ?? "";
-                if (!SleeveLevelPolicy.Confirm(_doc, _pipes, levelKey)) return;
+                bool confirmed = SleeveLevelPolicy.Confirm(_doc, _pipes, levelKey);
+                Activate();
+                if (!confirmed) return;
                 SaveSettings(false);
 
                 var symbolMap = new Dictionary<int, ElementId>();
@@ -261,9 +273,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
 
                 btnExecute.IsEnabled = false;
+                _executing = true;
+                btnExecute.Content = "處理中，請稍候…";
+                btnSaveDefaults.IsEnabled = btnCancel.IsEnabled = false;
+                settingsPanel.IsEnabled = advancedPanel.IsEnabled = false;
+                Cursor = System.Windows.Input.Cursors.Wait;
+                Title = "管線套管工具｜處理中";
                 progressExecution.IsIndeterminate = true;
-                txtPreview.Text = "執行中...\n正在分析穿越位置並建立套管。";
-                Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.Background);
+                ShowExecutionProgress($"已選取 {_pipes.Count} 個來源構件，正在準備套管作業。");
 
                 {
                     PipeSleeveResult result = PipeSleeveService.ExecuteCreate(
@@ -272,6 +289,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         new PipeSleeveOptions
                         {
                             CreationLevelUniqueId = levelKey,
+                            ReportProgress = ShowExecutionProgress,
                             ClearanceMm = clearance,
                             IncludeCurrentModel = chkIncludeCurrentModel.IsChecked == true,
                             IncludeLinks = chkIncludeLinks.IsChecked == true,
@@ -291,7 +309,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                     string completionText = BuildCompletionText(result);
                     txtPreview.Text = completionText;
-                    MessageBox.Show(completionText, result.CreatedCount > 0 || result.UpdatedCount > 0 ? "管線套管完成" : "管線套管",
+                    Activate();
+                    MessageBox.Show(this, completionText, result.CreatedCount > 0 || result.UpdatedCount > 0 ? "管線套管完成" : "管線套管",
                         MessageBoxButton.OK,
                         result.CreatedCount > 0 || result.UpdatedCount > 0 || result.SkippedExistingCount > 0
                             ? MessageBoxImage.Information
@@ -300,6 +319,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     btnExecute.IsEnabled = true;
                     if (result.CreatedCount > 0 || result.UpdatedCount > 0 || result.SkippedExistingCount > 0)
                     {
+                        _executing = false;
                         DialogResult = true;
                         Close();
                     }
@@ -311,11 +331,18 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 if (!(ex is SleeveOperationRolledBackException)) HasUnrecoveredFailure = true;
                 progressExecution.Value = 0;
                 txtPreview.Text = "執行未完成：" + ex.Message;
-                MessageBox.Show($"執行失敗:\n{ex.Message}", "錯誤",
+                Activate();
+                MessageBox.Show(this, $"執行失敗:\n{ex.Message}", "錯誤",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
+                _executing = false;
+                Title = "管線套管工具";
+                Cursor = null;
+                btnExecute.Content = "檢查並建立";
+                btnSaveDefaults.IsEnabled = btnCancel.IsEnabled = true;
+                settingsPanel.IsEnabled = advancedPanel.IsEnabled = true;
                 progressExecution.IsIndeterminate = false;
                 btnExecute.IsEnabled = _pipes.Count > 0 && !HasUnrecoveredFailure;
             }

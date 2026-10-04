@@ -25,6 +25,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         public bool SkipExisting { get; set; } = true;
         public bool LimitToActiveView { get; set; } = true;
         public ElementId ActiveViewId { get; set; } = ElementId.InvalidElementId;
+        public Action<string> ReportProgress { get; set; }
     }
 
     internal sealed class PipeSleeveResult
@@ -92,6 +93,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var opening = FindOpeningSymbol(doc);
             var rows = new List<SleeveUpdatePreviewRow>();
             var owners = new Dictionary<PipeSleeveCandidate, SleeveUpdatePreviewRow>();
+            var existing = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>().Where(IsSleeveInstance).ToList();
             foreach (var sleeve in sleeves)
             {
                 var level = SleeveGlLevel.Actual(doc, sleeve);
@@ -101,11 +103,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 };
                 rows.Add(row);
                 if (level == null) { row.Reason = "無有效約束樓層，請使用管理的更多 → 變更約束樓層"; continue; }
-                if (diagnostics.Count > 0) { row.Reason = string.Join("；", diagnostics.Take(3)); continue; }
                 try
                 {
-                    var matches = candidates.Where(c => FindExistingSleeveForUpdate(doc, c, null, new List<FamilyInstance> { sleeve }) != null).ToList();
-                    if (matches.Count != 1) { row.Reason = $"找到 {matches.Count} 個穿越點；保留原件，不自動刪除"; continue; }
+                    var matches = candidates.Where(c => FindExistingSleeveForUpdate(doc, c, null, existing)?.Id == sleeve.Id).ToList();
+                    if (matches.Count != 1) { row.Reason = UnresolvedUpdateReason(sleeve, matches.Count, diagnostics); continue; }
                     var candidate = matches[0];
                     if (owners.TryGetValue(candidate, out var other))
                     {
@@ -149,18 +150,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         {
             var diagnostics = new List<string>();
             var candidates = SuppressWallSleevesCoveredByBeams(Analyze(doc, pipes, options, diagnostics)).ToList();
-            if (diagnostics.Count > 0)
-                throw new InvalidOperationException("穿越檢查尚有待確認項目：\n" + string.Join("\n", diagnostics.Take(8)));
             var pairs = new List<Tuple<FamilyInstance, PipeSleeveCandidate, FamilySymbol>>();
             var wall = FindSleeveSymbol(doc, true);
             var floor = FindSleeveSymbol(doc, false);
             var opening = FindOpeningSymbol(doc);
+            var existing = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>().Where(IsSleeveInstance).ToList();
             foreach (var sleeve in sleeves)
             {
                 var matches = candidates.Where(candidate =>
-                    FindExistingSleeveForUpdate(doc, candidate, null, new List<FamilyInstance> { sleeve }) != null).ToList();
+                    FindExistingSleeveForUpdate(doc, candidate, null, existing)?.Id == sleeve.Id).ToList();
                 if (matches.Count != 1)
-                    throw new InvalidOperationException($"套管 {sleeve.Id} 有 {matches.Count} 個可能穿越點，未搬移或重建，請確認來源與位置。");
+                    throw new InvalidOperationException(UnresolvedUpdateReason(sleeve, matches.Count, diagnostics));
                 var candidate = matches[0];
                 if (pairs.Any(pair => ReferenceEquals(pair.Item2, candidate)))
                     throw new InvalidOperationException("多支套管對應同一穿越點，未自動更新。");
@@ -184,6 +184,15 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return result;
         }
 
+        private static string UnresolvedUpdateReason(FamilyInstance sleeve, int count, IList<string> diagnostics)
+        {
+            string source = ReadString(sleeve, "來源管線Id", "Pipe Id", "Source Pipe Id");
+            var related = diagnostics.Where(message => message.StartsWith("管線 " + source + "：") ||
+                message.StartsWith("管線 " + source + "／")).Take(3).ToList();
+            return $"套管 {sleeve.Id} 找到 {count} 個可配對的完整實體穿越點；保留原件，不自動刪除。" +
+                (related.Count == 0 ? "請確認來源、宿主與模型範圍。" : "\n" + string.Join("；", related));
+        }
+
         public static PipeSleeveResult ExecuteCreate(Document doc, IList<Element> pipes, PipeSleeveOptions options)
         {
             if (options == null) throw new ArgumentNullException(nameof(options));
@@ -196,6 +205,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     throw new InvalidOperationException("無法開始套管交易群組。");
                 try
                 {
+                    options.ReportProgress?.Invoke("正在檢查既有套管與標註。");
                     var annotations = new SleeveAnnotationGuard(doc, ids);
                     PipeSleeveResult result;
                     using (var tx = new Transaction(doc, "自動放置管線套管"))
@@ -207,6 +217,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         if (tx.Commit() != TransactionStatus.Committed)
                             throw new InvalidOperationException("Revit 未成功提交套管變更。");
                     }
+                    options.ReportProgress?.Invoke("正在核對套管與標註，準備完成。");
                     annotations.Verify();
                     if (group.Assimilate() != TransactionStatus.Committed)
                         throw new InvalidOperationException("套管交易群組未完成。");
@@ -228,6 +239,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             if (pipes == null) throw new ArgumentNullException(nameof(pipes));
             options = options ?? new PipeSleeveOptions();
 
+            options.ReportProgress?.Invoke("正在準備套管族群。");
             EnsureDefaultFamiliesLoaded(doc);
             doc.Regenerate();
 
@@ -268,12 +280,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             if (openingSymbol != null && !openingSymbol.IsActive) openingSymbol.Activate();
             doc.Regenerate();
 
-            int sleeveNumber = GetNextSleeveNumber(doc);
             var updatedSleeveIds = new HashSet<long>();
+            var newSleeves = new List<FamilyInstance>();
             var existingSleeves = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance))
                 .Cast<FamilyInstance>().Where(IsSleeveInstance).ToList();
+            int completedCandidates = 0;
             foreach (PipeSleeveCandidate candidate in candidates)
             {
+                options.ReportProgress?.Invoke($"正在處理穿越點 {++completedCandidates}／{candidates.Count}。");
                 using (var candidateTx = new SubTransaction(doc))
                 {
                 try
@@ -332,7 +346,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                     doc.Regenerate();
                     MoveSleeveToPoint(doc, sleeve, candidate.Point);
-                    SetSleeveParameters(sleeve, candidate, options.ClearanceMm * MmToFeet, options.AutoNumber ? $"PS-{sleeveNumber:D3}" : null, options.PreserveNominalTypeDimensions);
+                    SetSleeveParameters(sleeve, candidate, options.ClearanceMm * MmToFeet, null, options.PreserveNominalTypeDimensions);
                     AlignSleeveToDirection(doc, sleeve, candidate.Point, candidate.SleeveDirection ?? candidate.Direction);
                     SetSleeveLevelAndOffset(doc, sleeve, candidate.Point, creationLevel);
                     MoveSleeveToPoint(doc, sleeve, candidate.Point);
@@ -341,9 +355,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     doc.Regenerate();
                     ValidateCustomClearance(sleeve, candidate, options);
                     CommitCandidate(candidateTx);
+                    newSleeves.Add(sleeve);
                     existingSleeves.Add(sleeve);
                     result.CreatedCount++;
-                    sleeveNumber++;
                 }
                 catch (Autodesk.Revit.Exceptions.RegenerationFailedException) { throw; }
                 catch (Exception ex)
@@ -358,14 +372,15 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
             if (options.AutoNumber && (result.CreatedCount > 0 || result.UpdatedCount > 0))
             {
-                result.OrganizedCount = OrganizeSleeveNumbers(doc, options);
+                options.ReportProgress?.Invoke("正在保留既有編號並補齊新套管編號。");
+                result.OrganizedCount = OrganizeSleeveNumbers(doc, options, newSleeves);
                 result.NumberingOrganized = result.OrganizedCount > 0;
             }
 
             return result;
         }
 
-        public static int OrganizeSleeveNumbers(Document doc, PipeSleeveOptions options)
+        public static int OrganizeSleeveNumbers(Document doc, PipeSleeveOptions options, IEnumerable<FamilyInstance> additional = null)
         {
             if (doc == null || !doc.IsModifiable)
             {
@@ -386,10 +401,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 .ThenBy(fi => fi.Id.GetIdValue())
                 .ToList();
 
-            int number = 1;
+            var newlyCreated = (additional ?? Enumerable.Empty<FamilyInstance>()).ToList();
+            sleeves = sleeves.Concat(newlyCreated).GroupBy(fi => fi.UniqueId).Select(g => g.First()).ToList();
+            SleeveStableNumbering.Assign(doc, sleeves, newlyCreated);
             foreach (FamilyInstance sleeve in sleeves)
             {
-                SetString(sleeve, $"PS-{number:D3}", BuiltInParameter.ALL_MODEL_MARK, "套管編號", "編號", "Sleeve Number");
 
                 string levelName = GetSleeveLevelName(doc, sleeve);
                 if (!string.IsNullOrWhiteSpace(levelName))
@@ -397,7 +413,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     SetString(sleeve, levelName, "套管樓層", "樓層名稱", "Level Name", "Reference Level Name", "參考樓層名稱", "所屬樓層名稱");
                 }
 
-                number++;
             }
 
             return sleeves.Count;
@@ -489,13 +504,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         }
         private static IEnumerable<PipeSleeveCandidate> Analyze(Document doc, IList<Element> pipes, PipeSleeveOptions options, List<string> diagnostics)
         {
+            options.ReportProgress?.Invoke("正在收集牆、樓板、梁與連結模型。");
             Outline searchOutline = CreatePipeSearchOutline(pipes, 500.0 * MmToFeet);
             var hosts = options.IncludeCurrentModel ? CollectHostElements(doc, searchOutline).ToList() : new List<Element>();
             var links = options.IncludeLinks ? CollectLinkHosts(doc, searchOutline).ToList() : new List<Tuple<Element, Document, Transform, string>>();
             var candidatesByKey = new Dictionary<string, PipeSleeveCandidate>();
 
+            int checkedPipes = 0;
             foreach (Element pipe in pipes.Where(IsSupportedCurve))
             {
+                options.ReportProgress?.Invoke($"正在分析管線 {++checkedPipes}／{pipes.Count} 的穿越位置。");
                 Curve curve = ((LocationCurve)pipe.Location).Curve;
                 XYZ direction = GetCurveDirection(curve);
                 double ductWidth;
@@ -520,9 +538,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                     XYZ point;
                     double hostThickness;
-                    if (!TryGetIntersectionData(curve, host, hostType, out point, out hostThickness))
+                    XYZ sleeveDirection;
+                    if (!TryGetIntersectionData(curve, host, hostType, out point, out hostThickness, out sleeveDirection))
                     {
-                        if (MayCurveIntersectElementBox(curve, host)) diagnostics.Add($"管線 {pipe.Id}／宿主 {host.Id}：未確認完整實體穿越；不以外包框生成，保留舊套管。");
+                        if (MayCurveIntersectElementBox(curve, host)) diagnostics.Add($"管線 {pipe.Id}／宿主 {host.Id}：未確認完整實體穿越或平行穿越面；保留舊套管，請確認構件幾何。");
                         continue;
                     }
 
@@ -535,7 +554,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         HostType = hostType,
                         Point = point,
                         Direction = direction,
-                        SleeveDirection = GetSleeveDirection(host, hostType, direction, null),
+                        SleeveDirection = sleeveDirection,
                         PipeDiameterFeet = diameter,
                         PipeNominalDiameterMm = nominalDiameterMm,
                         IsRectangularDuct = isRectangularDuct,
@@ -558,9 +577,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     Curve curveInLink = curve.CreateTransformed(linkTransform.Inverse);
                     XYZ pointInLink;
                     double hostThickness;
-                    if (!TryGetIntersectionData(curveInLink, host, hostType, out pointInLink, out hostThickness))
+                    XYZ sleeveDirection;
+                    if (!TryGetIntersectionData(curveInLink, host, hostType, out pointInLink, out hostThickness, out sleeveDirection))
                     {
-                        if (MayCurveIntersectElementBox(curveInLink, host)) diagnostics.Add($"管線 {pipe.Id}／連結宿主 {host.Id}：未確認完整實體穿越；不以外包框生成，保留舊套管。");
+                        if (MayCurveIntersectElementBox(curveInLink, host)) diagnostics.Add($"管線 {pipe.Id}／連結宿主 {host.Id}：未確認完整實體穿越或平行穿越面；保留舊套管，請確認構件幾何。");
                         continue;
                     }
 
@@ -573,7 +593,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         HostType = hostType,
                         Point = point,
                         Direction = direction,
-                        SleeveDirection = GetSleeveDirection(host, hostType, direction, linkTransform),
+                        SleeveDirection = linkTransform.OfVector(sleeveDirection).Normalize(),
                         PipeDiameterFeet = diameter,
                         PipeNominalDiameterMm = nominalDiameterMm,
                         IsRectangularDuct = isRectangularDuct,
@@ -650,7 +670,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return false;
             }
 
-            XYZ pipeDirection = wallCandidate.Direction.Normalize();
+            XYZ pipeDirection = wallCandidate.SleeveDirection?.Normalize();
+            if (pipeDirection == null) return false;
             double perpendicularTolerance = 150.0 * MmToFeet;
             double jointTolerance = 100.0 * MmToFeet;
 
@@ -666,6 +687,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 {
                     continue;
                 }
+
+                if (beamCandidate.SleeveDirection == null ||
+                    Math.Abs(beamCandidate.SleeveDirection.Normalize().DotProduct(pipeDirection)) < 1 - 1e-8) continue;
 
                 XYZ delta = wallCandidate.Point - beamCandidate.Point;
                 double perpendicularDistance = delta.CrossProduct(pipeDirection).GetLength();
@@ -975,7 +999,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return false;
             }
 
-            XYZ direction = existing.Direction.Normalize();
+            if (existing.SleeveDirection == null || candidate.SleeveDirection == null ||
+                Math.Abs(existing.SleeveDirection.Normalize().DotProduct(candidate.SleeveDirection.Normalize())) < 1 - 1e-8) return false;
+            XYZ direction = existing.SleeveDirection.Normalize();
             XYZ delta = candidate.Point - existing.Point;
             double perpendicularDistance = delta.CrossProduct(direction).GetLength();
             double alongDistance = Math.Abs(delta.DotProduct(direction));
@@ -987,7 +1013,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         private static void MergeBeamCandidate(PipeSleeveCandidate existing, PipeSleeveCandidate candidate)
         {
-            XYZ direction = existing.Direction.Normalize();
+            XYZ direction = existing.SleeveDirection.Normalize();
             double station = (candidate.Point - existing.Point).DotProduct(direction);
             double existingHalf = existing.HostThicknessFeet * 0.5;
             double candidateHalf = candidate.HostThicknessFeet * 0.5;
@@ -1265,52 +1291,81 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
         }
 
-        private static bool TryGetIntersectionData(Curve curve, Element element, string hostType, out XYZ point, out double thicknessFeet)
+        // Geometry is in the host document coordinates. The caller transforms linked
+        // points and normals exactly once after validating the actual crossing faces.
+        private static bool TryGetIntersectionData(Curve curve, Element element, string hostType,
+            out XYZ point, out double thicknessFeet, out XYZ sleeveDirection)
         {
             point = null;
             thicknessFeet = 0;
-
-            if (!MayCurveIntersectElementBox(curve, element))
-            {
-                return false;
-            }
-
+            sleeveDirection = null;
+            if (!MayCurveIntersectElementBox(curve, element)) return false;
             Curve segment = GetIntersectionSegment(curve, element);
-            if (segment != null)
-            {
-                if (hostType == "Beam")
-                {
-                    // Require solid entry and exit before either source endpoint.
-                    double a = curve.ComputeNormalizedParameter(curve.Project(segment.GetEndPoint(0)).Parameter);
-                    double b = curve.ComputeNormalizedParameter(curve.Project(segment.GetEndPoint(1)).Parameter);
-                    double tolerance = 0.5 * MmToFeet / curve.Length;
-                    if (Math.Min(a, b) <= tolerance || Math.Max(a, b) >= 1 - tolerance) return false;
-                    point = segment.Evaluate(0.5, true);
-                    thicknessFeet = segment.Length;
-                    return thicknessFeet > 0.5 * MmToFeet;
-                }
-                if (!HasCompleteTraversal(curve, element, hostType))
-                {
-                    return false;
-                }
+            if (segment == null) return false;
+            double a = curve.ComputeNormalizedParameter(curve.Project(segment.GetEndPoint(0)).Parameter);
+            double b = curve.ComputeNormalizedParameter(curve.Project(segment.GetEndPoint(1)).Parameter);
+            double tolerance = 0.5 * MmToFeet / curve.Length;
+            if (Math.Min(a, b) <= tolerance || Math.Max(a, b) >= 1 - tolerance) return false;
 
-                point = AdjustPointToHostCenter(element, hostType, (segment.GetEndPoint(0) + segment.GetEndPoint(1)) * 0.5);
-                thicknessFeet = ResolveSleeveLengthFeet(element, hostType, segment.Length);
-                return true;
-            }
-
-            // Native floors can contain shaft or slab openings. If the solid has no
-            // curve intersection, falling back to the element bounding box would place
-            // sleeves in the void area.
-            if (hostType == "Floor" && element is Floor)
-            {
-                return false;
-            }
-
-            // Bounding boxes are broad-phase filters, never sleeve geometry.
-            return false;
+            var geometry = element.get_Geometry(new Options { DetailLevel = ViewDetailLevel.Fine });
+            var faces = PlanarHostFaces(geometry).ToList();
+            XYZ entry = UniqueFaceNormal(faces, segment.GetEndPoint(0));
+            XYZ exit = UniqueFaceNormal(faces, segment.GetEndPoint(1));
+            // A straight sleeve cannot be perpendicular to two nonparallel faces.
+            // Curved faces and ambiguous corners require review, not a guessed axis.
+            if (entry == null || exit == null || Math.Abs(entry.DotProduct(exit)) < 1 - 1e-8) return false;
+            XYZ normal = entry.DotProduct(GetCurveDirection(curve)) < 0 ? entry.Negate() : entry;
+            XYZ center = segment.Evaluate(0.5, true);
+            BoundingBoxXYZ box = element.get_BoundingBox(null);
+            if (box == null) return false;
+            double reach = box.Transform.OfPoint(box.Max).DistanceTo(box.Transform.OfPoint(box.Min)) + 1;
+            Curve probe = Line.CreateBound(center - normal * reach, center + normal * reach);
+            Curve perpendicularSegment = GetIntersectionSegment(probe, element);
+            if (perpendicularSegment == null) return false;
+            XYZ normalEntry = UniqueFaceNormal(faces, perpendicularSegment.GetEndPoint(0));
+            XYZ normalExit = UniqueFaceNormal(faces, perpendicularSegment.GetEndPoint(1));
+            if (normalEntry == null || normalExit == null ||
+                Math.Abs(normalEntry.DotProduct(normal)) < 1 - 1e-8 ||
+                Math.Abs(normalExit.DotProduct(normal)) < 1 - 1e-8) return false;
+            // Measure along the corrected axis, never along the sloping source pipe
+            // or using a nominal parameter / bounding box as the host thickness.
+            thicknessFeet = perpendicularSegment.Length;
+            if (thicknessFeet <= 0.5 * MmToFeet) return false;
+            point = perpendicularSegment.Evaluate(0.5, true);
+            sleeveDirection = normal;
+            return true;
         }
 
+        private static IEnumerable<PlanarFace> PlanarHostFaces(GeometryElement geometry)
+        {
+            if (geometry == null) yield break;
+            foreach (GeometryObject obj in geometry)
+            {
+                if (obj is GeometryInstance instance)
+                {
+                    foreach (PlanarFace face in PlanarHostFaces(instance.GetInstanceGeometry())) yield return face;
+                }
+                else if (obj is Solid solid && solid.Volume > 0)
+                {
+                    foreach (Face face in solid.Faces)
+                        if (face is PlanarFace planar) yield return planar;
+                }
+            }
+        }
+
+        private static XYZ UniqueFaceNormal(IEnumerable<PlanarFace> faces, XYZ point)
+        {
+            XYZ normal = null;
+            foreach (PlanarFace face in faces)
+            {
+                IntersectionResult projection = face.Project(point);
+                if (projection == null || projection.Distance > 0.5 * MmToFeet || !face.IsInside(projection.UVPoint)) continue;
+                XYZ candidate = face.FaceNormal.Normalize();
+                if (normal != null && Math.Abs(normal.DotProduct(candidate)) < 1 - 1e-8) return null;
+                normal = candidate;
+            }
+            return normal;
+        }
         private static XYZ AdjustPointToHostCenter(Element host, string hostType, XYZ point)
         {
             if (host == null || point == null)
@@ -1871,78 +1926,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             return projected > 0 ? projected : 0;
         }
 
-        private static XYZ GetSleeveDirection(Element host, string hostType, XYZ pipeDirection, Transform linkTransform)
-        {
-            // Beam thickness is measured along this project-coordinate MEP axis.
-            if (hostType == "Beam") return pipeDirection?.Normalize();
-            XYZ direction = null;
-
-            if (hostType == "Wall")
-            {
-                Wall wall = host as Wall;
-                if (wall != null)
-                {
-                    direction = wall.Orientation;
-                }
-
-                if (direction == null || direction.GetLength() < 0.001)
-                {
-                    LocationCurve locationCurve = host?.Location as LocationCurve;
-                    Curve curve = locationCurve?.Curve;
-                    if (curve != null)
-                    {
-                        XYZ tangent = (curve.GetEndPoint(1) - curve.GetEndPoint(0)).Normalize();
-                        direction = tangent.CrossProduct(XYZ.BasisZ);
-                    }
-                }
-            }
-            else if (hostType == "Floor")
-            {
-                direction = XYZ.BasisZ;
-            }
-            else if (hostType == "Beam")
-            {
-                LocationCurve locationCurve = host?.Location as LocationCurve;
-                Curve curve = locationCurve?.Curve;
-                if (curve != null)
-                {
-                    XYZ tangent = (curve.GetEndPoint(1) - curve.GetEndPoint(0)).Normalize();
-                    XYZ normal = tangent.CrossProduct(XYZ.BasisZ);
-                    if (normal.GetLength() < 0.001)
-                    {
-                        normal = XYZ.BasisZ.CrossProduct(tangent);
-                    }
-                    direction = normal.GetLength() > 0.001 ? normal : pipeDirection;
-                }
-                else
-                {
-                    direction = pipeDirection;
-                }
-            }
-
-            if (direction == null || direction.GetLength() < 0.001)
-            {
-                direction = pipeDirection;
-            }
-
-            if (direction == null || direction.GetLength() < 0.001)
-            {
-                return null;
-            }
-
-            if (linkTransform != null)
-            {
-                direction = linkTransform.OfVector(direction);
-            }
-
-            direction = direction.Normalize();
-            if (pipeDirection != null && pipeDirection.GetLength() > 0.001 && direction.DotProduct(pipeDirection.Normalize()) < 0)
-            {
-                direction = direction.Negate();
-            }
-
-            return direction;
-        }
         private static double ReadHostThicknessParameter(Element host, string hostType)
         {
             Wall wall = host as Wall;
@@ -2192,44 +2175,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 // Some hosted families restrict movement; LocationPoint alignment above remains the fallback.
             }
         }
-        private static int GetNextSleeveNumber(Document doc)
-        {
-            int maxNumber = 0;
-            try
-            {
-                foreach (FamilyInstance sleeve in new FilteredElementCollector(doc)
-                    .OfClass(typeof(FamilyInstance))
-                    .OfType<FamilyInstance>()
-                    .Where(IsSleeveInstance))
-                {
-                    string mark = ReadString(sleeve, BuiltInParameter.ALL_MODEL_MARK, "套管編號", "編號", "Sleeve Number");
-                    int number = ParseSleeveNumber(mark);
-                    if (number > maxNumber)
-                    {
-                        maxNumber = number;
-                    }
-                }
-            }
-            catch
-            {
-                // If the model cannot be scanned, fall back to PS-001 instead of blocking sleeve placement.
-            }
-
-            return maxNumber + 1;
-        }
-
-        private static int ParseSleeveNumber(string mark)
-        {
-            if (string.IsNullOrWhiteSpace(mark)) return 0;
-
-            string text = mark.Trim();
-            if (text.StartsWith("PS-", StringComparison.OrdinalIgnoreCase))
-            {
-                text = text.Substring(3);
-            }
-
-            return int.TryParse(text, out int value) ? value : 0;
-        }
         private static void SetSleeveParameters(FamilyInstance sleeve, PipeSleeveCandidate candidate, double clearanceFeet, string number, bool preserveDiameter = false)
         {
             if (!string.IsNullOrWhiteSpace(number)) SetString(sleeve, number, BuiltInParameter.ALL_MODEL_MARK, "套管編號", "編號", "Sleeve Number");
@@ -2428,8 +2373,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     x.IsNear = x.Distance <= nearTolerance;
                     return x;
                 })
-                .Where(x => x.IsNear && x.CrossingMatches &&
-                    (x.SourceMatches || (string.IsNullOrWhiteSpace(x.Source) && x.Distance <= 25.0 * MmToFeet)))
+                .Where(x => x.CrossingMatches &&
+                    ((x.SourceMatches && (x.IsNear || IsOriginalSleeveHost(x.Instance, candidate))) ||
+                    (x.IsNear && string.IsNullOrWhiteSpace(x.Source) && x.Distance <= 25.0 * MmToFeet)))
                 .OrderBy(x => x.SourceMatches ? 0 : 1)
                 .ThenBy(x => x.CrossingMatches ? 0 : 1)
                 .ThenBy(x => x.Distance)
@@ -2438,6 +2384,28 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             if (matches.Count > 1)
                 throw new InvalidOperationException($"管線 {candidate.Pipe.Id}／宿主 {candidate.HostElement?.Id}：存在多支可能配對套管，未自動搬移或新增，請確認既有套管。");
             return matches.SingleOrDefault();
+        }
+
+        // A moved source may be far from its old sleeve. Match against the original host's
+        // real solid, not a larger search radius that could pair adjacent walls incorrectly.
+        private static bool IsOriginalSleeveHost(FamilyInstance sleeve, PipeSleeveCandidate candidate)
+        {
+            if (candidate.HostElement == null) return false;
+            var box = sleeve.get_BoundingBox(null);
+            if (box == null) return false;
+            XYZ center = box.Transform.OfPoint((box.Min + box.Max) * .5);
+            if (candidate.IsFromLink)
+            {
+                if (candidate.LinkTransform == null) return false;
+                center = candidate.LinkTransform.Inverse.OfPoint(center);
+            }
+            var probe = Line.CreateBound(center - XYZ.BasisZ * (5 * MmToFeet), center + XYZ.BasisZ * (5 * MmToFeet));
+            if (!MayCurveIntersectElementBox(probe, candidate.HostElement)) return false;
+            var segment = GetIntersectionSegment(probe, candidate.HostElement);
+            if (segment == null) return false;
+            var projection = segment.Project(center);
+            return projection != null && projection.Distance <= .5 * MmToFeet &&
+                projection.Parameter >= segment.GetEndParameter(0) && projection.Parameter <= segment.GetEndParameter(1);
         }
 
         private static void UpdateExistingSleeve(Document doc, FamilyInstance sleeve, PipeSleeveCandidate candidate, FamilySymbol symbol, double clearanceFeet, PipeSleeveOptions options)
@@ -2460,6 +2428,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             SetSleeveLevelAndOffset(doc, sleeve, candidate.Point, originalLevel);
             MoveSleeveToPoint(doc, sleeve, candidate.Point);
             MoveSleeveGeometryCenterToPoint(doc, sleeve, candidate.Point, candidate.IsRectangularDuct);
+            doc.Regenerate();
+            var finalBox = sleeve.get_BoundingBox(null);
+            if (finalBox == null || finalBox.Transform.OfPoint((finalBox.Min + finalBox.Max) * .5).DistanceTo(candidate.Point) > .5 * MmToFeet)
+                throw new InvalidOperationException("套管中心未移至新穿越點，已取消更新；請檢查釘選、群組或宿主約束。");
             if (SleeveGlLevel.Actual(doc, sleeve)?.Id != originalLevel.Id)
                 throw new InvalidOperationException("更新後約束樓層改變，已取消本次套管更新。");
             ApplyBeamRiskViewOverride(doc, sleeve, candidate, options);
@@ -2742,30 +2714,53 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private static void AlignSleeveToDirection(Document doc, FamilyInstance sleeve, XYZ point, XYZ targetDirection)
         {
             if (targetDirection == null) return;
-            try
+            doc.Regenerate();
+            XYZ ReadAxis()
             {
-                XYZ current = sleeve.FacingOrientation;
-                XYZ target = targetDirection.Normalize();
-                double dot = Math.Max(-1.0, Math.Min(1.0, current.DotProduct(target)));
-                if (Math.Abs(dot - 1.0) < 0.001) return;
-
-                XYZ axisDirection = current.CrossProduct(target);
-                double angle = Math.Acos(dot);
-                if (axisDirection.GetLength() < 0.001)
-                {
-                    axisDirection = XYZ.BasisZ;
-                    angle = Math.PI;
-                }
-
-                Line axis = Line.CreateBound(point, point + axisDirection.Normalize());
-                ElementTransformUtils.RotateElement(doc, sleeve.Id, axis, angle);
+                var ends = sleeve.MEPModel?.ConnectorManager?.Connectors.Cast<Connector>()
+                    .Where(c => c.ConnectorType == ConnectorType.End).ToList();
+                return ends?.Count == 2 && ends[0].Origin.DistanceTo(ends[1].Origin) > 1e-6
+                    ? (ends[1].Origin - ends[0].Origin).Normalize() : sleeve.FacingOrientation.Normalize();
             }
-            catch
+            XYZ current = ReadAxis();
+            XYZ target = targetDirection.Normalize();
+            double dot = Math.Max(-1.0, Math.Min(1.0, current.DotProduct(target)));
+            if (dot < 0) { target = target.Negate(); dot = -dot; }
+            if (1 - dot < 1e-10) return;
+            bool Aligned() => 1 - Math.Abs(ReadAxis().DotProduct(target)) <= 1e-8;
+            string identity = sleeve.UniqueId;
+            bool mirrored = sleeve.Mirrored;
+            using (var rotate = new SubTransaction(doc))
             {
-                // Some sleeve families are not direction-aware; placement is still useful.
+                rotate.Start();
+                XYZ axisDirection = current.CrossProduct(target).Normalize();
+                ElementTransformUtils.RotateElement(doc, sleeve.Id, Line.CreateBound(point, point + axisDirection), Math.Acos(dot));
+                doc.Regenerate();
+                if (Aligned()) { rotate.Commit(); return; }
+                rotate.RollBack();
+            }
+            // Some level-based MEP families silently ignore out-of-plane rotation.
+            // Two reflections implement the same proper rotation without replacing
+            // the instance or leaving it mirrored. Never move a connected MEP network.
+            var ports = sleeve.MEPModel?.ConnectorManager?.Connectors.Cast<Connector>()
+                .Where(c => c.ConnectorType == ConnectorType.End).ToList();
+            if (ports?.Any(c => c.IsConnected) == true)
+                throw new InvalidOperationException("套管旋轉受連接約束，已保留原件；請確認接頭連接與族群設定。");
+            using (var rotate = new SubTransaction(doc))
+            {
+                rotate.Start();
+                current = ReadAxis();
+                if (current.DotProduct(target) < 0) current = current.Negate();
+                var ids = new List<ElementId> { sleeve.Id };
+                ElementTransformUtils.MirrorElements(doc, ids, Plane.CreateByNormalAndOrigin(current, point), false);
+                doc.Regenerate();
+                ElementTransformUtils.MirrorElements(doc, ids, Plane.CreateByNormalAndOrigin((current + target).Normalize(), point), false);
+                doc.Regenerate();
+                if (!Aligned() || sleeve.UniqueId != identity || sleeve.Mirrored != mirrored)
+                    throw new InvalidOperationException("套管軸向未能對齊，已取消本支變更；請確認族群旋轉或宿主約束。");
+                rotate.Commit();
             }
         }
-
         private static bool IsSupportedCurve(Element element)
         {
             return (element is Pipe || element is Duct || IsElementOfCategory(element, BuiltInCategory.OST_Conduit) || IsElementOfCategory(element, BuiltInCategory.OST_CableTray)) && element.Location is LocationCurve;

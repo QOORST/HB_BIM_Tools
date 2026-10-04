@@ -1,4 +1,4 @@
-<Window x:Class="YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveWindow"
+﻿<Window x:Class="YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="管線套管工具" Height="760" Width="1100"
@@ -213,13 +213,13 @@
                 <ColumnDefinition Width="120"/>
                 <ColumnDefinition Width="120"/>
             </Grid.ColumnDefinitions>
-            <Button x:Name="btnExecute" Grid.Column="0" Content="開始執行" Height="38"
+            <Button x:Name="btnExecute" Grid.Column="0" Content="檢查並建立" Height="38"
                     Click="BtnExecute_Click" IsEnabled="True"
                     Background="#008080" Foreground="White" BorderBrush="#008080"
                     FontSize="15" FontWeight="SemiBold"/>
             <Button x:Name="btnSaveDefaults" Grid.Column="1" Content="儲存預設" Height="38" Margin="12,0,0,0"
                     Click="BtnSaveDefaults_Click"/>
-            <Button x:Name="btnCancel" Grid.Column="2" Content="取消" Height="38" Margin="12,0,0,0"
+            <Button x:Name="btnCancel" Grid.Column="2" Content="關閉" ToolTip="關閉不建立套管；已載入的族群及已儲存的預設仍保留。" Height="38" Margin="12,0,0,0"
                     Click="BtnCancel_Click"/>
         </Grid>
     </Grid>

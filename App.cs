@@ -27,6 +27,7 @@ namespace YD_RevitTools.LicenseManager
         {
             try
             {
+                Commands.MEP.SleeveQuantityUpdater.Register(application.ActiveAddInId);
                 // 註冊編碼提供者（修復 GB18030 編碼錯誤）
                 // 這對於 EPPlus 處理某些 Excel 檔案是必要的
                 try
@@ -1462,6 +1463,7 @@ namespace YD_RevitTools.LicenseManager
 
         public Result OnShutdown(UIControlledApplication application)
         {
+            Commands.MEP.SleeveQuantityUpdater.Unregister();
             Commands.AR.AutoJoin.AutoJoinModelessController.Shutdown();
             application.Idling -= RestoreQuickRiseAction;
             return Result.Succeeded;
