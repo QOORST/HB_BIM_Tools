@@ -171,9 +171,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 var items = buckets[b].Select(e => {
                     var l = TargetLine(e, targetLink);
                     double a = l.GetEndPoint(0).DotProduct(direction), z = l.GetEndPoint(1).DotProduct(direction);
-                    return new Item { Reference = TargetReference(new Reference(e), targetLink), GeometryLine = l, Id = e.Id.ToString(), Station = l.Evaluate(.5,true).DotProduct(measure), Start = Math.Min(a,z), End = Math.Max(a,z) };
+                    return new Item { SourceElement = e, Reference = TargetReference(new Reference(e), targetLink), GeometryLine = l, Id = e.Id.ToString(), Station = l.Evaluate(.5,true).DotProduct(measure), Start = Math.Min(a,z), End = Math.Max(a,z) };
                 }).ToList();
-                foreach (var group in GroupRuns(items, (double)savedGap / 304.8))
+                var groups = GroupRuns(items, (double)savedGap / 304.8);
+                if (edgeDistance) groups = groups.SelectMany(g => g.Select(i => new List<Item> { i })).ToList();
+                foreach (var group in groups)
                 {
                     string ids = string.Join(",", group.Select(i => i.Id));
                     double left = group.Min(i => i.Station), right = group.Max(i => i.Station);
@@ -211,7 +213,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     var chosen = ChooseBeamMatch(ui, doc, matches, normal, "管段 " + ids, ref preferredReference);
                     if (chosen == null) { notes.Add($"管段 {ids}：未指定歧義基準，未建立尺寸。"); continue; }
                     if (chosen.Distance>(double)searchDistance/304.8) notes.Add($"管段 {ids}：擴大搜尋配對梁 {chosen.Side.Id}，距離 {chosen.Distance*304.8:0} mm，請確認。");
-                    var chain = group.Concat(new[] { new Item { Reference = chosen.Side.Reference, Station = chosen.Station } }).OrderBy(i => i.Station).ToList();
+                    List<Item> measured;
+                    try { measured = edgeDistance ? group.Select(i => PipeEdgeItem(i, measure, normal, chosen.Station, targetLink)).ToList() : group; }
+                    catch (Exception ex) { notes.Add($"管段 {ids}：{ex.Message}"); continue; }
+                    var chain = measured.Concat(new[] { new Item { Reference = chosen.Side.Reference, Station = chosen.Station } }).OrderBy(i => i.Station).ToList();
                     if (chain.Zip(chain.Skip(1),(x,y) => y.Station-x.Station).Any(d => d < .5/304.8))
                     { notes.Add($"管段 {ids}：中心重疊，略過。"); continue; }
                     string key = Signature(doc, chain.Select(i => i.Reference));
@@ -242,7 +247,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         var values = dim.Segments.Size > 0 ? dim.Segments.Cast<DimensionSegment>().Select(s => s.Value).ToList() : new List<double?> { dim.Value };
                         var expected = plan.Items.Zip(plan.Items.Skip(1),(x,y) => y.Station-x.Station).ToList();
                         if (values.Count != expected.Count || values.Where((v,i) => !v.HasValue || Math.Abs(v.Value-expected[i]) > .5/304.8).Any())
-                            throw new InvalidOperationException("尺寸值與平面定位距離不一致。");
+                            throw new InvalidOperationException(edgeDistance ? "Revit 未接受外緣切線參照，尺寸值與實際外緣淨距不符，已回復。" : "尺寸值與平面定位距離不一致。");
+                        LabelPipeEdgeDimension(dim);
                         string layoutWarning = ArrangeDimensionText(doc, view, dim);
                         if (layoutWarning != null) notes.Add(layoutWarning);
                         if (tx.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("Revit 拒絕提交。");

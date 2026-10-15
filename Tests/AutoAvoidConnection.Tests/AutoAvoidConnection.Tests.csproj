@@ -3,6 +3,8 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="RevitDoubles.cs" />
+    <Compile Include="RouteChecks.cs" />
+    <Compile Include="../../Commands/MEP/AutoAvoid/Core/AvoidRoutePolicy.cs" Link="AvoidRoutePolicy.cs" />
     <Compile Include="../../Commands/MEP/AutoAvoid/Core/RevitUtils.cs" Link="RevitUtils.cs" />
   </ItemGroup>
 </Project>

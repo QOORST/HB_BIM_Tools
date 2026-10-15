@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net48</TargetFramework><LangVersion>9.0</LangVersion><AssemblyName>HB.MepField.Native</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <Reference Include="RevitAPI"><HintPath>C:/Program Files/Autodesk/Revit 2024/RevitAPI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="RevitAPIUI"><HintPath>C:/Program Files/Autodesk/Revit 2024/RevitAPIUI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Compile Include="../../Commands/MEP/AutoAvoid/UI/DetourPreviewForm.cs" Link="DetourPreviewForm.cs" />
+    <Compile Include="../../Commands/MEP/PipeEdgePositionReference.cs" Link="PipeEdgePositionReference.cs" />
+    <Compile Include="../../Commands/MEP/AutoAvoid/Core/DetourCollisionReview.cs" Link="DetourCollisionReview.cs" />
+    <Compile Include="../../Commands/MEP/AutoAvoid/Core/RevitUtils.cs" Link="RevitUtils.cs" />
+    <Compile Include="../../Commands/MEP/AutoAvoid/Core/AvoidOptions.cs" Link="AvoidOptions.cs" />
+    <Compile Include="../../Commands/MEP/AutoAvoid/Core/AvoidRoutePolicy.cs" Link="AvoidRoutePolicy.cs" />
+    <Compile Include="../../Commands/MEP/AutoAvoid/Core/DetourRouteBuilder.cs" Link="DetourRouteBuilder.cs" />
+    <Compile Include="../../Commands/MEP/AutoAvoid/Core/Logger.cs" Link="Logger.cs" />
+  </ItemGroup>
+</Project>

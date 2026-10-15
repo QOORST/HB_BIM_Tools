@@ -33,7 +33,17 @@ internal static class Program
     }
     private static void Main()
     {
+        RouteChecks.Run();
         RoundTrip<Pipe>(); RoundTrip<Duct>(); RoundTrip<Conduit>();
+        {
+            var doc=new Document(); var source=AddCurve<Pipe>(doc); var before=AddCurve<Pipe>(doc); var after=AddCurve<Pipe>(doc);
+            source.ConnectorManager.Lookup(0).ConnectTo(before.ConnectorManager.Lookup(1));
+            source.ConnectorManager.Lookup(1).ConnectTo(after.ConnectorManager.Lookup(0));
+            Check(RevitUtils.ReplaceWithDetour(doc,source,Plan(),new AvoidOptions(),out var ids,out var reason,retainOriginal:true),"preview reroute succeeds with retained source");
+            Check(source.IsValidObject && ids.Contains(source.Id) && ids.Count==5,"preview contains retained source, remaining segments and elbows");
+            Check(((LocationCurve)source.Location).Curve.GetEndPoint(1).DistanceTo(Plan().Path[1])<1e-9,"retained source becomes first segment");
+            Check(before.ConnectorManager.Lookup(1).AllRefs.Single().Owner==source && after.ConnectorManager.Lookup(0).AllRefs.Single().Owner!=source,"retained preview restores both outside endpoints");
+        }
         {
             var doc=new Document(); var source=AddCurve<Pipe>(doc);
             Check(RevitUtils.ReplaceWithDetour(doc,source,Plan(),new AvoidOptions()),"open endpoints stay open");

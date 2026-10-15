@@ -38,12 +38,23 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.Core
         /// 必須在交易內呼叫；false 代表呼叫端必須 RollBack，不可提交部分結果。
         /// </summary>
         public static bool ReplaceWithDetour(Document doc, Element target, DetourPlan plan, AvoidOptions opt)
+            => ReplaceWithDetour(doc, target, plan, opt, out _);
+
+        public static bool ReplaceWithDetour(Document doc, Element target, DetourPlan plan, AvoidOptions opt,
+            out List<ElementId> createdIds)
+            => ReplaceWithDetour(doc, target, plan, opt, out createdIds, out _);
+
+        public static bool ReplaceWithDetour(Document doc, Element target, DetourPlan plan, AvoidOptions opt,
+            out List<ElementId> createdIds, out string failureReason, bool retainOriginal = false)
         {
+            createdIds = new List<ElementId>();
+            failureReason = null;
             if (doc == null || !doc.IsModifiable || target == null || plan == null || !plan.IsValid ||
                 plan.Path == null || plan.Path.Count < 2 ||
                 !(target is Pipe || target is Duct || target is Conduit))
             {
                 Logger.Warning("無效的替換參數或未啟動交易");
+                failureReason = "無效的替換參數或未啟動交易。";
                 return false;
             }
 
@@ -78,7 +89,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.Core
 
                 var segments = new List<MEPCurve>();
                 for (int i = 0; i < plan.Path.Count - 1; i++)
-                    segments.Add(CreateSegment(doc, source, plan.Path[i], plan.Path[i + 1]));
+                    segments.Add(retainOriginal && i == 0 ? source : CreateSegment(doc, source, plan.Path[i], plan.Path[i + 1]));
+
+                // Preview keeps the original identity and its Revit-owned dependencies on the first segment.
+                // Copy the remaining segments before shortening it. Caller rolls everything back on any failure.
+                if (retainOriginal) ((LocationCurve)source.Location).Curve = Line.CreateBound(plan.Path[0], plan.Path[1]);
 
                 doc.Regenerate();
                 List<FamilyInstance> elbows = CreateElbowsForSegments(doc, segments);
@@ -89,17 +104,23 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.Core
 
                 // Delay deletion until the complete replacement exists. Still verify afterwards:
                 // deletion may cascade to dependent elements, including original neighbours.
-                ICollection<ElementId> deletedIds = doc.Delete(originalId);
-                if (deletedIds.Count != 1 || !deletedIds.Contains(originalId))
-                    throw new InvalidOperationException("刪除原管線會連帶刪除其他元素，取消避讓以保留相依資料");
+                if (!retainOriginal)
+                {
+                    ICollection<ElementId> deletedIds = doc.Delete(originalId);
+                    if (deletedIds.Count != 1 || !deletedIds.Contains(originalId))
+                        throw new InvalidOperationException("刪除原管線會連帶刪除其他元素，取消避讓以保留相依資料");
+                }
                 doc.Regenerate();
                 ValidateConnections(doc, segments, elbows, start, end, externalStart, externalEnd);
 
                 Logger.Info($"元素 {originalId} 替換及連接驗證完成，等待交易提交（{segments.Count} 段）");
+                createdIds.AddRange(segments.Select(s => s.Id));
+                createdIds.AddRange(elbows.Select(e => e.Id));
                 return true;
             }
             catch (Exception ex)
             {
+                failureReason = ex.Message;
                 Logger.Error($"替換元素 {originalId} 失敗，必須回復交易", ex);
                 return false;
             }

@@ -563,11 +563,12 @@ namespace YD_RevitTools.LicenseManager
                     assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.MEP.CmdAutoAvoid");
 
-                autoAvoidData.ToolTip = "管線避讓工具";
+                autoAvoidData.ToolTip = "避讓預覽與碰撞複查，確認後保留";
                 autoAvoidData.LongDescription = "自動避讓管線與障礙物衝突\n\n" +
                     "功能特色：\n" +
                     "• 選擇管線和避讓範圍\n" +
-                    "• 自動生成翻彎路徑\n" +
+                    "• 預覽翻彎路徑並複查實體碰撞與淨距風險\n" +
+                    "• 未通過、取消或關閉時整批還原\n" +
                     "• 支援 Pipe、Duct、Conduit\n" +
                     "• 可自訂彎角和偏移量\n\n" +
                     "授權要求：Trial+";
@@ -922,12 +923,13 @@ namespace YD_RevitTools.LicenseManager
                     assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.MEP.CmdAutoAvoid");
 
-                autoAvoidData.ToolTip = "管線避讓工具";
+                autoAvoidData.ToolTip = "避讓預覽與碰撞複查，確認後保留";
                 autoAvoidData.LongDescription =
                     "自動避讓管線與障礙物衝突。\n\n" +
                     "功能：\n" +
                     "• 選擇管線和避讓範圍\n" +
-                    "• 自動生成翻彎路徑\n" +
+                    "• 預覽翻彎路徑並複查實體碰撞與淨距風險\n" +
+                    "• 未通過、取消或關閉時整批還原\n" +
                     "• 支援多種避讓方向與偏移設定";
                 SetButtonIcon(autoAvoidData, "auto_avoid");
                 avoidOffsetPulldown?.AddPushButton(autoAvoidData);
@@ -1028,7 +1030,8 @@ namespace YD_RevitTools.LicenseManager
                 if (positionMenu != null) positionMenu.IsSynchronizedWithCurrentItem = true;
                 foreach (var entry in new[] {
                     new[] { "MepPositionDimension", "管線/設備\n中心距", "CmdMepPositionCenter", "mep_position_dimension", "依上次設定，以物件中心參考建立定位尺寸。" },
-                    new[] { "MepPositionEdge", "管線/設備\n邊距", "CmdMepPositionEdge", "mep_position_dimension", "以支援族群的最外緣建立定位尺寸；不適用管線切線。" },
+                    new[] { "MepPositionEdge", "管線/設備\n外緣淨距", "CmdMepPositionEdge", "mep_position_dimension", "以圓管實際外徑或支援族群的外緣定位。無有效參照時略過並說明。" },
+                    new[] { "MepPositionInsulation", "管保溫\n外緣淨距", "CmdMepPositionInsulation", "mep_position_dimension", "依模型中實際管外徑與保溫厚度建立外緣淨距；缺少保溫或有效參照時略過，不以中心距替代。" },
                     new[] { "MepPositionDimensionSettings", "定位\n尺寸設定", "CmdMepPositionDimensionSettings", "mep_position_settings", "設定基準模式、參考模型、搜尋範圍、尺寸樣式及分組間距；不建立尺寸。" },
                 })
                 {

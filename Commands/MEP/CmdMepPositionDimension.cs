@@ -60,6 +60,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         }
         private sealed class Item
         {
+            internal Element SourceElement;
             internal Reference Reference;
             internal Line GeometryLine;
             internal double Station;
@@ -78,7 +79,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private static int objectMode = 4;
         private static decimal expandedDistance = 6000;
         private static bool staggerText = true;
-        private static decimal textOffset = 3;
+        private static decimal textMaximumMove = 3;
+        private static decimal textLineClearance = .5m;
         private static string openingFamily;
         private static bool edgeDistance;
         private static bool includeEdgeSize = true;
@@ -119,17 +121,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var distance = new System.Windows.Forms.NumericUpDown { Minimum = 100, Maximum = 20000, Increment = 100, Value = searchDistance, Dock = System.Windows.Forms.DockStyle.Fill };
             var height = new System.Windows.Forms.NumericUpDown { Minimum = 0, Maximum = 5000, Increment = 100, Value = heightDistance, Dock = System.Windows.Forms.DockStyle.Fill };
             var expanded = new System.Windows.Forms.NumericUpDown { Minimum = 100, Maximum = 30000, Increment = 100, Value = expandedDistance, Dock = System.Windows.Forms.DockStyle.Fill };
-            var stagger = new System.Windows.Forms.CheckBox { Text = "重疊文字局部交錯", Checked = staggerText, AutoSize = true };
-            var textGap = new System.Windows.Forms.NumericUpDown { Minimum = 1, Maximum = 20, DecimalPlaces = 1, Increment = .5m, Value = textOffset, Dock = System.Windows.Forms.DockStyle.Fill };
+            var stagger = new System.Windows.Forms.CheckBox { Text = "重疊文字小幅避讓（優先同側）", Checked = staggerText, AutoSize = true };
+            var textGap = new System.Windows.Forms.NumericUpDown { Minimum = .5m, Maximum = 20, DecimalPlaces = 1, Increment = .5m, Value = textMaximumMove, Dock = System.Windows.Forms.DockStyle.Fill };
+            var lineGap = new System.Windows.Forms.NumericUpDown { Minimum = .3m, Maximum = 3, DecimalPlaces = 1, Increment = .1m, Value = textLineClearance, Dock = System.Windows.Forms.DockStyle.Fill };
             textGap.Enabled = stagger.Checked;
-            stagger.CheckedChanged += (s,e) => textGap.Enabled = stagger.Checked;
+            lineGap.Enabled = stagger.Checked;
+            stagger.CheckedChanged += (s,e) => textGap.Enabled = lineGap.Enabled = stagger.Checked;
             var objects = MepConnectionUi.Choices(new[] { "管線", "套管／管附件", "開孔族", "設備", "自動辨識" }
                 .Select((name,i) => new MepConnectionUi.Choice { Text = name, Value = i }));
             objects.SelectedIndex = objectMode;
             var edgeMode = MepConnectionUi.Choices(new[] {
                 new MepConnectionUi.Choice { Text = "中心距", Value = false },
-                new MepConnectionUi.Choice { Text = "邊距（族群外緣）", Value = true } });
-            edgeMode.SelectedIndex = edgeDistance ? 1 : 0;
+                new MepConnectionUi.Choice { Text = "管／族群外緣淨距", Value = true },
+                new MepConnectionUi.Choice { Text = "管保溫外緣淨距", Value = true } });
+            edgeMode.SelectedIndex = edgeDistance ? (insulationEdge ? 2 : 1) : 0;
             var edgeSize = new System.Windows.Forms.CheckBox { Text = "附加物件寬高", AutoSize = true, Checked = includeEdgeSize, Enabled = edgeDistance };
             var horizontal = MepConnectionUi.Choices(new[] { "自動", "上", "下" }
                 .Select((name, i) => new MepConnectionUi.Choice { Text = name, Value = i }));
@@ -139,7 +144,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             vertical.SelectedIndex = verticalPlacement;
             horizontal.Enabled = vertical.Enabled = edgeDistance;
             edgeMode.SelectedIndexChanged += (s,e) =>
-                edgeSize.Enabled = horizontal.Enabled = vertical.Enabled = edgeMode.SelectedIndex == 1;
+                edgeSize.Enabled = horizontal.Enabled = vertical.Enabled = edgeMode.SelectedIndex > 0;
             Func<Document, List<MepConnectionUi.Choice>> collectOpenings = model => model == null ? new List<MepConnectionUi.Choice>() : new FilteredElementCollector(model).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
                 .Where(s => s.Category != null && (s.Category.Id == new ElementId(BuiltInCategory.OST_GenericModel) || s.Category.Id == new ElementId(BuiltInCategory.OST_PipeAccessory)))
                 .Select(s => s.Family).GroupBy(f => f.UniqueId).Select(g => g.First()).OrderBy(f => f.Name)
@@ -165,7 +170,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 "水平尺寸位置", horizontal, "垂直尺寸位置", vertical, "尺寸紙面偏移 (mm)", offset,
                 "基準模式", mode, "定位基準來源", sourceBox, "搜尋距離 (mm)", distance,
                 "文字排列", stagger, "擴大上限 (mm)", expanded, "高程搜尋差 (mm)", height,
-                "分組最大間距 (mm)", gap, "文字紙面偏移 (mm)", textGap))
+                "分組最大間距 (mm)", gap, "文字最大位移 (紙面 mm)", textGap,
+                "文字至尺寸線淨距 (紙面 mm)", lineGap))
             {
                 form.Width = 650;
                 ((System.Windows.Forms.Button)form.AcceptButton).Text = "套用設定";
@@ -179,9 +185,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 if (objects.SelectedIndex == 2 && openingBox.SelectedItem == null)
                     throw new InvalidOperationException("請指定代表開孔的族，避免將一般模型全部視為開孔。");
                 if (expanded.Value < distance.Value) throw new InvalidOperationException("擴大上限不得小於搜尋距離；兩者相同表示不擴大。");
-                if (edgeMode.SelectedIndex == 1 && objects.SelectedIndex == 0)
-                    throw new InvalidOperationException("邊距目前適用具有效外緣參考的開孔族、套管／管附件及設備；管線切線邊距尚未支援。請選擇對應標註物件，或改用中心距。");
-                edgeDistance = edgeMode.SelectedIndex == 1;
+                if (edgeMode.SelectedIndex == 2 && objects.SelectedIndex != 0 && objects.SelectedIndex != 4)
+                    throw new InvalidOperationException("保溫外緣僅適用具有模型保溫層的圓形直管，請選管線或自動辨識。");
+                edgeDistance = edgeMode.SelectedIndex > 0;
+                insulationEdge = edgeMode.SelectedIndex == 2;
                 includeEdgeSize = edgeSize.Checked;
                 horizontalPlacement = horizontal.SelectedIndex;
                 verticalPlacement = vertical.SelectedIndex;
@@ -192,7 +199,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 if (sourceBox.SelectedItem != null) sourceLink = (string)((MepConnectionUi.Choice)sourceBox.SelectedItem).Value;
                 searchDistance = distance.Value; heightDistance = height.Value;
                 expandedDistance = expanded.Value;
-                staggerText = stagger.Checked; textOffset = textGap.Value;
+                staggerText = stagger.Checked; textMaximumMove = textGap.Value;
+                textLineClearance = lineGap.Value;
                 objectMode = objects.SelectedIndex;
                 openingFamily = (openingBox.SelectedItem as MepConnectionUi.Choice)?.Value as string;
             }
@@ -207,19 +215,22 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             catch (Exception ex) { TaskDialog.Show("管線/設備 定位尺寸設定", ex.Message); return Result.Cancelled; }
         }
 
-        internal static Result ExecuteMode(ExternalCommandData data, ref string message, ElementSet elements, bool useEdges)
+        internal static Result ExecuteMode(ExternalCommandData data, ref string message, ElementSet elements, bool useEdges, bool useInsulation = false)
         {
             bool previous = edgeDistance;
+            bool previousInsulation = insulationEdge;
+            int previousObjectMode = objectMode;
             edgeDistance = useEdges;
-            // A remembered pipes-only scope cannot execute the family-edge mode.
-            if (useEdges && objectMode == 0)
+            insulationEdge = useEdges && useInsulation;
+            if (insulationEdge && objectMode != 0 && objectMode != 4) objectMode = 0;
+            if (useEdges && savedType == null)
             {
                 try
                 {
                     var doc = data.Application.ActiveUIDocument?.Document;
-                    if (doc == null || Settings(doc, true) == null) { edgeDistance = previous; return Result.Cancelled; }
+                    if (doc == null || Settings(doc, true) == null) { edgeDistance = previous; insulationEdge = previousInsulation; objectMode = previousObjectMode; return Result.Cancelled; }
                 }
-                catch (Exception ex) { edgeDistance = previous; message = ex.Message; return Result.Failed; }
+                catch (Exception ex) { edgeDistance = previous; insulationEdge = previousInsulation; objectMode = previousObjectMode; message = ex.Message; return Result.Failed; }
             }
             return new CmdMepPositionDimension().Execute(data, ref message, elements);
         }
@@ -273,9 +284,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     var selected = PickTargets(ui, targetLink, new MixedFilter());
                     var pipes = selected.Where(e => new CurveFilter().AllowElement(e)).ToList();
                     var families = selected.OfType<FamilyInstance>().ToList();
-                    if (edgeDistance && pipes.Count > 0) TaskDialog.Show("邊距定位", $"已略過 {pipes.Count} 個管線物件：尚未支援管線切線邊距，未改用中心距。");
-                    var pipeResult = pipes.Count > 0 && !edgeDistance ? ExecuteAutomatic(doc, view, pipes, dimType, targetLink, ui) : Result.Cancelled;
-                    var familyResult = families.Count > 0 ? ExecuteFamilies(ui, dimType, families, targetLink) : Result.Cancelled;
+                    if (edgeDistance && insulationEdge && families.Count > 0) TaskDialog.Show("保溫外緣", $"已略過 {families.Count} 個族物件，保溫外緣僅處理具有模型保溫層的圓管。");
+                    var pipeResult = pipes.Count > 0 ? ExecuteAutomatic(doc, view, pipes, dimType, targetLink, ui) : Result.Cancelled;
+                    var familyResult = families.Count > 0 && !(edgeDistance && insulationEdge) ? ExecuteFamilies(ui, dimType, families, targetLink) : Result.Cancelled;
                     return pipeResult == Result.Succeeded || familyResult == Result.Succeeded ? Result.Succeeded : Result.Cancelled;
                 }
                 if (objectMode != 0) return ExecuteFamilies(ui, dimType, null, targetLink);
@@ -342,10 +353,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     if (planar.GetLength() < 1e-6 || Math.Abs(planar.Normalize().DotProduct(direction)) < 0.999999)
                     { notes.Add($"{element.Id}：方向不符或為立管，需另選基準。"); continue; }
                     double a = line.GetEndPoint(0).DotProduct(direction), b = line.GetEndPoint(1).DotProduct(direction);
-                    candidates.Add(new Item { Reference = TargetReference(new Reference(element), targetLink), Station = line.Evaluate(.5, true).DotProduct(measure),
+                    candidates.Add(new Item { SourceElement = element, Reference = TargetReference(new Reference(element), targetLink), Station = line.Evaluate(.5, true).DotProduct(measure),
                         Start = Math.Min(a,b), End = Math.Max(a,b), Id = element.Id.ToString() });
                 }
                 var groups = GroupRuns(candidates, (double)savedGap / 304.8);
+                if (edgeDistance) groups = groups.SelectMany(g => g.Select(i => new List<Item> { i })).ToList();
                 var existingSignatures = new HashSet<string>(StringComparer.Ordinal);
                 foreach (Dimension existing in new FilteredElementCollector(doc, view.Id).OfClass(typeof(Dimension)))
                 {
@@ -359,7 +371,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 double offset = (double)savedOffset * view.Scale / 304.8;
                 foreach (var group in groups)
                 {
-                    var items = group.Concat(new[] { datum }).OrderBy(i => i.Station).ToList();
+                    List<Item> measured;
+                    try { measured = edgeDistance ? group.Select(i => PipeEdgeItem(i, measure, normal, datum.Station, targetLink)).ToList() : group; }
+                    catch (Exception ex) { notes.Add($"管段 {group[0].Id}：{ex.Message}"); continue; }
+                    var items = measured.Concat(new[] { datum }).OrderBy(i => i.Station).ToList();
                     string ids = string.Join(", ", group.Select(i => i.Id));
                     if (items.Zip(items.Skip(1), (a,b) => b.Station-a.Station).Any(d => d < .5/304.8))
                     { notes.Add($"{ids}：中心重疊或基準重合，整組略過。"); continue; }
@@ -403,7 +418,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                                 var values = dim.Segments.Size > 0 ? dim.Segments.Cast<DimensionSegment>().Select(s => s.Value).ToList() : new List<double?> { dim.Value };
                                 var expected = items.Zip(items.Skip(1), (a,b) => b.Station-a.Station).ToList();
                                 if (values.Count != expected.Count || values.Where((v,i) => !v.HasValue || Math.Abs(v.Value-expected[i]) > .5/304.8).Any())
-                                    throw new InvalidOperationException("尺寸值與中心距不符。");
+                                    throw new InvalidOperationException(edgeDistance ? "Revit 未接受外緣切線參照，尺寸值與實際外緣淨距不符，已回復。" : "尺寸值與中心距不符。");
+                                LabelPipeEdgeDimension(dim);
                                 string layoutWarning = ArrangeDimensionText(doc, view, dim);
                                 if (layoutWarning != null) notes.Add(layoutWarning);
                                 if (tx.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("Revit 拒絕提交。");
@@ -445,6 +461,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     {
         public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
             => CmdMepPositionDimension.ExecuteMode(data, ref message, elements, true);
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    public class CmdMepPositionInsulation : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
+            => CmdMepPositionDimension.ExecuteMode(data, ref message, elements, true, true);
     }
 
     [Transaction(TransactionMode.Manual)]

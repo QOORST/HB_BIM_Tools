@@ -6,20 +6,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 {
     public partial class CmdMepPositionDimension
     {
-        private static double AlternatingOffset(int index, bool vertical, double distance)
-            => (index % 2 == 0 ? 1 : -1) * (vertical ? -1 : 1) * distance;
-
-        private static bool[] OverlappingLabels(double[] along, double[] across, double[] widths, double[] heights, double gap)
-        {
-            var result = new bool[along.Length];
-            for (int i=0;i<along.Length;i++)
-            for (int j=i+1;j<along.Length;j++)
-                if (Math.Abs(along[i]-along[j]) < (widths[i]+widths[j])/2+gap &&
-                    Math.Abs(across[i]-across[j]) < (heights[i]+heights[j])/2+gap)
-                    result[i]=result[j]=true;
-            return result;
-        }
-
         private static string ArrangeDimensionText(Document doc, View view, Dimension dimension)
         {
             if (!staggerText || dimension.Segments.Size < 2) return null;
@@ -41,7 +27,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     // Screen order is stable even when reference or dimension line direction reverses.
                     segments = segments.OrderBy(s => s.Origin.DotProduct(ordering) * (vertical ? -1 : 1)).ToList();
                     var values = segments.Select(s => s.Value).ToList();
-                    double distance = (double)textOffset * view.Scale / 304.8;
+                    double modelPerPaperMm = view.Scale / 304.8;
                     var type = doc.GetElement(dimension.GetTypeId());
                     double size = type.get_Parameter(BuiltInParameter.TEXT_SIZE)?.AsDouble() ?? 0;
                     if (size <= 0) return $"尺寸 {dimension.Id}：無法讀取文字尺寸，保留原排版。";
@@ -59,34 +45,46 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                             if (!string.IsNullOrEmpty(segments[i].Above)) label = segments[i].Above + "\n" + label;
                             if (!string.IsNullOrEmpty(segments[i].Below)) label += "\n" + segments[i].Below;
                             var bounds = graphics.MeasureString(label,font);
-                            widths[i] = bounds.Width/100 * size * view.Scale;
-                            heights[i] = bounds.Height/100 * size * view.Scale;
+                            widths[i] = bounds.Width/100 * size * 304.8;
+                            heights[i] = bounds.Height/100 * size * 304.8;
                         }
                     }
                     var original = segments.Select(s=>s.TextPosition).ToList();
                     if (original.Any(p=>p==null)) return $"尺寸 {dimension.Id}：無可用文字位置，保留原排版。";
-                    double gap = .3 * view.Scale / 304.8;
-                    var overlapping = OverlappingLabels(original.Select(p=>p.DotProduct(direction)).ToArray(),
-                        original.Select(p=>p.DotProduct(side)).ToArray(),widths,heights,gap);
-                    if (!overlapping.Any(x=>x)) return null;
-                    distance = Math.Max(distance, heights.Max()/2 + gap);
+                    XYZ anchor = line.GetEndPoint(0);
+                    var boxes = original.Select((p, i) => new MepTextBox {
+                        Along = (p - anchor).DotProduct(direction) / modelPerPaperMm,
+                        Across = (p - anchor).DotProduct(side) / modelPerPaperMm,
+                        Width = widths[i], Height = heights[i]
+                    }).ToList();
+                    var plan = MepDimensionTextPolicy.Plan(boxes, (double)textMaximumMove,
+                        lineClearance: (double)textLineClearance);
+                    string warning = plan.UnresolvedGroups == 0 ? null :
+                        $"尺寸 {dimension.Id}：{plan.UnresolvedGroups} 組文字未能在最大位移 {textMaximumMove:0.#} mm 內兼顧避讓與尺寸線淨距 {textLineClearance:0.#} mm（皆為紙面），已保留該組原位，請人工調整。";
+                    if (!boxes.Where((b, i) => Math.Abs(plan.Across[i] - b.Across) > 1e-7).Any()) return warning;
                     layout.Start();
-                    int moved = 0;
                     for (int i = 0; i < segments.Count; i++)
-                        if (overlapping[i])
-                        {
-                            // Preserve the along-line position and leave every non-overlapping label untouched.
-                            double target = segments[i].Origin.DotProduct(side) + AlternatingOffset(moved++, vertical, distance);
-                            segments[i].TextPosition = original[i] + side * (target-original[i].DotProduct(side));
-                        }
+                        if (Math.Abs(plan.Across[i] - boxes[i].Across) > 1e-7)
+                            segments[i].TextPosition = original[i] + side *
+                                ((plan.Across[i] - boxes[i].Across) * modelPerPaperMm);
                     doc.Regenerate();
                     if (!dimension.AreReferencesAvailable || segments.Where((s,i) => s.Value != values[i]).Any())
                         throw new InvalidOperationException("文字移位後參考或量測值改變。");
+                    // Check actual Revit positions before committing, including labels we left untouched.
+                    for (int i = 0; i < segments.Count; i++)
+                    {
+                        var position = segments[i].TextPosition;
+                        var expected = original[i] + side * ((plan.Across[i] - boxes[i].Across) * modelPerPaperMm);
+                        if (position == null || position.DistanceTo(expected) / modelPerPaperMm > .01 ||
+                            position.DistanceTo(original[i]) / modelPerPaperMm > (double)textMaximumMove + 1e-7)
+                            throw new InvalidOperationException("實際文字位置與排版計畫不符或超過最大位移。");
+                        if (MepDimensionTextPolicy.ClearsDimensionLine(boxes[i], plan.Across[i], (double)textLineClearance) &&
+                            !MepDimensionTextPolicy.ClearsDimensionLine(boxes[i],
+                                (position - anchor).DotProduct(side) / modelPerPaperMm, (double)textLineClearance))
+                            throw new InvalidOperationException("實際文字位置未達尺寸線最小淨距。");
+                    }
                     if (layout.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("文字排版未提交。");
-                    var positions = segments.Select(s=>s.TextPosition).ToList();
-                    bool remaining = OverlappingLabels(positions.Select(p=>p.DotProduct(direction)).ToArray(),
-                        positions.Select(p=>p.DotProduct(side)).ToArray(),widths,heights,gap).Any(x=>x);
-                    return remaining ? $"尺寸 {dimension.Id}：局部交錯後仍可能重疊，請檢查文字。" : null;
+                    return warning;
                 }
                 catch (Exception ex)
                 {

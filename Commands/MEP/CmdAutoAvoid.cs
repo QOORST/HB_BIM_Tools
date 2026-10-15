@@ -17,10 +17,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
     /// 管線避讓工具命令
     /// </summary>
     [Transaction(TransactionMode.Manual)]
-    public class CmdAutoAvoid : IExternalCommand
+    public partial class CmdAutoAvoid : IExternalCommand
     {
         private static double _lastBendAngle = 45.0;
         private static double _lastOffsetMm = 500.0;
+        private static double _lastClearanceMm = 50.0;
         private static DirectionMode _lastDirection = DirectionMode.Up;
         private static bool _lastRepeatMode = true;
         private UIDocument _uidoc;
@@ -28,6 +29,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            _windowHandle = commandData.Application.MainWindowHandle;
             _uidoc = commandData.Application.ActiveUIDocument;
             if (_uidoc == null)
             {
@@ -93,61 +95,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                         Logger.Info($"起點: ({point1.X * GeometryUtils.FT_TO_MM:F0}, {point1.Y * GeometryUtils.FT_TO_MM:F0}, {point1.Z * GeometryUtils.FT_TO_MM:F0})");
                         Logger.Info($"終點: ({point2.X * GeometryUtils.FT_TO_MM:F0}, {point2.Y * GeometryUtils.FT_TO_MM:F0}, {point2.Z * GeometryUtils.FT_TO_MM:F0})");
 
-                        // 步驟 4：執行避讓
-                        foreach (var targetElement in targetElements)
-                        {
-                            ElementId targetId = targetElement.Id;
-
-                            using (var trans = new Transaction(_doc, $"避讓管線-{targetId}"))
-                            {
-                                trans.Start();
-                                FailureHandlingOptions failureOptions = trans.GetFailureHandlingOptions();
-                                failureOptions.SetFailuresPreprocessor(new RollbackOnFailure());
-                                failureOptions.SetClearAfterRollback(true);
-                                failureOptions.SetForcedModalHandling(true);
-                                trans.SetFailureHandlingOptions(failureOptions);
-                                try
-                                {
-                                    Result bendResult = ExecuteBendByPoints(targetElement, point1, point2, opt);
-
-                                    if (bendResult == Result.Succeeded)
-                                    {
-                                        TransactionStatus status = trans.Commit();
-                                        if (status == TransactionStatus.Committed)
-                                        {
-                                            successCount++;
-                                            Logger.Info($"元素 {targetId} 避讓成功");
-                                        }
-                                        else
-                                        {
-                                            failCount++;
-                                            Logger.Warning($"元素 {targetId} 避讓未提交：{status}");
-                                            // Pending failure processing must finish before any new transaction.
-                                            if (status == TransactionStatus.Pending)
-                                            {
-                                                transactionPending = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    else
-                                    {
-                                        trans.RollBack();
-                                        failCount++;
-                                        Logger.Warning($"元素 {targetId} 避讓失敗");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    if (trans.HasStarted() && !trans.HasEnded())
-                                    {
-                                        trans.RollBack();
-                                    }
-                                    failCount++;
-                                    Logger.Error($"元素 {targetId} 避讓過程發生錯誤", ex);
-                                }
-                            }
-                        }
+                        int kept = PreviewAvoidanceBatch(targetElements, point1, point2, opt, ref transactionPending, out bool failed);
+                        successCount += kept;
+                        if (failed) failCount += targetElements.Count;
+                        if (kept == 0 && !failed) break;
                     }
                     catch (Autodesk.Revit.Exceptions.OperationCanceledException)
                     {
@@ -158,6 +109,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     catch (Exception ex)
                     {
                         Logger.Error("處理過程發生錯誤", ex);
+                        TaskDialog.Show("避讓未完成", ex.Message);
                         break;
                     }
                 }
@@ -199,135 +151,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return accessor.GetFailureMessages().Count == 0
                     ? FailureProcessingResult.Continue
                     : FailureProcessingResult.ProceedWithRollBack;
-            }
-        }
-
-        /// <summary>
-        /// 根據兩點執行避讓（從 TestCommand 移植）
-        /// </summary>
-        private Result ExecuteBendByPoints(Element target, XYZ point1, XYZ point2, AvoidOptions opt)
-        {
-            ElementId targetId = target.Id;
-
-            try
-            {
-                // 獲取元素位置曲線
-                var lc = target.Location as LocationCurve;
-                if (lc == null)
-                {
-                    TaskDialog.Show("錯誤", "選擇的元素沒有位置曲線");
-                    return Result.Failed;
-                }
-
-                Line pipeLine = lc.Curve as Line;
-                if (pipeLine == null)
-                {
-                    TaskDialog.Show("錯誤", "僅支援直線管線");
-                    return Result.Failed;
-                }
-
-                XYZ startpoint = pipeLine.GetEndPoint(0);
-                XYZ endpoint = pipeLine.GetEndPoint(1);
-                XYZ dir = (endpoint - startpoint).Normalize();
-
-                // 投影點到元素上
-                XYZ point1project = pipeLine.Project(point1).XYZPoint;
-                XYZ point2project = pipeLine.Project(point2).XYZPoint;
-
-                // 確保 point1 在 point2 前
-                double t1 = (point1project - startpoint).DotProduct(dir);
-                double t2 = (point2project - startpoint).DotProduct(dir);
-                if (t1 > t2)
-                {
-                    var temp = point1project;
-                    point1project = point2project;
-                    point2project = temp;
-                }
-
-                Logger.Info($"投影起點: ({point1project.X * GeometryUtils.FT_TO_MM:F0}, {point1project.Y * GeometryUtils.FT_TO_MM:F0}, {point1project.Z * GeometryUtils.FT_TO_MM:F0})");
-                Logger.Info($"投影終點: ({point2project.X * GeometryUtils.FT_TO_MM:F0}, {point2project.Y * GeometryUtils.FT_TO_MM:F0}, {point2project.Z * GeometryUtils.FT_TO_MM:F0})");
-
-                // 計算避讓偏移量
-                double offsetvalue = opt.ExtraOffsetMm * GeometryUtils.MM_TO_FT;
-
-                // 決定方向（向上或向下避讓）
-                bool flipUp = opt.Direction == DirectionMode.Up ||
-                              (opt.Direction == DirectionMode.Auto) ||
-                              opt.Direction == DirectionMode.VerticalFlip;
-
-                if (opt.Direction == DirectionMode.Down)
-                    flipUp = false;
-
-                Logger.Info($"避讓偏移量: {offsetvalue * GeometryUtils.FT_TO_MM:F0}mm, 方向: {(flipUp ? "向上" : "向下")}");
-
-                // 決定彎角計算水平偏移（0度時水平偏移為無限大，需要特殊處理）
-                double angleRad = opt.BendAngle * Math.PI / 180.0;
-                double horizontalOffset = Math.Abs(offsetvalue / Math.Tan(angleRad));
-
-                // 防止無限大或 NaN 值
-                if (double.IsInfinity(horizontalOffset) || double.IsNaN(horizontalOffset))
-                {
-                    horizontalOffset = 0;
-                }
-
-                Logger.Info($"彎角={opt.BendAngle}度, 水平偏移={horizontalOffset * GeometryUtils.FT_TO_MM:F0}mm");
-
-                // 構建 6 點路徑（考慮彎角）
-                XYZ p1 = startpoint;
-
-                // p2 在點1附近
-                XYZ p2 = point1project;
-
-                // p3 = p2 向上/向下移動 + 向前延伸（根據彎角）
-                XYZ verticalOffset = new XYZ(0, 0, flipUp ? offsetvalue : -offsetvalue);
-                XYZ horizontalExtension = dir * horizontalOffset; // 管線方向延伸（根據彎角）
-                XYZ p3 = point1project + verticalOffset + horizontalExtension;
-
-                // p4 = p5 向上/向下移動 + 向後延伸（根據彎角）
-                XYZ p4 = point2project + verticalOffset - horizontalExtension; // 點2處向後延伸
-                // p5 在點2附近
-                XYZ p5 = point2project;
-
-                XYZ p6 = endpoint;
-
-                var path = new List<XYZ> { p1, p2, p3, p4, p5, p6 };
-
-                Logger.Info($"生成路徑: {path.Count} 個點");
-                for (int i = 0; i < path.Count; i++)
-                {
-                    Logger.Debug($"  點{i}: ({path[i].X * GeometryUtils.FT_TO_MM:F0}, {path[i].Y * GeometryUtils.FT_TO_MM:F0}, {path[i].Z * GeometryUtils.FT_TO_MM:F0})");
-                }
-
-                // 構建 DetourPlan
-                var plan = new DetourPlan
-                {
-                    Path = path,
-                    UsedDirection = opt.Direction,
-                    OffsetFt = offsetvalue,
-                    IsValid = true
-                };
-
-                // 執行替換（注意：已在 Transaction 中，不需要再開啟）
-                bool success = RevitUtils.ReplaceWithDetour(_doc, target, plan, opt);
-                if (success)
-                {
-                    Logger.Info($"避讓執行成功 - 元素 Id={targetId}");
-                    return Result.Succeeded;
-                }
-                else
-                {
-                    Logger.Warning($"避讓執行失敗 - 元素 Id={targetId} - ReplaceWithDetour 返回 false");
-                    return Result.Failed;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"ExecuteBendByPoints 失敗 - 元素 Id={targetId}", ex);
-                TaskDialog.Show("路徑生成錯誤",
-                    $"元素 ID: {targetId}\n" +
-                    $"錯誤訊息：{ex.Message}\n\n" +
-                    $"詳細資訊：\n{Logger.GetLogFilePath()}");
-                throw; // 重新拋出異常以便上層處理
             }
         }
 
@@ -386,6 +209,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             using (var upRadio = new WinForms.RadioButton())
             using (var downRadio = new WinForms.RadioButton())
             using (var autoRadio = new WinForms.RadioButton())
+            using (var clearanceLabel = new WinForms.Label())
+            using (var clearanceBox = new WinForms.NumericUpDown())
             using (var repeatCheck = new WinForms.CheckBox())
             using (var flowPanel = new WinForms.Panel())
             using (var hintLabel = new WinForms.Label())
@@ -394,7 +219,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             using (var cancelButton = new WinForms.Button())
             {
                 form.Text = "HB_BIM 管線避讓";
-                form.ClientSize = new System.Drawing.Size(444, 430);
+                form.ClientSize = new System.Drawing.Size(444, 470);
                 form.StartPosition = WinForms.FormStartPosition.CenterScreen;
                 form.FormBorderStyle = WinForms.FormBorderStyle.FixedDialog;
                 form.MaximizeBox = false;
@@ -429,7 +254,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 settingsGroup.Left = 18;
                 settingsGroup.Top = 86;
                 settingsGroup.Width = 408;
-                settingsGroup.Height = 156;
+                settingsGroup.Height = 196;
                 settingsGroup.BackColor = System.Drawing.Color.White;
                 settingsGroup.ForeColor = System.Drawing.Color.FromArgb(45, 55, 72);
 
@@ -514,39 +339,47 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 downRadio.Width = 70;
                 downRadio.Checked = _lastDirection == DirectionMode.Down;
 
-                autoRadio.Text = "自動";
+                autoRadio.Text = "比較上下";
                 autoRadio.Left = 270;
                 autoRadio.Top = 108;
-                autoRadio.Width = 70;
+                autoRadio.Width = 100;
                 autoRadio.Checked = _lastDirection == DirectionMode.Auto;
+                clearanceLabel.Text = "要求淨距 mm";
+                clearanceLabel.SetBounds(18, 148, 90, 22);
+                clearanceBox.SetBounds(110, 144, 100, 28);
+                clearanceBox.Minimum = 0; clearanceBox.Maximum = 1000;
+                clearanceBox.Value = (decimal)_lastClearanceMm;
+                clearanceBox.Increment = 10;
+                settingsGroup.Controls.Add(clearanceLabel);
+                settingsGroup.Controls.Add(clearanceBox);
 
                 repeatCheck.Text = "連續模式：完成後繼續下一組避讓";
                 repeatCheck.Left = 128;
-                repeatCheck.Top = 252;
+                repeatCheck.Top = 292;
                 repeatCheck.Checked = _lastRepeatMode;
                 repeatCheck.Width = 285;
                 repeatCheck.Height = 24;
                 repeatCheck.ForeColor = System.Drawing.Color.FromArgb(45, 55, 72);
 
                 flowPanel.Left = 18;
-                flowPanel.Top = 288;
+                flowPanel.Top = 328;
                 flowPanel.Width = 408;
                 flowPanel.Height = 38;
                 flowPanel.BackColor = System.Drawing.Color.FromArgb(232, 244, 253);
 
-                hintLabel.Text = "開始後流程：選管線 → 點起點 → 點終點";
+                hintLabel.Text = "選管線 → 點起終點 → 預覽／複查 → 確認";
                 hintLabel.Left = 14;
                 hintLabel.Top = 10;
                 hintLabel.Width = 380;
                 hintLabel.ForeColor = System.Drawing.Color.FromArgb(43, 108, 176);
 
                 actionPanel.Left = 0;
-                actionPanel.Top = 374;
+                actionPanel.Top = 414;
                 actionPanel.Width = 444;
                 actionPanel.Height = 44;
                 actionPanel.BackColor = System.Drawing.Color.White;
 
-                okButton.Text = "開始避讓";
+                okButton.Text = "開始預覽";
                 okButton.Left = 236;
                 okButton.Top = 7;
                 okButton.Width = 96;
@@ -598,6 +431,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                 options.BendAngle = double.Parse(angleBox.SelectedItem?.ToString() ?? "45", System.Globalization.CultureInfo.InvariantCulture);
                 options.ExtraOffsetMm = (double)offsetBox.Value;
+                options.ClearanceMm = (double)clearanceBox.Value;
+                _lastClearanceMm = options.ClearanceMm;
                 options.Direction = downRadio.Checked
                     ? DirectionMode.Down
                     : autoRadio.Checked
