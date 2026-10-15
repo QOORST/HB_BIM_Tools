@@ -426,7 +426,6 @@ namespace YD_RevitTools.LicenseManager
                 smartLegendData.ToolTip = "依構件型別建立、預覽及更新圖例";
                 smartLegendData.LongDescription = "選取模型構件或讀取目前視圖，以既有圖例範本建立型別圖例。可設定文字欄位與紙面尺寸、預覽差異並配置圖紙；保留人工內容與位置。";
                 SetButtonIcon(smartLegendData, "model_data_manager");
-                autoDimensionPulldown.AddPushButton(smartLegendData);
 
                 PushButtonData autoTagHorizontalData = new PushButtonData(
                     "AutoTagHorizontal",
@@ -470,6 +469,7 @@ namespace YD_RevitTools.LicenseManager
                 _dimensionMenu.AddSeparator();
                 _dimensionMenu.AddPushButton(dimensionSettings);
                 autoDimensionPulldown.AddPushButton(roomContentData);
+                autoDimensionPulldown.AddPushButton(smartLegendData);
                 autoDimensionPulldown.AddSeparator();
                 var selectedDimensions = new PushButtonData("AutoDimensionSelectedOnly", "自動標註（僅選取）", assemblyPath,
                     "YDBIM.AutoDimension.App.AutoDimensionSelectionCommand");
