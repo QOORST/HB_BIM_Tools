@@ -25,6 +25,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private sealed class BeamMatch
         {
             internal BeamSide Side;
+            internal XYZ SectionPoint;
             internal double Station, Distance, Section, Overlap, HeightGap;
         }
         private sealed class MatchDiagnostics
@@ -46,13 +47,38 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             foreach (var match in matches.OrderByDescending(m=>m.Overlap).ThenBy(m=>Math.Abs(m.Section-preferred))
                 .ThenBy(m=>m.Side.Id,StringComparer.Ordinal))
             {
-                bool samePlane = representatives.Any(r => r.Side.Id == match.Side.Id &&
-                    r.Side.Reference.ElementId == match.Side.Reference.ElementId &&
-                    r.Side.Normal.DotProduct(match.Side.Normal) > .999999 &&
-                    Math.Abs((r.Side.Origin-match.Side.Origin).DotProduct(match.Side.Normal)) <= .5/304.8);
+                bool samePlane = representatives.Any(r => SameProjectedBeamBoundary(r, match, viewNormal));
                 if (!samePlane) representatives.Add(match);
             }
             return representatives.OrderBy(m=>m.Distance).ToList();
+        }
+
+        private static bool SameProjectedBeamBoundary(BeamMatch a, BeamMatch b, XYZ viewNormal)
+        {
+#if REVIT2022 || REVIT2023
+            // Older APIs cannot collect linked elements using the host view's display settings.
+            if ((a.Side.Reference.LinkedElementId != ElementId.InvalidElementId || b.Side.Reference.LinkedElementId != ElementId.InvalidElementId) &&
+                (a.Side.Id != b.Side.Id || a.Side.Reference.ElementId != b.Side.Reference.ElementId)) return false;
+#endif
+            if (a.Side.Normal.DotProduct(b.Side.Normal) <= .999999) return false;
+            if (Math.Abs((a.Side.Origin-b.Side.Origin).DotProduct(b.Side.Normal)) > .5/304.8) return false;
+            XYZ along = viewNormal.CrossProduct(b.Side.Normal).Normalize();
+            // Different beam IDs are equivalent only where both faces cover the dimension section.
+            double lo = Math.Max(a.Side.Vertices.Min(p=>p.DotProduct(along)), b.Side.Vertices.Min(p=>p.DotProduct(along)));
+            double hi = Math.Min(a.Side.Vertices.Max(p=>p.DotProduct(along)), b.Side.Vertices.Max(p=>p.DotProduct(along)));
+            bool Covers(XYZ point) => point != null && point.DotProduct(along) >= lo && point.DotProduct(along) <= hi;
+            return hi-lo > .5/304.8 && Covers(a.SectionPoint) && Covers(b.SectionPoint);
+        }
+
+        private static FilteredElementCollector VisibleBeamCollector(Document doc, View view, RevitLinkInstance link)
+        {
+            if (link == null) return new FilteredElementCollector(doc, view.Id);
+            if (link.IsHidden(view)) throw new InvalidOperationException("定位基準連結在目前視圖已隱藏。");
+#if REVIT2022 || REVIT2023
+            return new FilteredElementCollector(link.GetLinkDocument());
+#else
+            return new FilteredElementCollector(doc, view.Id, link.Id);
+#endif
         }
 
         private static void ReadSides(GeometryElement geometry, Transform transform, XYZ beamDirection,
@@ -113,7 +139,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var max = new XYZ(endpoints.Max(p => p.X) + expand, endpoints.Max(p => p.Y) + expand, endpoints.Max(p => p.Z) + expand);
             var sides = new List<BeamSide>();
             using (var outline = new Outline(min, max))
-            using (var collector = new FilteredElementCollector(source))
+            using (var collector = VisibleBeamCollector(doc, view, link))
             {
                 var beams = collector.OfClass(typeof(FamilyInstance)).OfCategory(BuiltInCategory.OST_StructuralFraming)
                     .WherePasses(new BoundingBoxIntersectsFilter(outline)).ToElements().Where(IsBeam);
@@ -177,7 +203,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                             .Select(p => p.Axis.GetEndPoint(0).DotProduct(direction));
                         var section = ChooseSection(start, end, spacing, occupied);
                         if (!section.HasValue) { rejected.Placement++; continue; }
-                        matches.Add(new BeamMatch { Side = side, Station = station, Distance = distance, Section = section.Value, Overlap=end-start,
+                        matches.Add(new BeamMatch { Side = side, Station = station, Distance = distance, Section = section.Value, SectionPoint = direction * section.Value, Overlap=end-start,
                             HeightGap=IntervalDistance(elevations.Min(),elevations.Max(),hmin,hmax) });
                     }
                     matches = RankMatches(matches,normal,(group.Max(i=>i.Start)+group.Min(i=>i.End))/2);
@@ -197,12 +223,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
             }
             if (plans.Count == 0) { TaskDialog.Show("自動梁側面定位", "沒有可建立的尺寸。\n" + string.Join("\n", notes)); return Result.Cancelled; }
-            var preview = new TaskDialog("自動梁側面定位｜確認") {
-                MainInstruction = $"預計建立 {plans.Count} 組尺寸",
-                MainContent = $"參考模型：{link?.Name ?? "本機模型"}\n略過／待確認：{notes.Count} 項\n尚未檢查既有文字避碰；高程搜尋差不是同樓層或穿梁檢核。",
-                ExpandedContent = string.Join("\n", plans.Select((p,i) => $"第 {i+1} 組：梁 {p.Beam} → 管段 {p.Pipes}").Concat(notes)),
-                CommonButtons = TaskDialogCommonButtons.Ok | TaskDialogCommonButtons.Cancel, DefaultButton = TaskDialogResult.Cancel };
-            if (preview.Show() != TaskDialogResult.Ok) return Result.Cancelled;
             int created = 0;
             using (var batch = new TransactionGroup(doc, "自動梁側面定位"))
             {

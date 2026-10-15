@@ -1,8 +1,8 @@
 {
   "version": "2.5.17",
   "downloadUrl": "",
-  "releaseNotes": "Test_20260922_BeamChoice：連結模型定位尺寸、梁面候選去重與高程優先、歧義基準手選。四版本編譯及18項候選與24項連結模擬測試通過；原生尺寸與安裝驗收待完成。套管族群依Revit版本分流，詳見README.txt。",
-  "releaseDate": "2026-09-22T00:00:00+08:00",
+  "releaseNotes": "Test_20261015_TypeJoinRules：自動接合新增同類別族群與類型精確配對規則，可指定梁優先、水溝被切割，修正既有接合順序。49項新增離線測試通過；原生模型與完整安裝驗收仍待完成，詳見README.txt。",
+  "releaseDate": "2026-10-15T00:00:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0"
 }

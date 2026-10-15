@@ -9,6 +9,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     {
         public static void Run(Document doc, IList<ClassifiedElement> scope, AutoJoinSettings settings, JoinEngineResult result)
         {
+            var rules = new TypeJoinResolver(doc, settings);
             foreach (var bucket in scope.Where(x => !x.Element.GroupId.Equals(ElementId.InvalidElementId))
                 .GroupBy(x => x.Element.GroupId))
             {
@@ -38,13 +39,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                             {
                                 first = items[i]; second = items[j];
                                 result.PairChecks++;
-                                if (!settings.AllowSameCategoryJoin && first.CategorySpec.Key == second.CategorySpec.Key) continue;
-                                if (!settings.AllowStructuralNonStructuralJoin && first.CategorySpec.IsStructural != second.CategorySpec.IsStructural) continue;
+                                if (!rules.TryResolve(first, second, out var winner)) continue;
                                 var a = first.Element; var b = second.Element;
                                 if (!a.GroupId.Equals(bucket.Key) || !b.GroupId.Equals(bucket.Key))
                                     throw new InvalidOperationException("群組成員關係改變");
                                 var ba = a.get_BoundingBox(null); var bb = b.get_BoundingBox(null);
-                                if (ba == null || bb == null || !JoinEngine.BoundingBoxesMatch(ba, bb, settings.CheckInDetail)) continue;
+                                if (ba == null || bb == null ||
+                                    (!JoinEngine.BoundingBoxesMatch(ba, bb, settings.CheckInDetail) &&
+                                     !JoinGeometryUtils.AreElementsJoined(doc, a, b))) continue;
                                 result.PairCandidates++;
                                 int pairJoined = 0, pairReordered = 0;
                                 using (var pair = new SubTransaction(doc))
@@ -57,20 +59,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                                             JoinGeometryUtils.JoinGeometry(doc, a, b);
                                             pairJoined = 1;
                                         }
-                                        int pa = settings.PriorityKeys.IndexOf(first.CategorySpec.Key);
-                                        int pb = settings.PriorityKeys.IndexOf(second.CategorySpec.Key);
-                                        if (pa >= 0 && pb >= 0 && pa != pb)
-                                        {
-                                            var winner = pa < pb ? a : b; var loser = pa < pb ? b : a;
-                                            if (!JoinGeometryUtils.IsCuttingElementInJoin(doc, winner, loser))
-                                            {
-                                                JoinGeometryUtils.SwitchJoinOrder(doc, winner, loser);
-                                                pairReordered = 1;
-                                            }
-                                        }
+                                        if (TypeJoinResolver.ApplyOrder(doc, a, b, winner)) pairReordered = 1;
                                     }
                                     catch (Exception ex) when (ex is Autodesk.Revit.Exceptions.ArgumentException ||
-                                        ex is Autodesk.Revit.Exceptions.InvalidOperationException)
+                                        ex is Autodesk.Revit.Exceptions.InvalidOperationException || ex is InvalidOperationException)
                                     {
                                         if (pair.RollBack() != TransactionStatus.RolledBack)
                                             throw new InvalidOperationException("配對回復失敗，停止此群組。", ex);
@@ -84,6 +76,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                                     }
                                     // Regeneration/commit failures are not ordinary pair rejections.
                                     doc.Regenerate();
+                                    if (!JoinGeometryUtils.AreElementsJoined(doc, a, b) ||
+                                        (winner != null && !JoinGeometryUtils.IsCuttingElementInJoin(doc, winner, winner.Id.Equals(a.Id) ? b : a)))
+                                        throw new InvalidOperationException("群組內接合順序檢核失敗，回復此群組。");
                                     if (pair.Commit() != TransactionStatus.Committed)
                                         throw new InvalidOperationException("配對交易未提交，回復此群組。 ");
                                 }

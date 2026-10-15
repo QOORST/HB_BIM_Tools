@@ -80,6 +80,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private static bool staggerText = true;
         private static decimal textOffset = 3;
         private static string openingFamily;
+        private static bool edgeDistance;
+        private static bool includeEdgeSize = true;
+        internal static bool UseEdgeDistance => edgeDistance;
+        private static int horizontalPlacement = 2;
+        private static int verticalPlacement;
 
         private static DimensionType Settings(Document doc, bool force)
         {
@@ -121,6 +126,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var objects = MepConnectionUi.Choices(new[] { "管線", "套管／管附件", "開孔族", "設備", "自動辨識" }
                 .Select((name,i) => new MepConnectionUi.Choice { Text = name, Value = i }));
             objects.SelectedIndex = objectMode;
+            var edgeMode = MepConnectionUi.Choices(new[] {
+                new MepConnectionUi.Choice { Text = "中心距", Value = false },
+                new MepConnectionUi.Choice { Text = "邊距（族群外緣）", Value = true } });
+            edgeMode.SelectedIndex = edgeDistance ? 1 : 0;
+            var edgeSize = new System.Windows.Forms.CheckBox { Text = "附加物件寬高", AutoSize = true, Checked = includeEdgeSize, Enabled = edgeDistance };
+            var horizontal = MepConnectionUi.Choices(new[] { "自動", "上", "下" }
+                .Select((name, i) => new MepConnectionUi.Choice { Text = name, Value = i }));
+            var vertical = MepConnectionUi.Choices(new[] { "自動", "左", "右" }
+                .Select((name, i) => new MepConnectionUi.Choice { Text = name, Value = i }));
+            horizontal.SelectedIndex = horizontalPlacement;
+            vertical.SelectedIndex = verticalPlacement;
+            horizontal.Enabled = vertical.Enabled = edgeDistance;
+            edgeMode.SelectedIndexChanged += (s,e) =>
+                edgeSize.Enabled = horizontal.Enabled = vertical.Enabled = edgeMode.SelectedIndex == 1;
             Func<Document, List<MepConnectionUi.Choice>> collectOpenings = model => model == null ? new List<MepConnectionUi.Choice>() : new FilteredElementCollector(model).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
                 .Where(s => s.Category != null && (s.Category.Id == new ElementId(BuiltInCategory.OST_GenericModel) || s.Category.Id == new ElementId(BuiltInCategory.OST_PipeAccessory)))
                 .Select(s => s.Family).GroupBy(f => f.UniqueId).Select(g => g.First()).OrderBy(f => f.Name)
@@ -140,16 +159,18 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             objects.SelectedIndexChanged += (s,e) => objectChanged(); objectChanged();
             Action enable = () => { bool on = mode.SelectedIndex == 0; sourceBox.Enabled = distance.Enabled = height.Enabled = expanded.Enabled = on; };
             mode.SelectedIndexChanged += (s,e) => enable(); enable();
-            using (var form = MepConnectionUi.Form("HB_BIM｜管排定位設定", "尺寸類型", typeBox,
+            using (var form = MepConnectionUi.Form("HB_BIM｜管線/設備 定位尺寸設定", "尺寸類型", typeBox,
                 "標註對象來源", objectSourceBox, "標註物件", objects, "開孔族", openingBox,
+                "定位方式", edgeMode, "物件尺寸", edgeSize,
+                "水平尺寸位置", horizontal, "垂直尺寸位置", vertical, "尺寸紙面偏移 (mm)", offset,
                 "基準模式", mode, "定位基準來源", sourceBox, "搜尋距離 (mm)", distance,
                 "文字排列", stagger, "擴大上限 (mm)", expanded, "高程搜尋差 (mm)", height,
-                "尺寸線間距 (mm)", offset, "分組最大間距 (mm)", gap, "文字紙面偏移 (mm)", textGap))
+                "分組最大間距 (mm)", gap, "文字紙面偏移 (mm)", textGap))
             {
                 form.Width = 650;
                 ((System.Windows.Forms.Button)form.AcceptButton).Text = "套用設定";
                 form.Height = Math.Min(560, System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position).WorkingArea.Height - 40);
-                MepConnectionUi.CollapseAdvanced(form, 8);
+                MepConnectionUi.CollapseAdvanced(form, 12);
                 if (form.ShowDialog() != System.Windows.Forms.DialogResult.OK) return null;
                 if (objectSourceBox.SelectedItem == null)
                     throw new InvalidOperationException("標註對象連結未載入，請明確指定來源，不會自動改用本機。");
@@ -158,6 +179,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 if (objects.SelectedIndex == 2 && openingBox.SelectedItem == null)
                     throw new InvalidOperationException("請指定代表開孔的族，避免將一般模型全部視為開孔。");
                 if (expanded.Value < distance.Value) throw new InvalidOperationException("擴大上限不得小於搜尋距離；兩者相同表示不擴大。");
+                if (edgeMode.SelectedIndex == 1 && objects.SelectedIndex == 0)
+                    throw new InvalidOperationException("邊距目前適用具有效外緣參考的開孔族、套管／管附件及設備；管線切線邊距尚未支援。請選擇對應標註物件，或改用中心距。");
+                edgeDistance = edgeMode.SelectedIndex == 1;
+                includeEdgeSize = edgeSize.Checked;
+                horizontalPlacement = horizontal.SelectedIndex;
+                verticalPlacement = vertical.SelectedIndex;
                 current = (DimensionType)((MepConnectionUi.Choice)typeBox.SelectedItem).Value;
                 savedType = current.UniqueId; savedOffset = offset.Value; savedGap = gap.Value;
                 automaticBeam = mode.SelectedIndex == 0;
@@ -177,7 +204,24 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var doc = data.Application.ActiveUIDocument?.Document;
             if (doc == null) return Result.Cancelled;
             try { return Settings(doc, true) == null ? Result.Cancelled : Result.Succeeded; }
-            catch (Exception ex) { TaskDialog.Show("管排定位設定", ex.Message); return Result.Cancelled; }
+            catch (Exception ex) { TaskDialog.Show("管線/設備 定位尺寸設定", ex.Message); return Result.Cancelled; }
+        }
+
+        internal static Result ExecuteMode(ExternalCommandData data, ref string message, ElementSet elements, bool useEdges)
+        {
+            bool previous = edgeDistance;
+            edgeDistance = useEdges;
+            // A remembered pipes-only scope cannot execute the family-edge mode.
+            if (useEdges && objectMode == 0)
+            {
+                try
+                {
+                    var doc = data.Application.ActiveUIDocument?.Document;
+                    if (doc == null || Settings(doc, true) == null) { edgeDistance = previous; return Result.Cancelled; }
+                }
+                catch (Exception ex) { edgeDistance = previous; message = ex.Message; return Result.Failed; }
+            }
+            return new CmdMepPositionDimension().Execute(data, ref message, elements);
         }
 
         private static string Signature(Document doc, IEnumerable<Reference> refs)
@@ -229,7 +273,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     var selected = PickTargets(ui, targetLink, new MixedFilter());
                     var pipes = selected.Where(e => new CurveFilter().AllowElement(e)).ToList();
                     var families = selected.OfType<FamilyInstance>().ToList();
-                    var pipeResult = pipes.Count > 0 ? ExecuteAutomatic(doc, view, pipes, dimType, targetLink, ui) : Result.Cancelled;
+                    if (edgeDistance && pipes.Count > 0) TaskDialog.Show("邊距定位", $"已略過 {pipes.Count} 個管線物件：尚未支援管線切線邊距，未改用中心距。");
+                    var pipeResult = pipes.Count > 0 && !edgeDistance ? ExecuteAutomatic(doc, view, pipes, dimType, targetLink, ui) : Result.Cancelled;
                     var familyResult = families.Count > 0 ? ExecuteFamilies(ui, dimType, families, targetLink) : Result.Cancelled;
                     return pipeResult == Result.Succeeded || familyResult == Result.Succeeded ? Result.Succeeded : Result.Cancelled;
                 }
@@ -336,13 +381,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
                 if (plans.Count == 0)
                 { TaskDialog.Show("管排批次定位", "沒有可建立的尺寸。\n" + string.Join("\n", notes)); return Result.Cancelled; }
-                var preview = new TaskDialog("管排批次定位｜確認") {
-                    MainInstruction = $"預計建立 {plans.Count} 組尺寸",
-                    MainContent = $"基準：{host.Name}（{(linkInstance == null ? "本機" : "連結模型")}）\n位置：管排共同直線區段內\n尺寸線紙面間距：{savedOffset} mm\n略過／待確認：{notes.Count} 項\n目前未檢查與既有文字或圖元的碰撞。",
-                    ExpandedContent = string.Join("\n", plans.Select((p,i) => $"第 {i+1} 組：" + string.Join(", ", p.Where(x => x != datum).Select(x => x.Id))).Concat(notes)),
-                    CommonButtons = TaskDialogCommonButtons.Ok | TaskDialogCommonButtons.Cancel,
-                    DefaultButton = TaskDialogResult.Cancel };
-                if (preview.Show() != TaskDialogResult.Ok) return Result.Cancelled;
                 int created = 0;
                 using (var batch = new TransactionGroup(doc, "管排批次施工定位"))
                 {
@@ -385,7 +423,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
             catch(Autodesk.Revit.Exceptions.OperationCanceledException){return Result.Cancelled;}
             catch(System.OperationCanceledException){return Result.Cancelled;}
-            catch(Exception ex){TaskDialog.Show("管線定位尺寸",ex.Message);return Result.Cancelled;}
+            catch(Exception ex){TaskDialog.Show("管線/設備 定位尺寸",ex.Message);return Result.Cancelled;}
         }
         private sealed class RollBackErrors : IFailuresPreprocessor
         {
@@ -393,6 +431,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 => accessor.GetFailureMessages().Any(f => f.GetSeverity() == FailureSeverity.Error)
                     ? FailureProcessingResult.ProceedWithRollBack : FailureProcessingResult.Continue;
         }
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    public class CmdMepPositionCenter : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
+            => CmdMepPositionDimension.ExecuteMode(data, ref message, elements, false);
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    public class CmdMepPositionEdge : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
+            => CmdMepPositionDimension.ExecuteMode(data, ref message, elements, true);
     }
 
     [Transaction(TransactionMode.Manual)]

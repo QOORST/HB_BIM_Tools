@@ -103,9 +103,20 @@ foreach ($version in $supportedVersions) {
     $binDir = Join-Path $BuildRoot "$version\main"
     $nativeSqlite = Join-Path $binDir 'runtimes\win-x64\native\e_sqlite3.dll'
     if (-not (Test-Path -LiteralPath $nativeSqlite -PathType Leaf)) {
+        $nativeSqlite = Join-Path $binDir 'e_sqlite3.dll'
+    }
+    if (-not (Test-Path -LiteralPath $nativeSqlite -PathType Leaf)) {
         throw "Required x64 SQLite runtime missing: $nativeSqlite"
     }
-    Copy-Item -LiteralPath $nativeSqlite -Destination (Join-Path $binDir 'e_sqlite3.dll') -Force
+    $bytes = [IO.File]::ReadAllBytes($nativeSqlite)
+    $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+    if ([BitConverter]::ToUInt32($bytes, $pe) -ne 0x4550 -or [BitConverter]::ToUInt16($bytes, $pe + 4) -ne 0x8664) {
+        throw "SQLite runtime is not an x64 PE binary: $nativeSqlite"
+    }
+    $nativeDestination = Join-Path $binDir 'e_sqlite3.dll'
+    if ($nativeSqlite -ne $nativeDestination) {
+        Copy-Item -LiteralPath $nativeSqlite -Destination $nativeDestination -Force
+    }
 }
 foreach ($dll in $dependencyDlls) {
     $basePath = Join-Path $baseBinDir $dll

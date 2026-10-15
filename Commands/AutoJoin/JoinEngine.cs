@@ -49,7 +49,7 @@ internal static class JoinEngine
 
         elements = ExcludeGroupMembers(elements, result);
         if (elements.Count < 2) return result;
-        var priority = BuildPriorityIndex(settings.PriorityKeys);
+        var rules = new TypeJoinResolver(doc, settings);
         var boxes = new Dictionary<Element, BoundingBoxXYZ>();
         var spatial = new JoinSpatialCursor(elements.Count, index => GetCachedBoundingBox(elements[index].Element, boxes));
 
@@ -71,37 +71,47 @@ internal static class JoinEngine
 
                 result.PairChecks++;
 
-                if (!settings.AllowSameCategoryJoin && a.CategorySpec.Key == b.CategorySpec.Key)
-                {
-                    continue;
-                }
-
-                if (!settings.AllowStructuralNonStructuralJoin && a.CategorySpec.IsStructural != b.CategorySpec.IsStructural)
-                {
-                    continue;
-                }
+                if (!rules.TryResolve(a, b, out var winner)) continue;
 
                 bboxA = GetCachedBoundingBox(a.Element, boxes);
                 var bboxB = GetCachedBoundingBox(b.Element, boxes);
-                if (bboxA == null || bboxB == null || !BoundingBoxesMatch(bboxA, bboxB, settings.CheckInDetail))
+                if (bboxA == null || bboxB == null ||
+                    (!BoundingBoxesMatch(bboxA, bboxB, settings.CheckInDetail) &&
+                     !JoinGeometryUtils.AreElementsJoined(doc, a.Element, b.Element)))
                 {
                     continue;
                 }
 
                 result.PairCandidates++;
 
+                using var pair = new SubTransaction(doc);
                 try
                 {
+                    pair.Start();
+                    bool joined = false;
                     if (!JoinGeometryUtils.AreElementsJoined(doc, a.Element, b.Element))
                     {
                         JoinGeometryUtils.JoinGeometry(doc, a.Element, b.Element);
-                        result.Joined++;
+                        joined = true;
                     }
-
-                    EnsureJoinOrder(doc, a, b, priority, result);
+                    bool reordered = TypeJoinResolver.ApplyOrder(doc, a.Element, b.Element, winner);
+                    doc.Regenerate();
+                    if (!JoinGeometryUtils.AreElementsJoined(doc, a.Element, b.Element) ||
+                        (winner != null && !JoinGeometryUtils.IsCuttingElementInJoin(doc, winner, winner.Id.Equals(a.Element.Id) ? b.Element : a.Element)))
+                        throw new InvalidOperationException("接合結果或切割順序未通過檢核。");
+                    if (pair.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("接合配對未成功提交。");
+                    if (joined) result.Joined++;
+                    if (reordered) result.Reordered++;
+                }
+                catch (Autodesk.Revit.Exceptions.RegenerationFailedException)
+                {
+                    if (pair.GetStatus() == TransactionStatus.Started) pair.RollBack();
+                    throw;
                 }
                 catch (Exception ex)
                 {
+                    if (pair.GetStatus() == TransactionStatus.Started && pair.RollBack() != TransactionStatus.RolledBack)
+                        throw new InvalidOperationException("接合配對回復失敗，已停止操作。", ex);
                     result.FailedOperations++;
                     AddFailureSample(result, a, b, ex);
                 }
@@ -127,6 +137,7 @@ internal static class JoinEngine
 
         elements = ExcludeGroupMembers(elements, result);
         if (elements.Count < 2) return result;
+        var rules = new TypeJoinResolver(doc, settings);
         using var transaction = new Transaction(doc, "Auto Unjoin");
         transaction.Start();
         var boxes = new Dictionary<Element, BoundingBoxXYZ>();
@@ -147,19 +158,13 @@ internal static class JoinEngine
 
                 result.PairChecks++;
 
-                if (!settings.AllowSameCategoryJoin && a.CategorySpec.Key == b.CategorySpec.Key)
-                {
-                    continue;
-                }
-
-                if (!settings.AllowStructuralNonStructuralJoin && a.CategorySpec.IsStructural != b.CategorySpec.IsStructural)
-                {
-                    continue;
-                }
+                if (!rules.TryResolve(a, b, out _)) continue;
 
                 bboxA = GetCachedBoundingBox(a.Element, boxes);
                 var bboxB = GetCachedBoundingBox(b.Element, boxes);
-                if (bboxA == null || bboxB == null || !BoundingBoxesMatch(bboxA, bboxB, settings.CheckInDetail))
+                if (bboxA == null || bboxB == null ||
+                    (!BoundingBoxesMatch(bboxA, bboxB, settings.CheckInDetail) &&
+                     !JoinGeometryUtils.AreElementsJoined(doc, a.Element, b.Element)))
                 {
                     continue;
                 }
@@ -210,49 +215,6 @@ internal static class JoinEngine
         var status = transaction.Commit();
         if (status != TransactionStatus.Committed)
             throw new InvalidOperationException($"接合交易未成功提交（{status}），本次操作數不可視為成功結果。請先處理 Revit 失敗訊息，再重新檢查模型。");
-    }
-
-    private static Dictionary<string, int> BuildPriorityIndex(IList<string> keys)
-    {
-        var index = new Dictionary<string, int>(StringComparer.Ordinal);
-        for (var i = 0; i < keys.Count; i++)
-        {
-            index[keys[i]] = i;
-        }
-
-        return index;
-    }
-
-    private static void EnsureJoinOrder(
-        Document doc,
-        ClassifiedElement a,
-        ClassifiedElement b,
-        Dictionary<string, int> priority,
-        JoinEngineResult result)
-    {
-        if (!priority.TryGetValue(a.CategorySpec.Key, out var indexA) ||
-            !priority.TryGetValue(b.CategorySpec.Key, out var indexB) ||
-            indexA == indexB)
-        {
-            return;
-        }
-
-        var winner = indexA < indexB ? a.Element : b.Element;
-        var loser = ReferenceEquals(winner, a.Element) ? b.Element : a.Element;
-
-        try
-        {
-            if (!JoinGeometryUtils.IsCuttingElementInJoin(doc, winner, loser))
-            {
-                JoinGeometryUtils.SwitchJoinOrder(doc, winner, loser);
-                result.Reordered++;
-            }
-        }
-        catch (Exception ex)
-        {
-            result.FailedOperations++;
-            AddFailureSample(result, a, b, ex);
-        }
     }
 
     private static BoundingBoxXYZ GetCachedBoundingBox(Element element, Dictionary<Element, BoundingBoxXYZ> boxes)

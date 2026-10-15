@@ -2215,6 +2215,32 @@ internal sealed class DimensionOptionsForm : Form
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 
+    public void ConfigureQuickScope(int count, bool wholeView = false)
+    {
+        if (_bubblesTab != null) _tabControl.TabPages.Remove(_bubblesTab);
+        if (_beamScope != null) { _beamScope.SelectedIndex = 0; _beamScope.Enabled = false; }
+        if (_initialMode == DimensionMode.BeamGrid)
+            foreach (var list in new[] { _horizontalGridList, _verticalGridList })
+            {
+                for (int i = 0; i < list.Items.Count; i++) list.SetItemChecked(i, true);
+                if (wholeView && list.Parent != null) list.Parent.Enabled = false;
+            }
+        _applyButton.Text = "套用並繼續";
+        _statusLabel.Text = $"{(wholeView ? "目前視圖" : "目前選取")}：{count} 個";
+        if (wholeView && _initialMode == DimensionMode.BeamGrid)
+        {
+            void DisableSelectionActions(Control parent)
+            {
+                foreach (Control child in parent.Controls)
+                {
+                    if (child is Button && (child.Text == "全選" || child.Text == "全不選") && child.Parent != null) child.Parent.Enabled = false;
+                    DisableSelectionActions(child);
+                }
+            }
+            DisableSelectionActions(this);
+        }
+    }
+
     public bool TryGetOptions(out DimensionOptions options, out string error)
     {
         if (IsBubblePage)

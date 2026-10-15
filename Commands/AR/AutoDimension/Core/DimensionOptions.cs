@@ -48,13 +48,20 @@ internal enum FrontBackSide
 
 internal sealed class DimensionOptions
 {
+    // Runtime-only host document ID; source element IDs belong to that link document.
+    public ElementId? SourceLinkInstanceId { get; set; }
     public List<string>? Diagnostics { get; set; }
+    public List<string> Warnings { get; } = new List<string>();
+    public int RequestedDimensionCount { get; set; }
+    public int ExistingDimensionCount { get; set; }
 
     public bool IncludeBeamWidth { get; set; }
     public bool IncludeBeamSpacing { get; set; } = true;
     public bool SelectedBeamsOnly { get; set; } = true;
 
     public IReadOnlyList<ElementId> SelectedBeamIds { get; set; } = Array.Empty<ElementId>();
+    // Null preserves the full-view behavior of the explicit settings command.
+    public IReadOnlyList<ElementId>? SelectedColumnIds { get; set; }
 
     public bool GridBubblesOnly { get; set; }
     public bool HorizontalBubbleLeft { get; set; }

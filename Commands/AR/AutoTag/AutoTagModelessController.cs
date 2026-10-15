@@ -220,7 +220,50 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     }
 
                     var service = new AutoTagService();
-                    AutoTagResult result = service.TagElements(uiDoc, _mode, _options, _rules);
+                    AutoTagResult result;
+                    AutoTagPreviewDecision previewDecision = null;
+                    var exclusions = new HashSet<string>(StringComparer.Ordinal);
+                    if (_options.PreviewBeforeApply)
+                    {
+                        var uiView = uiDoc.GetOpenUIViews().FirstOrDefault(v => v.ViewId == doc.ActiveView.Id);
+                        var zoom = uiView?.GetZoomCorners();
+                        _form?.Hide();
+                        try
+                        {
+                            do
+                            {
+                                previewDecision = null;
+                                result = service.TagElements(uiDoc, _mode, _options, _rules, items =>
+                                {
+                                    using (var preview = new AutoTagPreviewForm(uiDoc, items))
+                                    {
+                                        preview.ShowDialog(new RevitWindow(app.MainWindowHandle));
+                                        previewDecision = preview.Decision;
+                                        exclusions.UnionWith(previewDecision.Excluded);
+                                        return previewDecision;
+                                    }
+                                }, exclusions);
+                            } while (previewDecision?.Action == AutoTagPreviewAction.Recalculate);
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                if (zoom != null && zoom.Count == 2) uiView.ZoomAndCenterRectangle(zoom[0], zoom[1]);
+                                uiDoc.RefreshActiveView();
+                            }
+                            finally
+                            {
+                                if (_form != null && !_form.IsDisposed) { _form.Show(); _form.Activate(); }
+                            }
+                        }
+                        if (previewDecision?.Action == AutoTagPreviewAction.Cancel)
+                        {
+                            Complete("已取消預覽，未保留本批標籤。");
+                            return;
+                        }
+                    }
+                    else result = service.TagElements(uiDoc, _mode, _options, _rules);
                     Complete(result.Message, !result.Success);
                     var report = new TaskDialog("自動標籤結果")
                     {
@@ -257,6 +300,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             public string GetName()
             {
                 return "HB_BIM Auto Tag";
+            }
+
+            private sealed class RevitWindow : System.Windows.Forms.IWin32Window
+            {
+                public RevitWindow(IntPtr handle) { Handle = handle; }
+                public IntPtr Handle { get; }
             }
 
             private sealed class TagTargetFilter : ISelectionFilter

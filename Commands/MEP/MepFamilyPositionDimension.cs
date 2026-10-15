@@ -41,6 +41,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             internal XYZ Measure, Direction;
             internal double Start, End, Station, Sign;
             internal string BaselineKey;
+            internal ElementId Owner;
+            internal int PlacementSide;
         }
         private static List<List<FamilyPlan>> GroupFamilyPlans(List<FamilyPlan> plans, double gap)
         {
@@ -48,6 +50,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             foreach (var plan in plans.OrderBy(p => p.BaselineKey, StringComparer.Ordinal).ThenBy(p => p.Station).ThenBy(p => p.Start))
             {
                 var group = groups.FirstOrDefault(g => g[0].BaselineKey == plan.BaselineKey && g[0].Sign == plan.Sign &&
+                    (!edgeDistance || (g[0].PlacementSide == plan.PlacementSide &&
+                        Math.Abs(g[0].Start - plan.Start) <= .5 / 304.8 && Math.Abs(g[0].End - plan.End) <= .5 / 304.8)) &&
                     g[0].Measure.DotProduct(plan.Measure) > .999999 &&
                     plan.Station - g.Max(p => p.Station) <= gap &&
                     Math.Min(plan.End,g.Min(p=>p.End))-Math.Max(plan.Start,g.Max(p=>p.Start)) > 1/304.8);
@@ -147,8 +151,22 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var targetTransform = targetLink?.GetTotalTransform() ?? Transform.Identity;
             var notes = new List<string>();
             var boxes = new Dictionary<ElementId,List<XYZ>>();
+            var edgeFaces = new Dictionary<ElementId,List<OuterEdgeFace>>();
             foreach (var instance in selected)
             {
+                if (edgeDistance)
+                {
+                    var physical = new List<XYZ>();
+                    var faces = new List<OuterEdgeFace>();
+                    using (var geometryOptions = new Options { ComputeReferences = true, DetailLevel = ViewDetailLevel.Fine, IncludeNonVisibleObjects = false })
+                    {
+                        if (!ReadEdgeVertices(instance.get_Geometry(geometryOptions), targetTransform, physical, faces) || physical.Count == 0)
+                        { notes.Add($"{instance.Id}：缺少平面實體外緣；曲面／圓管切線邊距尚未支援。"); continue; }
+                    }
+                    boxes.Add(instance.Id, physical);
+                    edgeFaces.Add(instance.Id, faces);
+                    continue;
+                }
                 var box = instance.get_BoundingBox(null);
                 if (box == null) notes.Add($"{instance.Id}：沒有可搜尋的幾何範圍。");
                 else boxes.Add(instance.Id, BoxCorners(box).Select(targetTransform.OfPoint).ToList());
@@ -159,7 +177,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var sides = new List<BeamSide>();
             using (var outline = new Outline(new XYZ(points.Min(p=>p.X)-expand,points.Min(p=>p.Y)-expand,points.Min(p=>p.Z)-expand),
                 new XYZ(points.Max(p=>p.X)+expand,points.Max(p=>p.Y)+expand,points.Max(p=>p.Z)+expand)))
-            using (var collector = new FilteredElementCollector(source))
+            using (var collector = VisibleBeamCollector(doc, view, link))
             {
                 foreach (var beam in collector.OfClass(typeof(FamilyInstance)).OfCategory(BuiltInCategory.OST_StructuralFraming)
                     .WherePasses(new BoundingBoxIntersectsFilter(outline)).ToElements().Where(IsBeam))
@@ -182,6 +200,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 catch { notes.Add($"尺寸 {dim.Id}：無法檢查重複。"); }
             }
             var plans = new List<FamilyPlan>();
+            var placementBaselines = new Dictionary<ElementId, List<BeamMatch>>();
             string preferredReference = null;
             foreach (var instance in selected)
             {
@@ -209,15 +228,15 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 var normals = new[] { placement.BasisX.Normalize(), placement.BasisY.Normalize(), placement.BasisZ.Normalize() };
                 for (int i=0;i<kinds.Length;i++)
                 {
-                    string label = $"{instance.Id} {instance.Name}／{(i==0 ? "左右中心" : i==1 ? "前後中心" : "上下中心")}";
+                    string label = $"{instance.Id} {instance.Name}／{(i==0 ? "左右" : i==1 ? "前後" : "上下")}{(edgeDistance ? "邊距" : "中心")}";
                     if (Math.Abs(normals[i].DotProduct(normal))>1e-6)
                     { continue; }
                     if (accessoryAxis != null && !IsAccessorySpacingReference(accessoryAxis, normal, normals[i]))
                     { continue; }
                     var refs = instance.GetReferences(kinds[i]);
-                    if (refs == null || refs.Count != 1)
+                    if (!edgeDistance && (refs == null || refs.Count != 1))
                     { notes.Add(label+"：缺少唯一有效中心參考，未使用插入點代替。"); continue; }
-                    var centerReference = TargetReference(refs[0], targetLink);
+                    var centerReference = edgeDistance ? null : TargetReference(refs[0], targetLink);
                     XYZ measure=normals[i];
                     if (measure.DotProduct(view.RightDirection)<-1e-6 || (Math.Abs(measure.DotProduct(view.RightDirection))<=1e-6 && measure.DotProduct(view.UpDirection)<0)) measure=-measure;
                     XYZ direction=normal.CrossProduct(measure).Normalize();
@@ -229,14 +248,17 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     {
                         if (Math.Abs(side.Normal.DotProduct(measure))<.999999) { rejected.Direction++; continue; }
                         double station=side.Origin.DotProduct(measure);
-                        if (station>=low-.5/304.8 && station<=high+.5/304.8) { rejected.Side++; continue; }
+                        bool inside = edgeDistance
+                            ? station > low + .5 / 304.8 && station < high - .5 / 304.8
+                            : station >= low - .5 / 304.8 && station <= high + .5 / 304.8;
+                        if (inside) { rejected.Side++; continue; }
                         if (((low+high)/2-station)*side.Normal.DotProduct(measure)<=0) { rejected.Side++; continue; }
                         double distance=Math.Min(Math.Abs(station-low),Math.Abs(station-high));
                         if (along<side.Vertices.Min(p=>p.DotProduct(direction)) || along>side.Vertices.Max(p=>p.DotProduct(direction))) { rejected.Overlap++; continue; }
                         if (IntervalDistance(vertices.Min(p=>p.DotProduct(normal)),vertices.Max(p=>p.DotProduct(normal)),
                             side.Vertices.Min(p=>p.DotProduct(normal)),side.Vertices.Max(p=>p.DotProduct(normal)))>(double)heightDistance/304.8) { rejected.Height++; continue; }
                         if (distance>(double)expandedDistance/304.8) { rejected.Distance++; continue; }
-                        matches.Add(new BeamMatch { Side=side,Station=station,Distance=distance,Section=along,
+                        matches.Add(new BeamMatch { Side=side,Station=station,Distance=distance,Section=along,SectionPoint=direction*along,
                             HeightGap=IntervalDistance(vertices.Min(p=>p.DotProduct(normal)),vertices.Max(p=>p.DotProduct(normal)),
                                 side.Vertices.Min(p=>p.DotProduct(normal)),side.Vertices.Max(p=>p.DotProduct(normal))),
                             Overlap=side.Vertices.Max(p=>p.DotProduct(direction))-side.Vertices.Min(p=>p.DotProduct(direction)) });
@@ -245,7 +267,47 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     if (matches.Count==0) { notes.Add(label+"："+rejected.Describe(sides.Count)); continue; }
                     var match=ChooseBeamMatch(ui,doc,matches,normal,label,ref preferredReference);
                     if (match==null) { notes.Add(label+"：未指定歧義基準，未建立尺寸。"); continue; }
+                    if (!placementBaselines.ContainsKey(instance.Id)) placementBaselines[instance.Id] = new List<BeamMatch>();
+                    placementBaselines[instance.Id].Add(match);
                     if (match.Distance>(double)searchDistance/304.8) notes.Add(label+$"：擴大搜尋配對梁 {match.Side.Id}，距離 {match.Distance*304.8:0} mm，請確認。");
+                    if (edgeDistance)
+                    {
+                        var negative = new[] { FamilyInstanceReferenceType.Left, FamilyInstanceReferenceType.Front, FamilyInstanceReferenceType.Bottom };
+                        var positive = new[] { FamilyInstanceReferenceType.Right, FamilyInstanceReferenceType.Back, FamilyInstanceReferenceType.Top };
+                        bool lowIsNegative = normals[i].DotProduct(measure) > 0;
+                        var lowRefs = instance.GetReferences(lowIsNegative ? negative[i] : positive[i]);
+                        var highRefs = instance.GetReferences(lowIsNegative ? positive[i] : negative[i]);
+                        // Real exterior faces take precedence over named planes, which may describe an inner frame.
+                        var outerLow = FindOuterEdgeReference(edgeFaces[instance.Id], measure, low, -1);
+                        var outerHigh = FindOuterEdgeReference(edgeFaces[instance.Id], measure, high, 1);
+                        if (outerLow != null) lowRefs = new List<Reference> { outerLow };
+                        if (outerHigh != null) highRefs = new List<Reference> { outerHigh };
+                        bool nearLow = Math.Abs(match.Station - low) <= Math.Abs(match.Station - high);
+                        var nearRefs = nearLow ? lowRefs : highRefs;
+                        var farRefs = nearLow ? highRefs : lowRefs;
+                        if (nearRefs == null || nearRefs.Count != 1 || (includeEdgeSize && (farRefs == null || farRefs.Count != 1)))
+                        { notes.Add(label + "：實體最外緣無有效平面參照，亦缺少唯一族群外緣參考；未改標內框或中心。"); continue; }
+                        var edgeRefs = includeEdgeSize ? new[] { nearRefs[0], farRefs[0] } : new[] { nearRefs[0] };
+                        for (int edge = 0; edge < edgeRefs.Length; edge++)
+                        {
+                            bool useLow = edge == 0 ? nearLow : !nearLow;
+                            double station = useLow ? low : high;
+                            // Omit the coincident near edge, retaining the native beam-to-far-edge dimension.
+                            if (edge == 0 && Math.Abs(station - match.Station) <= .5 / 304.8) continue;
+                            var reference = TargetReference(edgeRefs[edge], targetLink);
+                            string edgeKey = Signature(doc, new[] { match.Side.Reference, reference });
+                            if (!known.Add(edgeKey)) { notes.Add(label + "：已有相同外緣參考尺寸。"); continue; }
+                            XYZ edgeOrigin = normal * view.Origin.DotProduct(normal) + direction * along;
+                            double distance = Math.Abs(station - match.Station);
+                            plans.Add(new FamilyPlan { Center = reference, Side = match.Side, Label = label + (edge == 0 ? "／近緣" : "／遠緣"),
+                                Owner = instance.Id,
+                                Measure = measure, Direction = direction, Station = station, Sign = Math.Sign(station - match.Station),
+                                Start = vertices.Min(p => p.DotProduct(direction)), End = vertices.Max(p => p.DotProduct(direction)),
+                                BaselineKey = match.Side.Reference.ConvertToStableRepresentation(doc), Minimum = distance, Maximum = distance,
+                                Axis = Line.CreateBound(edgeOrigin + measure * Math.Min(match.Station, station), edgeOrigin + measure * Math.Max(match.Station, station)) });
+                        }
+                        continue;
+                    }
                     string key=Signature(doc,new[] { match.Side.Reference,centerReference });
                     if (!known.Add(key)) { notes.Add(label+"：已有相同參考尺寸。"); continue; }
                     // The box locates/searches the line only. Revit measures the actual family reference.
@@ -260,6 +322,19 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
             }
             if (plans.Count==0) { TaskDialog.Show("族中心定位","沒有可建立的尺寸。\n"+string.Join("\n",notes)); return Result.Cancelled; }
+            if (edgeDistance)
+                foreach (var plan in plans)
+                {
+                    bool horizontalAxis = Math.Abs(plan.Measure.DotProduct(view.RightDirection)) >= Math.Abs(plan.Measure.DotProduct(view.UpDirection));
+                    // Use the already validated perpendicular beam, not an unfiltered nearby face.
+                    var perpendicular = placementBaselines[plan.Owner]
+                        .Where(m => Math.Abs(m.Side.Normal.DotProduct(plan.Direction)) > .999999)
+                        .OrderBy(m => m.Distance).FirstOrDefault();
+                    plan.PlacementSide = OuterEdgePolicy.PlacementSign(
+                        horizontalAxis ? horizontalPlacement : verticalPlacement, horizontalAxis,
+                        plan.Direction.DotProduct(horizontalAxis ? view.UpDirection : view.RightDirection),
+                        perpendicular == null ? 0 : perpendicular.Side.Normal.DotProduct(plan.Direction));
+                }
             var groups=GroupFamilyPlans(plans,(double)savedGap/304.8);
             groups=groups.Where(g => {
                 bool exists=known.Contains(Signature(doc,new[] {g[0].Side.Reference}.Concat(g.Select(p=>p.Center))));
@@ -269,12 +344,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return !exists;
             }).ToList();
             if (groups.Count==0) { TaskDialog.Show("族中心定位","沒有新尺寸需要建立。\n"+string.Join("\n",notes)); return Result.Cancelled; }
-            var preview=new TaskDialog("族中心定位｜確認") {
-                MainInstruction=$"預計建立 {groups.Count} 組中心定位尺寸",
-                MainContent="同梁面、同側、共同列範圍合併為連續尺寸。\n梁邊至第一個中心，再標相鄰中心距。\n尚未檢查與既有文字的碰撞。",
-                ExpandedContent=string.Join("\n",groups.Select((g,i)=>$"第 {i+1} 組 → 梁 {g[0].Side.Id}："+string.Join(",",g.Select(p=>p.Label))).Concat(notes)),
-                CommonButtons=TaskDialogCommonButtons.Ok|TaskDialogCommonButtons.Cancel,DefaultButton=TaskDialogResult.Cancel };
-            if (preview.Show()!=TaskDialogResult.Ok) return Result.Cancelled;
             int created=0;
             using (var batch=new TransactionGroup(doc,"族中心施工定位"))
             {
@@ -298,14 +367,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                                 throw new InvalidOperationException(plan.Label+"：無有效單段中心尺寸。");
                             double value=probe.Value.Value;
                             if (value<plan.Minimum-.5/304.8 || value>plan.Maximum+.5/304.8)
-                                throw new InvalidOperationException(plan.Label+"：族中心參考超出幾何範圍。");
+                                throw new InvalidOperationException(plan.Label+(edgeDistance ? "：外緣參考與實體邊界不符，未建立尺寸。" : "：族中心參考超出幾何範圍。"));
                             measured.Add(new Item {Reference=plan.Center,Station=measured[0].Station+plan.Sign*value});
                             doc.Delete(probe.Id);
                         }
                         measured=measured.OrderBy(p=>p.Station).ToList();
                         var expected=measured.Zip(measured.Skip(1),(a,b)=>b.Station-a.Station).ToList();
                         if (expected.Any(d=>d<.5/304.8)) throw new InvalidOperationException("中心參考重合，請分開選取不同高程或同位置的物件。");
-                        double along=(group.Max(p=>p.Start)+group.Min(p=>p.End))/2;
+                        double along=edgeDistance
+                            ? (first.PlacementSide > 0 ? group.Max(p=>p.End) : group.Min(p=>p.Start)) + first.PlacementSide*(double)savedOffset*Math.Max(1,view.Scale)/304.8
+                            : (group.Max(p=>p.Start)+group.Min(p=>p.End))/2;
                         XYZ origin=normal*view.Origin.DotProduct(normal)+first.Direction*along;
                         var axis=Line.CreateBound(origin+first.Measure*measured.First().Station,origin+first.Measure*measured.Last().Station);
                         var refs=new ReferenceArray();foreach (var item in measured) refs.Append(item.Reference);
@@ -329,6 +400,45 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             }
             if (notes.Count>0) TaskDialog.Show("族中心定位",$"建立 {created} 條尺寸。\n"+string.Join("\n",notes));
             return created>0?Result.Succeeded:Result.Cancelled;
+        }
+
+        // Only physical planar solids define edge extents; symbolic lines and controls are excluded.
+        private static bool ReadEdgeVertices(GeometryElement geometry, Transform transform, List<XYZ> points, List<OuterEdgeFace> faces)
+        {
+            if (geometry == null) return false;
+            foreach (GeometryObject item in geometry)
+            {
+                if (item is GeometryInstance nested)
+                {
+                    if (!ReadEdgeVertices(nested.GetSymbolGeometry(), transform.Multiply(nested.Transform), points, faces)) return false;
+                }
+                else if (item is Solid solid && solid.Volume > 1e-9)
+                {
+                    if (solid.Faces.Cast<Face>().Any(f => !(f is PlanarFace))) return false;
+                    foreach (PlanarFace face in solid.Faces)
+                        if (face.Reference != null)
+                            faces.Add(new OuterEdgeFace { Reference = face.Reference,
+                                Origin = transform.OfPoint(face.Origin), Normal = transform.OfVector(face.FaceNormal).Normalize(), Area = face.Area });
+                    foreach (Edge edge in solid.Edges)
+                        foreach (var point in edge.Tessellate()) points.Add(transform.OfPoint(point));
+                }
+            }
+            return true;
+        }
+
+        private sealed class OuterEdgeFace
+        {
+            internal Reference Reference;
+            internal XYZ Origin, Normal;
+            internal double Area;
+        }
+
+        private static Reference FindOuterEdgeReference(List<OuterEdgeFace> faces, XYZ measure, double boundary, int outward)
+        {
+            // Coplanar split faces yield the same dimension; retain the largest valid face reference.
+            return faces.Where(f => OuterEdgePolicy.IsExterior(f.Origin.DotProduct(measure), boundary,
+                    f.Normal.DotProduct(measure), outward))
+                .OrderByDescending(f => f.Area).Select(f => f.Reference).FirstOrDefault();
         }
     }
 }

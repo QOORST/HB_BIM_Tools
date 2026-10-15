@@ -316,13 +316,14 @@ internal static class AutoDimensionModelessController
                 if (created == 0)
                 {
                     tx.RollBack();
-                    Complete(DimensionCommandRunner.BuildNoChangeMessage(options.ModeType, doc, view), true);
+                    Complete(options.Warnings.Count > 0 ? string.Join("\n", options.Warnings) : DimensionCommandRunner.BuildNoChangeMessage(options.ModeType, doc, view), true);
                     return;
                 }
 
                 if (tx.Commit() != TransactionStatus.Committed)
                     throw new InvalidOperationException("標註未成功提交，請檢查 Revit 的失敗訊息後重試。");
-                CompleteWithSavedSettings(doc, options, $"已建立 {created} 條標註。");
+                CompleteWithSavedSettings(doc, options, $"已建立 {created} 條標註。" +
+                    (options.Warnings.Count > 0 ? "\n" + string.Join("\n", options.Warnings) : string.Empty));
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {

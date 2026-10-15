@@ -52,6 +52,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     public static void Save(string path, AutoJoinSettings settings)
     {
+        settings.Normalize();
+        TypeJoinPolicy.Validate(settings.SameCategoryTypeRules);
+        if (settings.UseSameCategoryTypeRules && settings.SameCategoryTypeRules.Count == 0)
+            throw new InvalidOperationException("已啟用類型規則，請先新增至少一條規則。");
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
         {

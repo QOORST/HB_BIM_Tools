@@ -42,6 +42,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private readonly Forms.CheckBox _leaderCheck = new Forms.CheckBox();
         private readonly Forms.CheckBox _skipExistingCheck = new Forms.CheckBox();
         private readonly Forms.CheckBox _avoidOverlapCheck = new Forms.CheckBox();
+        private readonly Forms.CheckBox _previewCheck = new Forms.CheckBox { Text = "套用前預覽", AutoSize = true };
         private readonly Forms.Button _applyButton = new Forms.Button();
         private readonly Forms.Button _refreshButton = new Forms.Button();
         private readonly Forms.Button _saveDefaultButton = new Forms.Button();
@@ -239,7 +240,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             AddLabel(placement, "放置位置", 0, 0); placement.Controls.Add(_placementCombo, 1, 0);
             placement.Controls.Add(_offsetLabel, 2, 0); placement.Controls.Add(_offsetText, 3, 0);
             var mainFlags = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Fill, AutoSize = true, WrapContents = true };
-            foreach (var flag in new[] { _avoidOverlapCheck, _leaderCheck, _skipExistingCheck }) { flag.AutoSize = true; mainFlags.Controls.Add(flag); }
+            foreach (var flag in new[] { _avoidOverlapCheck, _leaderCheck, _skipExistingCheck, _previewCheck }) { flag.AutoSize = true; mainFlags.Controls.Add(flag); }
             placement.Controls.Add(mainFlags, 0, 1); placement.SetColumnSpan(mainFlags, 4);
             root.Controls.Add(Section("放置設定", placement), 0, 2);
 
@@ -668,6 +669,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 BankLeaderPaperMm = (double)_bankLeader.Value,
                 SkipExistingTags = _skipExistingCheck.Checked,
                 AvoidTagOverlap = _avoidOverlapCheck.Checked,
+                PreviewBeforeApply = _previewCheck.Checked,
                 VerticalOnly = _directionCombo.SelectedIndex == 2,
                 AllDirections = _directionCombo.SelectedIndex == 1,
                 UsePaperMillimeters = _unitsCombo.SelectedIndex == 1,
@@ -780,6 +782,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _bankLeader.Value = double.IsNaN(options.BankLeaderPaperMm) ? 5 : (decimal)Math.Max(2, Math.Min(100, options.BankLeaderPaperMm));
             _skipExistingCheck.Checked = options.SkipExistingTags;
             _avoidOverlapCheck.Checked = options.AvoidTagOverlap;
+            _previewCheck.Checked = options.PreviewBeforeApply;
             } finally { _applyingOptions = false; }
             UpdateSummary();
         }

@@ -8,13 +8,23 @@ using Autodesk.Revit.DB;
 namespace YDBIM.AutoDimension.Core
 {
 
-internal sealed class AutoDimensionService
+internal sealed partial class AutoDimensionService
 {
     private const double VectorTolerance = 1e-6;
     private const double PositionTolerance = 1e-5;
     private const double DimensionReferenceTolerance = 1.0 / 304.8;
     private const double DuplicateLineTolerance = 1.0 / 304.8;
     private const double NearestGridSearchTolerance = 2.0;
+
+    private sealed class ColumnDimensionState
+    {
+        private readonly HashSet<string> _lines = new HashSet<string>(StringComparer.Ordinal);
+        private int _covered;
+        internal int Count => _lines.Count + _covered;
+        internal bool Contains(string key) => _lines.Contains(key);
+        internal void Add(string key) => _lines.Add(key);
+        internal void MarkCovered() => _covered++;
+    }
 
     private sealed class ReferencePoint
     {
@@ -43,7 +53,9 @@ internal sealed class AutoDimensionService
             XYZ axisDirection,
             XYZ measureDirection,
             double axisMin,
-            double axisMax)
+            double axisMax,
+            double measureMin,
+            double measureMax)
         {
             Beam = beam;
             AxisPoint = axisPoint;
@@ -51,6 +63,8 @@ internal sealed class AutoDimensionService
             MeasureDirection = measureDirection;
             AxisMin = axisMin;
             AxisMax = axisMax;
+            MeasureMin = measureMin;
+            MeasureMax = measureMax;
         }
 
         public FamilyInstance Beam { get; }
@@ -64,11 +78,17 @@ internal sealed class AutoDimensionService
         public double AxisMin { get; }
 
         public double AxisMax { get; }
+        public double MeasureMin { get; }
+        public double MeasureMax { get; }
     }
 
     public int CreateDimensions(Document doc, View view, DimensionOptions options)
     {
+        options.RequestedDimensionCount = options.ExistingDimensionCount = 0;
+        options.Warnings.Clear();
         DimensionType? dimensionType = ResolveDimensionType(doc, options.DimensionTypeName);
+        if (options.SourceLinkInstanceId != null)
+            return CreateLinkedDimensions(doc, view, options, dimensionType);
 
         if (options.ModeType == DimensionMode.BeamWidth)
         {
@@ -98,6 +118,7 @@ internal sealed class AutoDimensionService
         int created = 0;
         foreach (IReadOnlyList<DatumInfo> group in GroupParallelGrids(horizontal, view))
         {
+            options.RequestedDimensionCount += group.Count > 2 ? 2 : 1;
             created += CreateGridDimensionForGroup(
                 doc,
                 view,
@@ -105,11 +126,12 @@ internal sealed class AutoDimensionService
                 ResolveHorizontalGridPreferredVector(view, options.Direction),
                 options.GridPrimaryOffsetInternal * scale,
                 options.GridOverallOffsetInternal * scale,
-                dimensionType, options.Diagnostics);
+                dimensionType, options.Diagnostics, options);
         }
 
         foreach (IReadOnlyList<DatumInfo> group in GroupParallelGrids(vertical, view))
         {
+            options.RequestedDimensionCount += group.Count > 2 ? 2 : 1;
             created += CreateGridDimensionForGroup(
                 doc,
                 view,
@@ -117,7 +139,7 @@ internal sealed class AutoDimensionService
                 ResolveVerticalGridPreferredVector(view, options.Direction),
                 options.GridPrimaryOffsetInternal * scale,
                 options.GridOverallOffsetInternal * scale,
-                dimensionType, options.Diagnostics);
+                dimensionType, options.Diagnostics, options);
         }
 
         return created;
@@ -188,7 +210,7 @@ internal sealed class AutoDimensionService
             }
         }
 
-        if (options.IncludeBeamSpacing) created += CreateBeamToBeamChainDimensions(doc, view, visibleBeams, viewNormal, spacingOffsetInternal, dimensionType);
+        if (options.IncludeBeamSpacing) created += CreateBeamToBeamChainDimensions(doc, view, visibleBeams, viewNormal, spacingOffsetInternal, dimensionType, options);
         return created;
     }
 
@@ -198,19 +220,27 @@ internal sealed class AutoDimensionService
         IReadOnlyList<FamilyInstance> visibleBeams,
         XYZ viewNormal,
         double offsetInternal,
-        DimensionType? dimensionType)
+        DimensionType? dimensionType,
+        DimensionOptions options,
+        RevitLinkInstance? link = null)
     {
+        Transform toHost = link?.GetTotalTransform() ?? Transform.Identity;
+        XYZ sourceNormal = toHost.Inverse.OfVector(viewNormal).Normalize();
         var groups = new Dictionary<string, List<BeamChainCandidate>>(StringComparer.Ordinal);
         foreach (FamilyInstance beam in visibleBeams)
         {
-            if (!TryGetBeamAxisPointAndDirection(beam, viewNormal, out XYZ axisPoint, out XYZ axisDirection))
+            if (!TryGetBeamAxisPointAndDirection(beam, sourceNormal, out XYZ axisPoint, out XYZ axisDirection))
             {
+                options.Warnings.Add($"梁 {beam.Id}：無可用的直線平面投影，未加入尺寸鏈。");
                 continue;
             }
 
-            BoundingBoxXYZ? bbox = beam.get_BoundingBox(view) ?? beam.get_BoundingBox(null);
+            axisPoint = toHost.OfPoint(axisPoint);
+            axisDirection = toHost.OfVector(axisDirection).Normalize();
+            BoundingBoxXYZ? bbox = link == null ? beam.get_BoundingBox(view) ?? beam.get_BoundingBox(null) : beam.get_BoundingBox(null);
             if (bbox is null)
             {
+                options.Warnings.Add($"梁 {beam.Id}：無法取得投影範圍。");
                 continue;
             }
 
@@ -236,11 +266,15 @@ internal sealed class AutoDimensionService
 
             double axisMin = double.MaxValue;
             double axisMax = double.MinValue;
-            foreach (XYZ corner in EnumerateBoundingBoxCorners(bbox))
+            double measureMin = double.MaxValue, measureMax = double.MinValue;
+            foreach (XYZ corner in EnumerateBoundingBoxCorners(bbox).Select(p => link == null ? p : toHost.OfPoint(bbox.Transform.OfPoint(p))))
             {
                 double axisPosition = corner.DotProduct(canonicalAxis);
                 axisMin = Math.Min(axisMin, axisPosition);
                 axisMax = Math.Max(axisMax, axisPosition);
+                double measurePosition = corner.DotProduct(measureDirection);
+                measureMin = Math.Min(measureMin, measurePosition);
+                measureMax = Math.Max(measureMax, measurePosition);
             }
 
             if (axisMax - axisMin < PositionTolerance)
@@ -248,14 +282,14 @@ internal sealed class AutoDimensionService
                 continue;
             }
 
-            group.Add(new BeamChainCandidate(beam, axisPoint, canonicalAxis, measureDirection, axisMin, axisMax));
+            group.Add(new BeamChainCandidate(beam, axisPoint, canonicalAxis, measureDirection, axisMin, axisMax, measureMin, measureMax));
         }
 
         int created = 0;
         var createdChainKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (List<BeamChainCandidate> directionGroup in groups.Values)
         {
-            foreach (List<BeamChainCandidate> group in SplitBeamChainGroups(directionGroup)
+            foreach (List<BeamChainCandidate> group in MergeProjectedBeamGroups(SplitBeamChainGroups(directionGroup).ToList())
                          .OrderByDescending(g => g.Max(c => c.AxisMax)))
             {
                 if (group.Count < 2)
@@ -267,87 +301,184 @@ internal sealed class AutoDimensionService
                 XYZ measureDirection = group[0].MeasureDirection.Normalize();
                 var refs = new List<ReferencePoint>();
                 double placementAxis = double.MinValue;
+                var missing = new List<ElementId>();
 
                 foreach (BeamChainCandidate item in group)
                 {
-                    IList<(PlanarFace Face, XYZ Normal, XYZ Point)> faces = GetPlanarFaces(item.Beam, viewNormal);
-                    (PlanarFace Face, XYZ Normal, XYZ Point)? positive = SelectBestFace(faces, measureDirection);
-                    (PlanarFace Face, XYZ Normal, XYZ Point)? negative = SelectBestFace(faces, measureDirection.Negate());
+                    var faces = GetBeamChainFaces(item.Beam, sourceNormal)
+                        .Select(f => (f.Face, Normal: toHost.OfVector(f.Normal).Normalize(), Point: toHost.OfPoint(f.Point))).ToList();
+                    var positive = SelectBeamChainFace(faces, measureDirection);
+                    var negative = SelectBeamChainFace(faces, measureDirection.Negate());
                     if (positive is null || negative is null)
                     {
+                        missing.Add(item.Beam.Id);
                         continue;
                     }
 
-                    refs.Add(new ReferencePoint(positive.Value.Face.Reference, positive.Value.Point, positive.Value.Point.DotProduct(measureDirection), 0.0));
-                    refs.Add(new ReferencePoint(negative.Value.Face.Reference, negative.Value.Point, negative.Value.Point.DotProduct(measureDirection), 0.0));
+                    refs.Add(new ReferencePoint(ToLinkedReference(positive.Value.Face.Reference, link), positive.Value.Point, positive.Value.Point.DotProduct(measureDirection), 0.0));
+                    refs.Add(new ReferencePoint(ToLinkedReference(negative.Value.Face.Reference, link), negative.Value.Point, negative.Value.Point.DotProduct(measureDirection), 0.0));
 
                     placementAxis = Math.Max(placementAxis, item.AxisMax);
                 }
 
                 refs = UniqueDimensionReferencesByPosition(refs).ToList();
+                options.RequestedDimensionCount++;
+                if (missing.Count > 0)
+                {
+                    options.Warnings.Add("梁 " + string.Join(", ", missing) + "：缺少有效外側參考面；整組未建立，避免跨過缺漏梁。");
+                    continue;
+                }
 
                 if (refs.Count < 2 || placementAxis == double.MinValue)
                 {
+                    options.Warnings.Add("梁尺寸鏈：有效投影邊界不足，未建立。");
                     continue;
                 }
 
                 string chainKey = BuildBeamChainKey(axisDirection, measureDirection, refs);
+                if (link != null) chainKey += "|" + string.Join("|", refs.Select(r => r.Reference.ConvertToStableRepresentation(doc)));
                 if (createdChainKeys.Contains(chainKey))
                 {
+                    options.ExistingDimensionCount++;
                     continue;
                 }
 
                 double targetAxis = placementAxis + offsetInternal;
-                double minMeasure = refs.Min(r => r.Position);
-                double maxMeasure = refs.Max(r => r.Position);
                 XYZ basePoint = group[0].AxisPoint;
                 double baseAxis = basePoint.DotProduct(axisDirection);
                 double baseMeasure = basePoint.DotProduct(measureDirection);
                 XYZ origin = basePoint + (axisDirection * (targetAxis - baseAxis));
-                XYZ start = origin + (measureDirection * (minMeasure - baseMeasure));
-                XYZ end = origin + (measureDirection * (maxMeasure - baseMeasure));
-                if (start.DistanceTo(end) < VectorTolerance)
+                var runs = BeamChainProjectionPolicy.MissingRuns(refs.Select(r => r.Position).ToList(),
+                    ExistingBeamChainSegments(doc, view, measureDirection, link, link == null ? null : refs), DimensionReferenceTolerance);
+                if (runs.Count == 0)
                 {
+                    options.ExistingDimensionCount++;
                     continue;
                 }
-
-                var refArray = new ReferenceArray();
-                foreach (ReferencePoint rp in refs)
+                options.RequestedDimensionCount += runs.Count - 1;
+                bool complete = true;
+                foreach (var run in runs)
                 {
-                    refArray.Append(rp.Reference);
-                }
-
-                try
-                {
-                    Line dimLine = Line.CreateBound(start, end);
-                    if (HasSimilarDimension(doc, view, dimLine))
+                    var runRefs = refs.Skip(run.Start).Take(run.End - run.Start + 1).ToList();
+                    XYZ start = origin + (measureDirection * (runRefs[0].Position - baseMeasure));
+                    XYZ end = origin + (measureDirection * (runRefs[runRefs.Count - 1].Position - baseMeasure));
+                    var refArray = new ReferenceArray();
+                    foreach (ReferencePoint rp in runRefs) refArray.Append(rp.Reference);
+                    using var chainTx = new SubTransaction(doc);
+                    try
                     {
-                        continue;
-                    }
+                        Line dimLine = Line.CreateBound(start, end);
+                        chainTx.Start();
+                        Dimension dimension = doc.Create.NewDimension(view, dimLine, refArray);
+                        if (dimensionType is not null && dimension.GetTypeId() != dimensionType.Id)
+                        {
+                            dimension.ChangeTypeId(dimensionType.Id);
+                        }
 
-                    Dimension dimension = doc.Create.NewDimension(view, dimLine, refArray);
-                    if (dimensionType is not null && dimension.GetTypeId() != dimensionType.Id)
+                        doc.Regenerate();
+                        if (link != null) ValidateLinkedReferences(dimension, link);
+                        var expected = runRefs.Zip(runRefs.Skip(1), (a, b) => b.Position - a.Position).ToList();
+                        var actual = dimension.Segments.Size > 0
+                            ? dimension.Segments.Cast<DimensionSegment>().Select(s => s.Value).ToList()
+                            : new List<double?> { dimension.Value };
+                        if (!dimension.AreReferencesAvailable || !LinkedDimensionPolicy.SegmentsMatch(expected, actual, DimensionReferenceTolerance))
+                            throw new InvalidOperationException("原生尺寸分段與梁投影邊界不符。");
+
+                        AdjustOverlappingDimensionText(doc, dimension, view);
+                        if (chainTx.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("尺寸鏈未成功提交。");
+                        created++;
+                    }
+                    catch (Exception ex)
                     {
-                        dimension.ChangeTypeId(dimensionType.Id);
+                        complete = false;
+                        if (chainTx.GetStatus() == TransactionStatus.Started) chainTx.RollBack();
+                        options.Warnings.Add("梁 " + string.Join(", ", group.Select(g => g.Beam.Id)) + "：尺寸鏈未建立，" + ex.Message);
                     }
-
-                    if (TryDiscardZeroLengthDimension(doc, dimension))
-                    {
-                        continue;
-                    }
-
-                    AdjustOverlappingDimensionText(doc, dimension, view);
-                    created++;
-                    createdChainKeys.Add(chainKey);
                 }
-                catch
-                {
-                    // Some beam families expose references that cannot be mixed in one chain.
-                }
+                if (complete) createdChainKeys.Add(chainKey);
             }
         }
 
         return created;
+    }
+
+    private static IEnumerable<List<BeamChainCandidate>> MergeProjectedBeamGroups(IReadOnlyList<List<BeamChainCandidate>> groups)
+    {
+        var ranges = groups.Select(g => (Min: g.Min(c => c.MeasureMin), Max: g.Max(c => c.MeasureMax))).ToList();
+        foreach (var indexes in BeamChainProjectionPolicy.MergeRanges(ranges, DimensionReferenceTolerance))
+            yield return indexes.SelectMany(i => groups[i]).ToList();
+    }
+
+    private static IList<(PlanarFace Face, XYZ Normal, XYZ Point)> GetBeamChainFaces(FamilyInstance beam, XYZ viewNormal)
+    {
+        var faces = new List<(PlanarFace Face, XYZ Normal, XYZ Point)>();
+        void Read(GeometryElement geometry, Transform transform, int depth)
+        {
+            if (geometry == null) return;
+            if (depth > 16) throw new InvalidOperationException("梁巢狀族群層數超出讀取範圍。");
+            foreach (GeometryObject obj in geometry)
+            {
+                if (obj is Solid solid && solid.Volume > 1e-9)
+                    ExtractPlanarFaces(solid, viewNormal, faces, transform);
+                else if (obj is GeometryInstance instance)
+                    Read(instance.GetSymbolGeometry(), transform.Multiply(instance.Transform), depth + 1);
+            }
+        }
+        Read(beam.get_Geometry(new Options { ComputeReferences = true, IncludeNonVisibleObjects = false, DetailLevel = ViewDetailLevel.Fine }), Transform.Identity, 0);
+        return faces;
+    }
+
+    private static (PlanarFace Face, XYZ Normal, XYZ Point)? SelectBeamChainFace(
+        IList<(PlanarFace Face, XYZ Normal, XYZ Point)> faces, XYZ direction)
+    {
+        var matches = faces.Where(f => f.Normal.DotProduct(direction) > .999999)
+            .OrderByDescending(f => f.Point.DotProduct(direction)).ThenByDescending(f => f.Face.Area).ToList();
+        return matches.Count == 0 ? ((PlanarFace Face, XYZ Normal, XYZ Point)?)null : matches[0];
+    }
+
+    // Preserve each native segment instead of inferring coverage from a union of endpoints.
+    private static List<(double Start, double End)> ExistingBeamChainSegments(Document doc, View view, XYZ direction,
+        RevitLinkInstance? link = null, IReadOnlyList<ReferencePoint>? proposed = null)
+    {
+        var result = new List<(double Start, double End)>();
+        foreach (Dimension dimension in new FilteredElementCollector(doc, view.Id).OfClass(typeof(Dimension)))
+        {
+            try
+            {
+                if (dimension.Curve is not Line line || !DirectionUtils.IsParallel(line.Direction, direction) || !dimension.AreReferencesAvailable) continue;
+                var references = dimension.References.Cast<Reference>().ToList();
+                if (references.Count < 2 || references.Any(r => link == null
+                    ? doc.GetElement(r.ElementId)?.Category?.Id != new ElementId(BuiltInCategory.OST_StructuralFraming)
+                    : r.ElementId != link.Id || link.GetLinkDocument()?.GetElement(r.LinkedElementId)?.Category?.Id != new ElementId(BuiltInCategory.OST_StructuralFraming))) continue;
+                var segments = new List<(double Start, double End)>();
+                void Add(XYZ origin, double? value, int index)
+                {
+                    if (!value.HasValue || double.IsNaN(value.Value) || double.IsInfinity(value.Value)) return;
+                    if (link != null)
+                    {
+                        if (proposed == null || index + 1 >= references.Count) return;
+                        string first = references[index].ConvertToStableRepresentation(doc);
+                        string second = references[index + 1].ConvertToStableRepresentation(doc);
+                        if (!proposed.Zip(proposed.Skip(1), (a, b) => LinkedDimensionPolicy.SamePair(
+                            a.Reference.ConvertToStableRepresentation(doc), b.Reference.ConvertToStableRepresentation(doc), first, second)).Any(match => match)) return;
+                    }
+                    double center = origin.DotProduct(direction), half = Math.Abs(value.Value) / 2;
+                    if (!double.IsNaN(center) && !double.IsInfinity(center)) segments.Add((center - half, center + half));
+                }
+                if (dimension.Segments.Size > 0)
+                {
+                    int index = 0;
+                    foreach (DimensionSegment segment in dimension.Segments) Add(segment.Origin, segment.Value, index++);
+                }
+                else Add(dimension.Origin, dimension.Value, 0);
+                result.AddRange(segments);
+            }
+            catch
+            {
+                // A dimension without readable segment origins cannot prove coverage.
+            }
+        }
+        return result;
     }
 
     private static string BuildBeamChainKey(XYZ axisDirection, XYZ measureDirection, IReadOnlyList<ReferencePoint> refs)
@@ -964,7 +1095,7 @@ internal sealed class AutoDimensionService
         XYZ preferredVector,
         double primaryOffsetInternal,
         double overallOffsetInternal,
-        DimensionType? dimensionType, List<string>? diagnostics = null)
+        DimensionType? dimensionType, List<string>? diagnostics = null, DimensionOptions? runOptions = null)
     {
         diagnostics?.Add("Group: " + string.Join(", ", group.Select(d => d.Element.Id.ToString())));
         XYZ viewNormal = view.ViewDirection.Normalize();
@@ -999,6 +1130,7 @@ internal sealed class AutoDimensionService
         try
         {
             bool duplicate = HasSimilarDimension(doc, view, dimLine, references);
+            if (duplicate && runOptions != null) runOptions.ExistingDimensionCount++;
             diagnostics?.Add($"Primary refs={references.Size}, duplicate={duplicate}; line={dimLine.GetEndPoint(0)} -> {dimLine.GetEndPoint(1)}");
             if (!duplicate)
             {
@@ -1022,9 +1154,9 @@ internal sealed class AutoDimensionService
                 ReferenceArray overallReferences = BuildOverallReferences(sortedGroup);
                 Line? overallLine = BuildDimensionLine(sortedGroup, datumDir, dimLineDir, overallOffsetInternal, side);
                 diagnostics?.Add($"Overall refs={overallReferences.Size}, line={overallLine != null}, duplicate={(overallLine != null && HasSimilarDimension(doc, view, overallLine, overallReferences))}");
-                if (overallLine is not null &&
-                    overallReferences.Size == 2 &&
-                    !HasSimilarDimension(doc, view, overallLine, overallReferences))
+                bool overallDuplicate = overallLine != null && overallReferences.Size == 2 && HasSimilarDimension(doc, view, overallLine, overallReferences);
+                if (overallDuplicate && runOptions != null) runOptions.ExistingDimensionCount++;
+                if (overallLine is not null && overallReferences.Size == 2 && !overallDuplicate)
                 {
                     Dimension overallDimension = doc.Create.NewDimension(view, overallLine, overallReferences);
                     if (dimensionType is not null && overallDimension.GetTypeId() != dimensionType.Id)
@@ -1054,24 +1186,24 @@ internal sealed class AutoDimensionService
         int created = 0;
         XYZ right = view.RightDirection.Normalize();
         XYZ up = view.UpDirection.Normalize();
-        var createdLineKeys = new HashSet<string>(StringComparer.Ordinal);
+        var createdLineKeys = new ColumnDimensionState();
 
         if (options.ColumnLeftRightSide == LeftRightSide.Left)
         {
-            created += CreateColumnSetoutForDirection(doc, view, right.Negate(), options.OffsetInternal, dimensionType, createdLineKeys);
+            created += CreateColumnSetoutForDirection(doc, view, right.Negate(), options.OffsetInternal, dimensionType, createdLineKeys, options);
         }
         else if (options.ColumnLeftRightSide == LeftRightSide.Right)
         {
-            created += CreateColumnSetoutForDirection(doc, view, right, options.OffsetInternal, dimensionType, createdLineKeys);
+            created += CreateColumnSetoutForDirection(doc, view, right, options.OffsetInternal, dimensionType, createdLineKeys, options);
         }
 
         if (options.ColumnFrontBackSide == FrontBackSide.Front)
         {
-            created += CreateColumnSetoutForDirection(doc, view, up, options.OffsetInternal, dimensionType, createdLineKeys);
+            created += CreateColumnSetoutForDirection(doc, view, up, options.OffsetInternal, dimensionType, createdLineKeys, options);
         }
         else if (options.ColumnFrontBackSide == FrontBackSide.Back)
         {
-            created += CreateColumnSetoutForDirection(doc, view, up.Negate(), options.OffsetInternal, dimensionType, createdLineKeys);
+            created += CreateColumnSetoutForDirection(doc, view, up.Negate(), options.OffsetInternal, dimensionType, createdLineKeys, options);
         }
 
         return created;
@@ -1083,7 +1215,8 @@ internal sealed class AutoDimensionService
         XYZ placeDirection,
         double offsetInternal,
         DimensionType? dimensionType,
-        ISet<string> createdLineKeys)
+        ColumnDimensionState createdLineKeys,
+        DimensionOptions options)
     {
         XYZ measureDirection = view.ViewDirection.Normalize().CrossProduct(placeDirection);
         if (measureDirection.GetLength() < VectorTolerance)
@@ -1101,13 +1234,17 @@ internal sealed class AutoDimensionService
         int created = 0;
         foreach (FamilyInstance column in CollectVisibleColumns(doc, view))
         {
+            if (options.SelectedColumnIds != null && !options.SelectedColumnIds.Contains(column.Id)) continue;
+            options.RequestedDimensionCount++;
             if (!IsColumnLikeInView(column, view))
             {
                 continue;
             }
 
+            int keysBefore = createdLineKeys.Count;
             if (!TryBuildColumnGridDimension(doc, view, column, visibleGrids, measureDirection, placeDirection, offsetInternal, dimensionType, createdLineKeys))
             {
+                if (createdLineKeys.Count > keysBefore) options.ExistingDimensionCount++;
                 continue;
             }
 
@@ -1170,7 +1307,7 @@ internal sealed class AutoDimensionService
         XYZ placeDirection,
         double offsetInternal,
         DimensionType? dimensionType,
-        ISet<string> createdLineKeys)
+        ColumnDimensionState createdLineKeys)
     {
         IList<(PlanarFace Face, XYZ Normal, XYZ Point)> faces = GetPlanarFaces(column, view.ViewDirection.Normalize());
         (PlanarFace Face, XYZ Normal, XYZ Point)? positive = faces.Count == 0 ? null : SelectBestFace(faces, measureDirection);
@@ -1190,6 +1327,7 @@ internal sealed class AutoDimensionService
 
         if (positive is null || negative is null)
         {
+            int keysBefore = createdLineKeys.Count;
             if (TryBuildColumnReferenceGridDimension(
                     doc,
                     view,
@@ -1205,6 +1343,8 @@ internal sealed class AutoDimensionService
                 return true;
             }
 
+            // A duplicate is handled, not a failed reference requiring another fallback.
+            if (createdLineKeys.Count > keysBefore) return false;
             if (TryBuildColumnCenterGridDimension(
                 doc,
                 view,
@@ -1220,6 +1360,7 @@ internal sealed class AutoDimensionService
                 return true;
             }
 
+            if (createdLineKeys.Count > keysBefore) return false;
             return TryBuildElementReferenceGridDimension(
                 doc,
                 view,
@@ -1278,6 +1419,7 @@ internal sealed class AutoDimensionService
             string lineKey = BuildDimensionLineKey(view, dimLine);
             if (createdLineKeys.Contains(lineKey) || HasSimilarDimension(doc, view, dimLine, refArray))
             {
+                createdLineKeys.MarkCovered();
                 return false;
             }
 
@@ -1312,7 +1454,7 @@ internal sealed class AutoDimensionService
         XYZ placeDirection,
         double offsetInternal,
         DimensionType? dimensionType,
-        ISet<string> createdLineKeys)
+        ColumnDimensionState createdLineKeys)
     {
         if (!TryGetColumnSideReferences(column, measureDirection, out Reference? negativeReference, out Reference? positiveReference) ||
             negativeReference is null ||
@@ -1383,6 +1525,7 @@ internal sealed class AutoDimensionService
             string lineKey = BuildDimensionLineKey(view, dimLine);
             if (createdLineKeys.Contains(lineKey) || HasSimilarDimension(doc, view, dimLine, refArray))
             {
+                createdLineKeys.MarkCovered();
                 return false;
             }
 
@@ -1454,7 +1597,7 @@ internal sealed class AutoDimensionService
         XYZ placeDirection,
         double offsetInternal,
         DimensionType? dimensionType,
-        ISet<string> createdLineKeys)
+        ColumnDimensionState createdLineKeys)
     {
         Reference? centerReference = GetColumnCenterReferences(column, measureDirection)
             .FirstOrDefault();
@@ -1498,6 +1641,7 @@ internal sealed class AutoDimensionService
             string lineKey = BuildDimensionLineKey(view, dimLine);
             if (createdLineKeys.Contains(lineKey) || HasSimilarDimension(doc, view, dimLine, refArray))
             {
+                createdLineKeys.MarkCovered();
                 return false;
             }
 
@@ -1532,7 +1676,7 @@ internal sealed class AutoDimensionService
         XYZ placeDirection,
         double offsetInternal,
         DimensionType? dimensionType,
-        ISet<string> createdLineKeys)
+        ColumnDimensionState createdLineKeys)
     {
         XYZ center = (bbox.Min + bbox.Max) * 0.5;
         double centerPosition = center.DotProduct(measureDirection);
@@ -1569,6 +1713,7 @@ internal sealed class AutoDimensionService
             string lineKey = BuildDimensionLineKey(view, dimLine);
             if (createdLineKeys.Contains(lineKey) || HasSimilarDimension(doc, view, dimLine, refArray))
             {
+                createdLineKeys.MarkCovered();
                 return false;
             }
 
@@ -1978,7 +2123,7 @@ internal sealed class AutoDimensionService
 
         foreach (Dimension existing in collector)
         {
-            if (existing.Curve is not Line existingLine || !existingLine.IsBound)
+            if (existing.Curve is not Line existingLine)
             {
                 continue;
             }
@@ -1989,7 +2134,8 @@ internal sealed class AutoDimensionService
                 continue;
             }
 
-            if (AreOverlappingDimensionLines(view, candidate, existingLine, 0.5))
+            if (DimensionQuickPolicy.SameMeasurement(candidateReferenceKey, existingReferenceKey,
+                candidate.Direction.DotProduct(existingLine.Direction)))
             {
                 return true;
             }
@@ -2058,11 +2204,12 @@ internal sealed class AutoDimensionService
         var keys = new List<string>();
         foreach (Reference reference in references)
         {
-            string key = BuildReferenceKey(doc, reference);
-            if (!string.IsNullOrWhiteSpace(key))
-            {
-                keys.Add(key);
-            }
+            // Element IDs alone cannot distinguish different faces on the same column.
+            string key;
+            try { key = reference.ConvertToStableRepresentation(doc); }
+            catch { return string.Empty; }
+            if (string.IsNullOrWhiteSpace(key)) return string.Empty;
+            keys.Add(key);
         }
 
         return string.Join("|", keys.OrderBy(k => k, StringComparer.Ordinal));
@@ -2367,6 +2514,10 @@ internal sealed class AutoDimensionService
 
             SpreadTextCluster(cluster, lineDirection, minSpacing);
             doc.Regenerate();
+        }
+        catch (Autodesk.Revit.Exceptions.RegenerationFailedException)
+        {
+            throw;
         }
         catch
         {

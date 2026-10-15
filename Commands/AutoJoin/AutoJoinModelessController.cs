@@ -54,10 +54,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             _document = app.ActiveUIDocument.Document;
             _form = new AutoJoinForm(SettingsSerializer.LoadOrDefault(SettingsSerializer.DefaultPath));
             _form.EnableModeless();
+            try { _form.SetTypeChoices(TypeJoinCatalog.Read(_document)); }
+            catch (Exception ex) { Log("Type catalog failed: " + ex); _form.SetTypeChoices(Array.Empty<TypeJoinChoice>()); _form.SetStatus("專案類型讀取失敗，請重新讀取：" + ex.Message); }
             _event = ExternalEvent.Create(this);
             _form.RunRequested += () => Queue("run");
             _form.SelectionRequested += () => Queue("selection");
             _form.PickRequested += () => Queue("pick");
+            _form.TypeChoicesRefreshRequested += () => Queue("types");
             _form.FormClosed += (_, __) =>
             {
                 // WinForms callbacks are outside Revit API context. Defer API cleanup.
@@ -130,7 +133,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             if (_busy || _closeRequested || _released) return;
             try
             {
-                _settings = _form.BuildSettings();
+                if (request == "run") _settings = _form.BuildSettings();
                 _action = _form.Action;
                 _request = request;
                 _busy = true;
@@ -189,6 +192,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                     throw new InvalidOperationException("模型已切換或關閉，未執行。請在目前模型重新開啟自動接合。");
                 if (!LicenseManager.Instance.HasFeatureAccess("AutoJoin"))
                     throw new InvalidOperationException("目前授權不包含自動接合功能。");
+                if (request == "types")
+                {
+                    var choices = TypeJoinCatalog.Read(_document);
+                    _form.SetTypeChoices(choices);
+                    _form.SetStatus($"已重新讀取 {choices.Count} 個類別／類型選項。\n模型：{_document.Title}");
+                    return;
+                }
                 if (request == "pick")
                 {
                     _form.Hide();

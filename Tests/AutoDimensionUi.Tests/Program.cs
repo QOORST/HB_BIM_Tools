@@ -21,6 +21,7 @@ internal static class Program {
     [STAThread] static void Main(string[] args) {
         Application.SetHighDpiMode(HighDpiMode.DpiUnaware);
         Application.EnableVisualStyles();
+        QuickFlowTests.Run();
         string output = args.Length > 0 ? args[0] : Path.Combine(AppContext.BaseDirectory,"screenshots"); Directory.CreateDirectory(output);
         foreach (bool locked in new[]{false,true}) {
             DimensionOptions? applied = null;

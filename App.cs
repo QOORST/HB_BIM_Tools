@@ -21,6 +21,10 @@ namespace YD_RevitTools.LicenseManager
         private SplitButton _quickRiseMenu;
         private PushButton _quickUpButton;
         private PushButton _quickDownButton;
+        private SplitButton _dimensionMenu;
+        private PushButton _dimensionColumnButton, _dimensionGridButton, _dimensionBeamButton;
+        private SplitButton _positionMenu;
+        private PushButton _positionCenterButton, _positionEdgeButton;
         internal static bool LastQuickRiseWasUp { get; set; } = true;
 
         public Result OnStartup(UIControlledApplication application)
@@ -386,25 +390,27 @@ namespace YD_RevitTools.LicenseManager
             SetButtonIcon(splitWallData, "split_wall");
             joinPulldown.AddPushButton(splitWallData);
 
-            // === 標註工具組 (Pulldown Button) ===
+            // Common tag commands are direct entries; secondary commands remain in the menu.
             if (!HasButton(panel, "AutoDimensionTools"))
             {
-                PulldownButtonData autoDimensionPulldownData = new PulldownButtonData("AutoDimensionTools", "標註\n工具");
-                autoDimensionPulldownData.ToolTip = "自動標註工具組";
-                autoDimensionPulldownData.LongDescription = "提供柱、梁、軸線與房間內容的快速標註與更新工具。";
+                PulldownButtonData autoDimensionPulldownData = new PulldownButtonData("AutoDimensionTools", "標註\n更多");
+                autoDimensionPulldownData.ToolTip = "其他標註與整理工具";
+                autoDimensionPulldownData.LongDescription = "房間內容、關聯標籤、進階排列與選取範圍標註。";
                 SetButtonIcon(autoDimensionPulldownData, "auto_dimension");
 
-                PulldownButton autoDimensionPulldown = panel.AddItem(autoDimensionPulldownData) as PulldownButton;
+                var tagAlignMenuData = new SplitButtonData("TagAlignTools", "標籤\n對齊");
+                SetButtonIcon(tagAlignMenuData, "tag_align");
+                var tagBatchMenuData = new SplitButtonData("TagBatchAlignTools", "批次配對\n對齊");
+                SetButtonIcon(tagBatchMenuData, "tag_align");
 
                 PushButtonData autoDimensionData = new PushButtonData(
                     "AutoDimensionMain",
-                    "自動\n標註",
+                    "柱｜補齊\n目前視圖",
                     assemblyPath,
                     "YDBIM.AutoDimension.App.AutoDimensionCommand");
-                autoDimensionData.ToolTip = "依可見構件快速建立標註";
-                autoDimensionData.LongDescription = "開啟完整標註設定視窗，可選擇模式、方向、偏移量與標註型式。";
+                autoDimensionData.ToolTip = "沿用專案設定，補齊目前視圖可見柱的尺寸";
+                autoDimensionData.LongDescription = "不必預選；已有相同參考與方向的尺寸保留，首次使用或設定失效時才開啟設定。";
                 SetButtonIcon(autoDimensionData, "auto_dimension");
-                autoDimensionPulldown.AddPushButton(autoDimensionData);
 
                 PushButtonData roomContentData = new PushButtonData(
                     "AutoDimensionRoomContent",
@@ -414,7 +420,6 @@ namespace YD_RevitTools.LicenseManager
                 roomContentData.ToolTip = "更新房間內容參數";
                 roomContentData.LongDescription = "批次更新目前視圖可處理房間的內容資訊，若資料已最新則不重複寫入。";
                 SetButtonIcon(roomContentData, "model_data_manager");
-                autoDimensionPulldown.AddPushButton(roomContentData);
 
                 PushButtonData autoTagHorizontalData = new PushButtonData(
                     "AutoTagHorizontal",
@@ -425,7 +430,45 @@ namespace YD_RevitTools.LicenseManager
                 autoTagHorizontalData.LongDescription =
                     "開啟自動標籤設定，可選擇軀體圖或機電圖樣板，依不同構件分類指定標籤族型，並控制標籤放置位置、偏移距離與引線。";
                 SetButtonIcon(autoTagHorizontalData, "auto_tag_horizontal");
-                autoDimensionPulldown.AddPushButton(autoTagHorizontalData);
+                var dimensionMenuData = new SplitButtonData("AutoDimensionQuickTools", "自動\n標註");
+                SetButtonIcon(dimensionMenuData, "auto_dimension");
+                _dimensionMenu = panel.AddItem(dimensionMenuData) as SplitButton;
+                _dimensionMenu.IsSynchronizedWithCurrentItem = true;
+                _dimensionColumnButton = _dimensionMenu.AddPushButton(autoDimensionData);
+                var gridAction = new PushButtonData("AutoDimensionGrid", "軸線｜補齊\n目前視圖", assemblyPath,
+                    "YDBIM.AutoDimension.App.AutoDimensionGridCommand");
+                gridAction.ToolTip = "補齊目前視圖全部可用直線軸線的尺寸，不必預選。";
+                SetButtonIcon(gridAction, "auto_dimension");
+                _dimensionGridButton = _dimensionMenu.AddPushButton(gridAction);
+                var beamAction = new PushButtonData("AutoDimensionBeam", "梁｜依選取\n標註", assemblyPath,
+                    "YDBIM.AutoDimension.App.AutoDimensionBeamCommand");
+                beamAction.ToolTip = "依預選梁建立尺寸；未預選時進入框選。";
+                SetButtonIcon(beamAction, "auto_dimension");
+                _dimensionBeamButton = _dimensionMenu.AddPushButton(beamAction);
+                var linkedDimensions = new PushButtonData("AutoDimensionLinked", "連結模型\n標註", assemblyPath,
+                    "YDBIM.AutoDimension.App.AutoDimensionLinkedCommand");
+                linkedDimensions.ToolTip = "指定連結的梁、柱或軸線，在目前出圖模型建立尺寸；需要 Revit 2024 以上。";
+                SetButtonIcon(linkedDimensions, "auto_dimension");
+                _dimensionMenu.AddPushButton(linkedDimensions);
+                panel.AddItem(autoTagHorizontalData);
+                var tagAlignMenu = panel.AddItem(tagAlignMenuData) as SplitButton;
+                var tagBatchMenu = panel.AddItem(tagBatchMenuData) as SplitButton;
+                tagAlignMenu.IsSynchronizedWithCurrentItem = true;
+                tagBatchMenu.IsSynchronizedWithCurrentItem = true;
+                PulldownButton autoDimensionPulldown = panel.AddItem(autoDimensionPulldownData) as PulldownButton;
+                var dimensionSettings = new PushButtonData("AutoDimensionSettings", "自動標註設定", assemblyPath,
+                    "YDBIM.AutoDimension.App.AutoDimensionSettingsCommand");
+                dimensionSettings.ToolTip = "調整柱、梁與軸線的標註設定，保留完整設定與視圖範圍操作。";
+                SetButtonIcon(dimensionSettings, "auto_dimension");
+                _dimensionMenu.AddSeparator();
+                _dimensionMenu.AddPushButton(dimensionSettings);
+                autoDimensionPulldown.AddPushButton(roomContentData);
+                autoDimensionPulldown.AddSeparator();
+                var selectedDimensions = new PushButtonData("AutoDimensionSelectedOnly", "自動標註（僅選取）", assemblyPath,
+                    "YDBIM.AutoDimension.App.AutoDimensionSelectionCommand");
+                selectedDimensions.ToolTip = "僅處理選取的柱、梁或軸線；不擴大至全視圖。";
+                SetButtonIcon(selectedDimensions, "auto_dimension");
+                autoDimensionPulldown.AddPushButton(selectedDimensions);
 
                 PushButtonData selectRelatedTagsData = new PushButtonData(
                     "SelectRelatedTags",
@@ -438,26 +481,26 @@ namespace YD_RevitTools.LicenseManager
                 SetButtonIcon(selectRelatedTagsData, "tag_related");
                 autoDimensionPulldown.AddPushButton(selectRelatedTagsData);
 
-                var tagAlignHorizontal = new PushButtonData("TagAlignHorizontal", "標籤水平對齊", assemblyPath,
+                var tagAlignHorizontal = new PushButtonData("TagAlignHorizontal", "標籤對齊\n水平", assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlignHorizontal");
                 tagAlignHorizontal.ToolTip = "選取基準標籤或水平線，再批次選取標籤；只調整上下位置。";
                 SetButtonIcon(tagAlignHorizontal, "auto_tag_horizontal");
-                autoDimensionPulldown.AddPushButton(tagAlignHorizontal);
-                var tagAlignVertical = new PushButtonData("TagAlignVertical", "標籤垂直對齊", assemblyPath,
+                tagAlignMenu.AddPushButton(tagAlignHorizontal);
+                var tagAlignVertical = new PushButtonData("TagAlignVertical", "標籤對齊\n垂直", assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlignVertical");
                 tagAlignVertical.ToolTip = "選取基準標籤或垂直線，再批次選取標籤；只調整左右位置。";
                 SetButtonIcon(tagAlignVertical, "auto_tag_vertical");
-                autoDimensionPulldown.AddPushButton(tagAlignVertical);
-                var tagBatchHorizontal = new PushButtonData("TagAlignBatchHorizontal", "結構標籤批次水平對齊", assemblyPath,
+                tagAlignMenu.AddPushButton(tagAlignVertical);
+                var tagBatchHorizontal = new PushButtonData("TagAlignBatchHorizontal", "批次配對\n水平對齊", assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlignBatchHorizontal");
                 tagBatchHorizontal.ToolTip = "框選基準及待對齊標籤，依梁、柱、牆、樓板、基礎分類及上下順序配對；支援 1 對 1。";
                 SetButtonIcon(tagBatchHorizontal, "auto_tag_horizontal");
-                autoDimensionPulldown.AddPushButton(tagBatchHorizontal);
-                var tagBatchVertical = new PushButtonData("TagAlignBatchVertical", "結構標籤批次垂直對齊", assemblyPath,
+                tagBatchMenu.AddPushButton(tagBatchHorizontal);
+                var tagBatchVertical = new PushButtonData("TagAlignBatchVertical", "批次配對\n垂直對齊", assemblyPath,
                     "YD_RevitTools.LicenseManager.Commands.AR.AutoTag.CmdTagAlignBatchVertical");
                 tagBatchVertical.ToolTip = "框選基準及待對齊標籤，依結構標籤分類及左右順序配對，只調整左右位置；支援 1 對 1。";
                 SetButtonIcon(tagBatchVertical, "auto_tag_vertical");
-                autoDimensionPulldown.AddPushButton(tagBatchVertical);
+                tagBatchMenu.AddPushButton(tagBatchVertical);
                 PushButtonData tagAlignData = new PushButtonData(
                     "TagAlign",
                     "標籤進階排列",
@@ -973,10 +1016,12 @@ namespace YD_RevitTools.LicenseManager
             }
             if (!HasButton(panel, "MepPositionTools"))
             {
-                var positionMenu = panel.AddItem(new SplitButtonData("MepPositionTools", "定位\n尺寸")) as SplitButton;
-                if (positionMenu != null) positionMenu.IsSynchronizedWithCurrentItem = false;
+                var positionMenu = panel.AddItem(new SplitButtonData("MepPositionTools", "管線/設備\n定位尺寸")) as SplitButton;
+                _positionMenu = positionMenu;
+                if (positionMenu != null) positionMenu.IsSynchronizedWithCurrentItem = true;
                 foreach (var entry in new[] {
-                    new[] { "MepPositionDimension", "管線\n定位尺寸", "CmdMepPositionDimension", "mep_position_dimension", "框選管排，依設定自動配對本機或指定連結模型的梁側面。可切換手選基準；沿用本次工作階段設定。" },
+                    new[] { "MepPositionDimension", "管線/設備\n中心距", "CmdMepPositionCenter", "mep_position_dimension", "依上次設定，以物件中心參考建立定位尺寸。" },
+                    new[] { "MepPositionEdge", "管線/設備\n邊距", "CmdMepPositionEdge", "mep_position_dimension", "以支援族群的最外緣建立定位尺寸；不適用管線切線。" },
                     new[] { "MepPositionDimensionSettings", "定位\n尺寸設定", "CmdMepPositionDimensionSettings", "mep_position_settings", "設定基準模式、參考模型、搜尋範圍、尺寸樣式及分組間距；不建立尺寸。" },
                 })
                 {
@@ -985,7 +1030,9 @@ namespace YD_RevitTools.LicenseManager
                     button.ToolTip = entry[4];
                     SetButtonIcon(button, entry[3]);
                     if (entry[0] == "MepPositionDimensionSettings") positionMenu?.AddSeparator();
-                    positionMenu?.AddPushButton(button);
+                    var added = positionMenu?.AddPushButton(button);
+                    if (entry[0] == "MepPositionDimension") _positionCenterButton = added;
+                    if (entry[0] == "MepPositionEdge") _positionEdgeButton = added;
                 }
             }
             foreach (var entry in new[] {
@@ -1455,10 +1502,21 @@ namespace YD_RevitTools.LicenseManager
         private void RestoreQuickRiseAction(object sender, Autodesk.Revit.UI.Events.IdlingEventArgs e)
         {
             // 原生 SplitButton 會把設定也設為目前項目；命令結束後還原最近執行方向。
-            if (_quickRiseMenu == null) return;
             var action = LastQuickRiseWasUp ? _quickUpButton : _quickDownButton;
-            if (action != null && _quickRiseMenu.CurrentButton?.Name == "MepQuickSettings")
+            if (action != null && _quickRiseMenu?.CurrentButton?.Name == "MepQuickSettings")
                 _quickRiseMenu.CurrentButton = action;
+            if (_dimensionMenu?.CurrentButton?.Name == "AutoDimensionSettings")
+            {
+                var mode = YDBIM.AutoDimension.App.AutoDimensionQuickRunner.LastMode;
+                _dimensionMenu.CurrentButton = mode == YDBIM.AutoDimension.Core.DimensionMode.BeamGrid ? _dimensionGridButton :
+                    mode == YDBIM.AutoDimension.Core.DimensionMode.BeamWidth ? _dimensionBeamButton : _dimensionColumnButton;
+            }
+            if (_positionMenu != null)
+            {
+                var positionAction = Commands.MEP.CmdMepPositionDimension.UseEdgeDistance ? _positionEdgeButton : _positionCenterButton;
+                if (positionAction != null && _positionMenu.CurrentButton != positionAction)
+                    _positionMenu.CurrentButton = positionAction;
+            }
         }
 
         public Result OnShutdown(UIControlledApplication application)

@@ -8,6 +8,9 @@
     <Compile Include="../../Commands/AR/AutoDimension/Core/AutoDimensionSettingsStore.cs" Link="AutoDimensionSettingsStore.cs" />
     <Compile Include="../../Commands/AR/AutoDimension/UI/DimensionOptionsForm.cs" Link="DimensionOptionsForm.cs" />
     <Compile Include="../../Commands/AR/AutoDimension/Core/DimensionOptions.cs" Link="DimensionOptions.cs" />
+    <Compile Include="../../Commands/AR/AutoDimension/Core/DimensionQuickPolicy.cs" Link="DimensionQuickPolicy.cs" />
+    <Compile Include="../../Commands/AR/AutoDimension/Core/BeamChainProjectionPolicy.cs" Link="BeamChainProjectionPolicy.cs" />
+    <Compile Include="../../Commands/AR/AutoDimension/Core/LinkedDimensionPolicy.cs" Link="LinkedDimensionPolicy.cs" />
     <Compile Include="../../Commands/AR/AutoDimension/Core/GridBubbleService.cs" Link="GridBubbleService.cs" />
   </ItemGroup>
 </Project>

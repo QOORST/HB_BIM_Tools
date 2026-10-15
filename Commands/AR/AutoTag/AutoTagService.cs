@@ -60,7 +60,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             UIDocument uiDoc,
             AutoTagMode mode,
             AutoTagOptions options,
-            IReadOnlyList<AutoTagRuleSelection> selectedRules)
+            IReadOnlyList<AutoTagRuleSelection> selectedRules,
+            Func<IReadOnlyList<AutoTagPreviewItem>, AutoTagPreviewDecision> preview = null,
+            ISet<string> excludedCandidates = null)
         {
             if (uiDoc == null)
                 throw new ArgumentNullException(nameof(uiDoc));
@@ -78,6 +80,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 return AutoTagResult.Failed("目前視圖不可建立標籤，請切換到平面、立面、剖面或詳圖視圖。");
 
             IList<TagCandidate> candidates = GetCandidateElements(uiDoc, view, options, selectedRules);
+            if (excludedCandidates != null) candidates = candidates.Where(c => !excludedCandidates.Contains(c.Key)).ToList();
             if (candidates.Count == 0)
                 return AutoTagResult.Failed("沒有可處理的元素。請確認目前視圖或目前選取中含有所選分類的可標註元素。");
 
@@ -118,6 +121,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             int skipped = 0;
             int failed = 0;
             var expectedCenters = new Dictionary<ElementId, XYZ>();
+            var previewItems = new List<AutoTagPreviewItem>();
 
             using (var batch = new TransactionGroup(doc, GetTransactionName(mode)))
             {
@@ -164,6 +168,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                         if (itemTransaction.Commit() != TransactionStatus.Committed)
                             throw new InvalidOperationException("單筆標籤交易未完成，已停止本次作業。");
                         taggedElementIds.Add(candidate.Key);
+                        previewItems.Add(new AutoTagPreviewItem { Id = tagId, Key = candidate.Key, Description = rule.Rule.Name + " / " + candidate.Description });
                         if (!options.PipeBank)
                         {
                             XYZ expected;
@@ -222,6 +227,41 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     if (batch.RollBack() != TransactionStatus.RolledBack)
                         throw new InvalidOperationException("投影驗證失敗且無法回復", ex);
                     return AutoTagResult.Failed("投影定位未通過驗證，本次建立已回復：" + ex.Message);
+                }
+            }
+            if (preview != null && previewItems.Count > 0)
+            {
+                foreach (var item in previewItems) item.NeedsReview = reviewIds.Contains(item.Id);
+                uiDoc.RefreshActiveView();
+                var decision = preview(previewItems);
+                if (decision == null || decision.Action != AutoTagPreviewAction.Apply)
+                {
+                    if (batch.RollBack() != TransactionStatus.RolledBack) throw new InvalidOperationException("預覽未完整回復。");
+                    return AutoTagResult.Failed("預覽已回復，未保留本批標籤。");
+                }
+                var removed = previewItems.Where(i => decision.Excluded.Contains(i.Key)).Select(i => i.Id).ToList();
+                if (removed.Count > 0)
+                {
+                    var heads = previewItems.Except(previewItems.Where(i => removed.Contains(i.Id)))
+                        .ToDictionary(i => i.Id, i => ((IndependentTag)doc.GetElement(i.Id)).TagHeadPosition);
+                    using (var remove = new Transaction(doc, "排除預覽標籤"))
+                    {
+                        remove.Start();
+                        var deleted = doc.Delete(removed);
+                        if (deleted.Any(id => !removed.Contains(id))) throw new InvalidOperationException("排除將影響其他物件，已停止套用。");
+                        if (remove.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("排除交易未完成。");
+                    }
+                    foreach (var head in heads)
+                        if (((IndependentTag)doc.GetElement(head.Key)).TagHeadPosition.DistanceTo(head.Value) > 0.05 / 304.8)
+                            throw new InvalidOperationException("套用位置與預覽不同，已停止套用。");
+                    created -= removed.Count;
+                    reviewIds.RemoveAll(id => removed.Contains(id));
+                    issues.Add($"預覽排除 {removed.Count} 個；以下診斷含排除前的配置資訊。");
+                }
+                if (created == 0)
+                {
+                    if (batch.RollBack() != TransactionStatus.RolledBack) throw new InvalidOperationException("預覽未完整回復。");
+                    return AutoTagResult.Failed("已排除全部預覽標籤，未保留變更。");
                 }
             }
             if (batch.Assimilate() != TransactionStatus.Committed)

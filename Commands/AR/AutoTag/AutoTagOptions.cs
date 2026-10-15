@@ -97,6 +97,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         public bool SkipExistingTags { get; set; } = true;
 
         public bool AvoidTagOverlap { get; set; } = true;
+        public bool PreviewBeforeApply { get; set; }
 
         // Defaults preserve previously saved model-distance and direction behavior.
         public bool VerticalOnly { get; set; }

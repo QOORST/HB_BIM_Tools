@@ -18,12 +18,17 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     public bool AllowSameCategoryJoin { get; set; } = false;
 
+    public bool UseSameCategoryTypeRules { get; set; } = false;
+
+    public List<TypeJoinRule> SameCategoryTypeRules { get; set; } = new();
+
     public bool AllowStructuralNonStructuralJoin { get; set; } = true;
 
     public bool CheckInDetail { get; set; } = false;
 
     public void Normalize()
     {
+        SameCategoryTypeRules ??= new List<TypeJoinRule>();
         var validKeys = new HashSet<string>(CategoryCatalog.AllKeys, StringComparer.Ordinal);
 
         // One-time migration for old XML files created before the 5-category preset.

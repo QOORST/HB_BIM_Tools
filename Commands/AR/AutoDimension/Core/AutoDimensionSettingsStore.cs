@@ -64,6 +64,38 @@ internal sealed class AutoDimensionSavedSettings
             SelectedVerticalGridIds = options.SelectedVerticalGridIds.Select(ElementIdCompat.ToInt32).ToList()
         };
     }
+
+    public DimensionOptions ToOptions()
+    {
+        return new DimensionOptions {
+            ModeType = ModeType, Mode = Mode, Direction = Direction,
+            IncludeBeamWidth = IncludeBeamWidth, IncludeBeamSpacing = IncludeBeamSpacing,
+            SelectedBeamsOnly = SelectedBeamsOnly,
+            ColumnLeftRightSide = ColumnLeftRightSide, ColumnFrontBackSide = ColumnFrontBackSide,
+            OffsetInternal = UnitUtils.ConvertToInternalUnits(OffsetMm, UnitTypeId.Millimeters),
+            BeamSpacingOffsetInternal = BeamSpacingOffsetMm.HasValue ? UnitUtils.ConvertToInternalUnits(BeamSpacingOffsetMm.Value, UnitTypeId.Millimeters) : (double?)null,
+            GridOffsetsInPaperSpace = GridOffsetsInPaperSpace,
+            GridPrimaryOffsetInternal = UnitUtils.ConvertToInternalUnits(GridPrimaryOffsetMm, UnitTypeId.Millimeters),
+            GridOverallOffsetInternal = UnitUtils.ConvertToInternalUnits(GridOverallOffsetMm, UnitTypeId.Millimeters),
+            DimensionTypeName = DimensionTypeName
+            // Element IDs are supplied by the current selection, never restored for quick execution.
+        };
+    }
+
+    public bool CanReuse(DimensionMode mode, IReadOnlyCollection<string> typeNames)
+    {
+        bool Finite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
+        if (ModeType != mode || (!string.IsNullOrEmpty(DimensionTypeName) && !typeNames.Contains(DimensionTypeName))) return false;
+        if (typeNames.Count == 0) return false;
+        if (mode == DimensionMode.BeamGrid)
+            return Enum.IsDefined(typeof(PlacementDirection), Direction) && Finite(GridPrimaryOffsetMm) && Finite(GridOverallOffsetMm);
+        if (!Finite(OffsetMm)) return false;
+        if (mode == DimensionMode.BeamWidth)
+            return (IncludeBeamWidth || IncludeBeamSpacing) && (!BeamSpacingOffsetMm.HasValue || Finite(BeamSpacingOffsetMm.Value));
+        return Enum.IsDefined(typeof(PlacementMode), Mode) && Enum.IsDefined(typeof(LeftRightSide), ColumnLeftRightSide) &&
+            Enum.IsDefined(typeof(FrontBackSide), ColumnFrontBackSide) &&
+            (ColumnLeftRightSide != LeftRightSide.None || ColumnFrontBackSide != FrontBackSide.None);
+    }
 }
 
 internal sealed class GridBubbleSavedSettings

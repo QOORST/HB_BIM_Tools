@@ -48,6 +48,27 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     private readonly Label _categoryCount = new() { AutoSize = true, Margin = new Padding(10, 8, 0, 0), ForeColor = Color.DimGray };
     private readonly ListBox _priorityList = new();
     private readonly CheckBox _sameCategoryCheckbox = new();
+    private readonly CheckBox _typeRulesEnabled = new() { Text = "啟用類型規則", AutoSize = true };
+    private readonly Button _typeRulesButton = new() { Text = "類型規則…", AutoSize = true };
+    private readonly Label _typeRulesCount = new() { AutoSize = true, Margin = new Padding(3, 8, 3, 0) };
+    private List<TypeJoinRule> _typeRules = new();
+    private IReadOnlyList<TypeJoinChoice> _typeChoices = Array.Empty<TypeJoinChoice>();
+    public event System.Action TypeChoicesRefreshRequested;
+
+    public void SetTypeChoices(IReadOnlyList<TypeJoinChoice> choices)
+    {
+        _typeChoices = choices ?? Array.Empty<TypeJoinChoice>();
+        _typeRulesButton.Enabled = !_alignOnlyMode;
+    }
+
+    private void EditTypeRules()
+    {
+        using var editor = new TypeJoinRuleEditor(_typeChoices, _typeRules);
+        if (editor.ShowDialog(this) != DialogResult.OK) return;
+        _typeRules = editor.Rules.Select(x => x.Clone()).ToList();
+        if (_typeRules.Count == 0) _typeRulesEnabled.Checked = false;
+        _typeRulesCount.Text = $"{_typeRules.Count} 條";
+    }
     private readonly CheckBox _structuralBridgeCheckbox = new();
     private readonly CheckBox _detailCheckbox = new();
     private readonly bool _alignOnlyMode;
@@ -139,6 +160,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 ? scopeOption.Value
                 : AutoJoinScope.VisibleInView,
             AllowSameCategoryJoin = _sameCategoryCheckbox.Checked,
+            UseSameCategoryTypeRules = _typeRulesEnabled.Checked,
+            SameCategoryTypeRules = _typeRules.Select(x => x.Clone()).ToList(),
             AllowStructuralNonStructuralJoin = _structuralBridgeCheckbox.Checked,
             CheckInDetail = _detailCheckbox.Checked,
             EnabledCategoryKeys = GetCheckedCategoryKeys(),
@@ -239,11 +262,27 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         categoryGroup.Controls.Add(categoryLayout);
 
         var priorityGroup = new GroupBox { Text = "接合優先序（越上方優先序越高）", Dock = DockStyle.Fill, Padding = new Padding(8, 22, 8, 8) };
-        var priorityLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        var priorityLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 };
         priorityLayout.Padding = new Padding(2);
         priorityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         priorityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100f));
         priorityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        priorityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var ruleBar = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+        _typeRulesButton.Enabled = false;
+        _typeRulesEnabled.Enabled = !_alignOnlyMode;
+        _typeRulesButton.Click += (_, _) => EditTypeRules();
+        _typeRulesEnabled.CheckedChanged += (_, _) => _sameCategoryCheckbox.Enabled = _alignOnlyMode || !_typeRulesEnabled.Checked;
+        var refreshTypes = new Button { Text = "↻", Width = 30, Height = 28, AccessibleName = "重新讀取專案類型" };
+        var refreshTip = new ToolTip();
+        refreshTip.SetToolTip(refreshTypes, "重新讀取專案類型");
+        refreshTip.SetToolTip(_typeRulesEnabled, "同類別僅接合符合規則的類型配對；未符合的配對會略過。");
+        Disposed += (_, _) => refreshTip.Dispose();
+        refreshTypes.Enabled = !_alignOnlyMode;
+        refreshTypes.Click += (_, _) => TypeChoicesRefreshRequested?.Invoke();
+        ruleBar.Controls.AddRange(new Control[] { _typeRulesEnabled, _typeRulesButton, _typeRulesCount, refreshTypes });
+        priorityLayout.Controls.Add(ruleBar, 0, 1);
+        priorityLayout.SetColumnSpan(ruleBar, 2);
         _priorityList.Dock = DockStyle.Fill;
         _priorityList.Margin = new Padding(3);
         foreach (var key in CategoryCatalog.DefaultPriorityKeys)
@@ -467,6 +506,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         }
 
         _sameCategoryCheckbox.Checked = settings.AllowSameCategoryJoin;
+        _typeRules = (settings.SameCategoryTypeRules ?? new List<TypeJoinRule>()).Select(x => x.Clone()).ToList();
+        _typeRulesEnabled.Checked = settings.UseSameCategoryTypeRules;
+        _typeRulesCount.Text = $"{_typeRules.Count} 條";
         _structuralBridgeCheckbox.Checked = settings.AllowStructuralNonStructuralJoin;
         _detailCheckbox.Checked = settings.CheckInDetail;
     }
@@ -484,6 +526,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     private bool ValidateBeforeRun()
     {
+        if (!_alignOnlyMode && !ValidateTypeRules()) return false;
         if (GetCheckedCategoryKeys().Count > 0)
             return true;
 
@@ -556,6 +599,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     private void ExportSettings()
     {
+        if (!_alignOnlyMode && !ValidateTypeRules()) return;
         using var dialog = new SaveFileDialog
         {
             Filter = "XML files (*.xml)|*.xml|所有檔案 (*.*)|*.*",
@@ -575,7 +619,23 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         MessageBox.Show($"設定已匯出至：{Environment.NewLine}{directory}", "自動接合", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private static string LocalizeCategoryText(string key, string fallback)
+    private bool ValidateTypeRules()
+    {
+        try
+        {
+            TypeJoinPolicy.Validate(_typeRules);
+            if (_typeRulesEnabled.Checked && _typeRules.Count == 0)
+                throw new InvalidOperationException("請新增類型規則，或取消啟用類型規則。");
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            MessageBox.Show(this, ex.Message, "類型規則", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+    }
+
+    internal static string LocalizeCategoryText(string key, string fallback)
     {
         return CategoryTextMap.TryGetValue(key, out var text) ? text : fallback;
     }
