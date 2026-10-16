@@ -346,6 +346,13 @@ namespace YD_RevitTools.LicenseManager
             SetButtonIcon(autoJoinData, "auto_join");
             joinPulldown.AddPushButton(autoJoinData);
 
+            var autoVoidCutData = new PushButtonData("AutoVoidCut", "自動切割", assemblyPath,
+                "YD_RevitTools.LicenseManager.Commands.AR.AutoJoin.CmdAutoVoidCut");
+            autoVoidCutData.ToolTip = "批次使用族內空心切割構件";
+            autoVoidCutData.LongDescription = "先選取含可切割空心的族元件，再選取接合工具支援類別的構件，或地形實體（2024 起，含明確選取的子分區）。各構件仍需通過原生空心切割檢查。不自動擴大到母地形。僅處理目前模型；略過既有切割，未驗證到實際切除則回復。群組與固定元件不處理。";
+            SetButtonIcon(autoVoidCutData, "auto_join");
+            joinPulldown.AddPushButton(autoVoidCutData);
+
             // 對齊牆輪廓
             PushButtonData alignWallProfileData = new PushButtonData(
                 "AlignWallProfile",

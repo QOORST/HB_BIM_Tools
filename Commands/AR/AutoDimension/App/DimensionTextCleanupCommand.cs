@@ -21,6 +21,7 @@ namespace YDBIM.AutoDimension.App
         {
             var ui = data.Application.ActiveUIDocument;
             if (ui == null) return Result.Cancelled;
+            if (DimensionTextCleanupPreviewController.ActivateExisting()) return Result.Succeeded;
             var doc = ui.Document;
             try
             {
@@ -33,6 +34,7 @@ namespace YDBIM.AutoDimension.App
                     if (form.ShowDialog() != System.Windows.Forms.DialogResult.OK) return Result.Cancelled;
                     int moved = 0, skipped = 0, unresolved = 0;
                     var previewBoxes = new List<DimensionTextPreview.Box>();
+                    var changes = new List<DimensionTextCleanupPreviewController.Change>();
                     using (var group = new TransactionGroup(doc, "尺寸文字整理"))
                     {
                         group.Start();
@@ -77,6 +79,7 @@ namespace YDBIM.AutoDimension.App
                                         int conflicts;
                                         var plan = DimensionTextLayout.Plan(boxes, form.Gap, form.Offset, out conflicts);
                                         int count = 0;
+                                        var chainChanges = new List<DimensionTextCleanupPreviewController.Change>();
                                         var chainPreview = new List<DimensionTextPreview.Box>();
                                         foreach (var box in boxes)
                                         {
@@ -85,11 +88,16 @@ namespace YDBIM.AutoDimension.App
                                                 Along = along, Across = across, Width = box.Width / factor, Height = box.Height / factor });
                                             if (Math.Abs(delta) < 1e-9) continue;
                                             segments[box.Index].TextPosition = originals[box.Index] + across * delta;
+                                            chainChanges.Add(new DimensionTextCleanupPreviewController.Change {
+                                                UniqueId = dim.UniqueId, Index = box.Index, SegmentCount = segments.Count,
+                                                Before = originals[box.Index], After = segments[box.Index].TextPosition,
+                                                Value = segments[box.Index].Value });
                                             count++;
                                         }
                                         if (sub.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("尺寸更新未提交");
                                         moved += count; unresolved += conflicts;
                                         previewBoxes.AddRange(chainPreview);
+                                        changes.AddRange(chainChanges);
                                     }
                                     catch { if (sub.GetStatus() == TransactionStatus.Started) sub.RollBack(); skipped++; }
                                 }
@@ -107,23 +115,11 @@ namespace YDBIM.AutoDimension.App
                         var conflictIds=DimensionTextLayout.FindConflicts(bounds,form.Gap);
                         foreach(var index in conflictIds) previewBoxes[index].Conflict=true;
                         unresolved=conflictIds.Count;
-                        TaskDialogResult result;
-                        using(var preview=new DimensionTextPreview(doc.ActiveView,previewBoxes))
-                        {
-                            string previewStatus;
-                            try {
-                                preview.Start(); ui.RefreshActiveView();
-                                previewStatus=preview.RenderError != null ? "色框預覽失敗："+preview.RenderError :
-                                    preview.Rendered ? "綠框：估算文字範圍；紅框：仍可能擁擠。" : "目前視圖未回報色框繪製，請以實際文字位置檢查。";
-                            }
-                            catch(Exception ex) { previewStatus="色框預覽無法啟動："+ex.Message; }
-                            result = TaskDialog.Show("尺寸文字整理｜結果預覽",
-                                $"已移動 {moved} 段文字；略過 {skipped} 條尺寸；仍可能擁擠 {unresolved} 段。\n\n{previewStatus}\n已檢查本次成功處理的尺寸鏈之間的文字；範圍為估算值，未檢查未選尺寸或模型線條。跨鏈衝突僅提示，不自動搬移。\n\n選擇「否」還原全部變更；保留後可用 Revit 復原。",
-                                TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No, TaskDialogResult.No);
-                        }
-                        if (result == TaskDialogResult.Yes) group.Assimilate(); else group.RollBack();
+                        if (group.Assimilate() != TransactionStatus.Committed) return Result.Cancelled;
+                        DimensionTextCleanupPreviewController.Show(data.Application, doc, doc.ActiveView,
+                            previewBoxes, changes, moved, skipped, unresolved);
                         ui.RefreshActiveView();
-                        return result == TaskDialogResult.Yes ? Result.Succeeded : Result.Cancelled;
+                        return Result.Succeeded;
                     }
                 }
             }

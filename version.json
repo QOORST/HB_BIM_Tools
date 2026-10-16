@@ -1,8 +1,8 @@
 {
   "version": "2.5.17",
   "downloadUrl": "",
-  "releaseNotes": "Test_20261015_TypeJoinRules：自動接合新增同類別族群與類型精確配對規則，可指定梁優先、水溝被切割，修正既有接合順序。49項新增離線測試通過；原生模型與完整安裝驗收仍待完成，詳見README.txt。",
-  "releaseDate": "2026-10-15T00:00:00+08:00",
+  "releaseNotes": "Test_20261016_AutoVoidCut：新增自動空心切割、手動及目前視圖範圍、接合工具目標類別與地形子分區篩選。32項新增離線檢查通過，實際切割與完整安裝待驗證，詳見README.txt。",
+  "releaseDate": "2026-10-16T00:00:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0"
 }
