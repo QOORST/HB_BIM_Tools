@@ -73,8 +73,25 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                     TaskDialog.Show("自動切割", "目前視圖無法收集模型構件，請切換模型視圖或改用手動選取。");
                     return Result.Cancelled;
                 }
-                // In view mode the picked instances define exact type IDs, not name substrings.
-                var cutters = ui.Selection.PickObjects(ObjectType.Element, new PickFilter(true),
+                bool validView = FilteredElementCollector.IsViewValidForElementIteration(doc, doc.ActiveView.Id);
+                var visible = validView ? new FilteredElementCollector(doc, doc.ActiveView.Id).WhereElementIsNotElementType()
+                    .Where(x => !x.IsHidden(doc.ActiveView) && (!doc.ActiveView.IsTemporaryHideIsolateActive() ||
+                        doc.ActiveView.IsElementVisibleInTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate, x.Id))).ToList() : new List<Element>();
+                var eligible = visible.OfType<FamilyInstance>().Where(x => InstanceVoidCutUtils.IsVoidInstanceCuttingElement(x)).ToList();
+                var sourceRows = eligible.GroupBy(x => x.GetTypeId()).Select(g => new VoidCutSourceRow {
+                    Key = g.Key.ToString(), Category = g.First().Category?.Name ?? "", Family = g.First().Symbol.FamilyName,
+                    Type = g.First().Symbol.Name, Count = g.Count() }).OrderBy(x => x.Family).ThenBy(x => x.Type).ToList();
+                bool filtered;
+                HashSet<string> selectedKeys;
+                using (var sourceForm = new VoidCutSourceForm(sourceRows, VoidCutSourceFilter.Load(VoidCutSourceFilter.DefaultPath), validView))
+                {
+                    if (sourceForm.ShowDialog() != System.Windows.Forms.DialogResult.OK) return Result.Cancelled;
+                    filtered = sourceForm.Filtered; selectedKeys = sourceForm.SelectedKeys;
+                    try { sourceForm.Settings.Save(VoidCutSourceFilter.DefaultPath); }
+                    catch (Exception ex) { TaskDialog.Show("自動切割", "無法記住來源條件，本次仍使用目前設定。\n" + ex.Message); }
+                }
+                var cutters = filtered ? eligible.Where(x => selectedKeys.Contains(x.GetTypeId().ToString())).Cast<Element>().ToList() :
+                    ui.Selection.PickObjects(ObjectType.Element, new PickFilter(true),
                     currentView ? "選取切割來源的代表元件；將處理目前視圖內相同族與類型的所有可切割元件。" :
                     "步驟 1/2：選取含可切割空心的水溝或族元件，完成後按完成。")
                     .Select(x => x.ElementId).Distinct().Select(doc.GetElement).ToList();
@@ -83,10 +100,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 if (currentView)
                 {
                     var types = new HashSet<ElementId>(cutters.Select(x => x.GetTypeId()));
-                    var visible = new FilteredElementCollector(doc, doc.ActiveView.Id).WhereElementIsNotElementType()
-                        .Where(x => !x.IsHidden(doc.ActiveView) && (!doc.ActiveView.IsTemporaryHideIsolateActive() ||
-                            doc.ActiveView.IsElementVisibleInTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate, x.Id))).ToList();
-                    cutters = visible.Where(x => x is FamilyInstance && types.Contains(x.GetTypeId()) &&
+                    if (!filtered) cutters = visible.Where(x => x is FamilyInstance && types.Contains(x.GetTypeId()) &&
                         InstanceVoidCutUtils.IsVoidInstanceCuttingElement(x)).ToList();
                     floors = visible.Where(x => targetKeys.Contains(TargetKey(x))).ToList();
                 }

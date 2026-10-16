@@ -1,7 +1,7 @@
 {
   "version": "2.5.17",
   "downloadUrl": "",
-  "releaseNotes": "Test_20261016_AutoVoidCut：新增自動空心切割、手動及目前視圖範圍、接合工具目標類別與地形子分區篩選。32項新增離線檢查通過，實際切割與完整安裝待驗證，詳見README.txt。",
+  "releaseNotes": "Test_20261016_VoidSourceFilter：自動切割新增品類、族群與類型名稱篩選、類型複選、符合數量及條件記憶。17項新增離線檢查通過，Revit實機及完整安裝待驗證，詳見README.txt。",
   "releaseDate": "2026-10-16T00:00:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0"
