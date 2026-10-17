@@ -51,7 +51,7 @@ internal static class Program {
             foreach(int width in new[]{980,1120}) { form.ClientSize=new Size(width,locked?560:760); Render(form,Path.Combine(output,$"bubbles-{locked}-{width}.png")); }
             int expandedHeight = h.Height;
             form.ClientSize = new Size(820, 500); Application.DoEvents();
-            Check(h.Height < expandedHeight, "grid list shrinks with host height");
+            Check(h.Height < expandedHeight, $"grid list shrinks with host height ({expandedHeight} -> {h.Height}, form {form.Size})");
             Check(h.Height >= 80, "compact grid list remains usable");
             Check(Field<Button>(form,"_applyButton").Bottom <= Field<Button>(form,"_applyButton").Parent!.ClientSize.Height, "primary action stays in footer");
             Render(form,Path.Combine(output,$"bubbles-compact-{locked}.png"));
@@ -110,8 +110,10 @@ internal static class Program {
             f.UpdateSources(Array.Empty<string>(),H(),V(),50);
             Check(Field<Label>(f,"_gridScaleHint").Text.Contains("1000") && Field<Label>(f,"_gridScaleHint").Text.Contains("600"),"scale hint updates");
             Field<TabControl>(f,"_tabControl").SelectedIndex=1; Application.DoEvents();
-            var dt=Field<TabControl>(f,"_distanceTabs"); dt.SelectedIndex=2; Application.DoEvents();
-            Check(Field<TabControl>(f,"_modeTabControl").SelectedTab!.Tag!.Equals(DimensionMode.BeamWidth),"distance mode sync");
+            var dt=Field<TabControl>(f,"_distanceTabs");
+            Check(dt.TabPages.Count==1 && dt.SelectedTab!.Tag!.Equals(DimensionMode.BeamGrid),"distance page shows only current task");
+            f.SelectMode(DimensionMode.BeamWidth); Application.DoEvents();
+            Check(dt.TabPages.Count==1 && dt.SelectedTab!.Tag!.Equals(DimensionMode.BeamWidth),"distance page follows task change");
             f.Close();
         }
         using(var legacyForm=new DimensionOptionsForm(Array.Empty<string>(),H(),V(),savedSettings:new Dictionary<DimensionMode,AutoDimensionSavedSettings> { [DimensionMode.BeamWidth]=new AutoDimensionSavedSettings { OffsetMm=850 } })) {

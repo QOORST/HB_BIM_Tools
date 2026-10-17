@@ -84,7 +84,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private static void RequestPick()
         {
             if (_handler == null) { _form?.SetRequestCompleted("標籤事件尚未初始化。", true); return; }
-            _handler.RequestPick();
+            _handler.RequestPick(_form.PickRequest);
             RaiseExternalEvent();
         }
 
@@ -138,10 +138,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 _sourceDocument = doc;
             }
 
-            public void RequestPick()
+            public void RequestPick(AutoTagOptions options)
             {
                 _requestKind = RequestKind.Pick;
-                _options = null;
+                _options = options;
                 _rules = null;
             }
 
@@ -174,7 +174,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     _form?.SetSelectionCount(uiDoc.Selection.GetElementIds().Count);
                     if (_requestKind == RequestKind.Pick)
                     {
-                        if (!ReferenceEquals(doc, _sourceDocument))
+                        if (!IsSameDocument(doc, _sourceDocument))
                         {
                             RefreshSources(doc, "文件已切換；請確認族型設定後重新選取。");
                             return;
@@ -183,6 +183,19 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                         _form?.Hide();
                         try
                         {
+                            if (_options?.Scope == AutoTagScope.LinkedSelection)
+                            {
+                                var link = string.IsNullOrEmpty(_options.LinkInstanceUniqueId) ? null : doc.GetElement(_options.LinkInstanceUniqueId) as RevitLinkInstance;
+                                var linkedDoc = link?.GetLinkDocument();
+                                if (linkedDoc == null) throw new InvalidOperationException("指定連結已卸載或不存在，請重新整理並選擇連結。");
+                                var pickedLinks = uiDoc.Selection.PickObjects(ObjectType.LinkedElement, new LinkedTagTargetFilter(doc, link),
+                                    "點選指定連結「" + link.Name + "」中的構件，按完成；Esc 保留原清單。");
+                                var uniqueIds = pickedLinks.Select(reference => linkedDoc.GetElement(reference.LinkedElementId)?.UniqueId)
+                                    .Where(id => !string.IsNullOrEmpty(id)).Distinct(StringComparer.Ordinal).ToList();
+                                _form?.SetLinkedSelection(link.UniqueId, uniqueIds, doc.ActiveView.UniqueId);
+                                Complete($"已選取 {uniqueIds.Count} 個連結構件；僅處理本清單中已勾選分類的元素。");
+                                return;
+                            }
                             var picked = uiDoc.Selection.PickObjects(ObjectType.Element, new TagTargetFilter(), "選取要標註的構件，按完成；Esc 保留原選取。");
                             var ids = picked.Select(r => r.ElementId).Distinct().ToList();
                             uiDoc.Selection.SetElementIds(ids);
@@ -191,7 +204,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                         }
                         catch (Autodesk.Revit.Exceptions.OperationCanceledException)
                         {
-                            uiDoc.Selection.SetElementIds(previous);
+                            if (_options?.Scope != AutoTagScope.LinkedSelection) uiDoc.Selection.SetElementIds(previous);
                             _form?.SetSelectionCount(previous.Count);
                             Complete("已取消選取，保留原選取。");
                         }
@@ -265,6 +278,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     }
                     else result = service.TagElements(uiDoc, _mode, _options, _rules);
                     Complete(result.Message, !result.Success);
+                    // Clean success remains in the modeless status area; review cases keep actionable details.
+                    if (result.Success && result.Created > 0 && result.Skipped == 0 &&
+                        result.FailedCount == 0 && result.ReviewTagIds.Count == 0 &&
+                        result.SkippedTagIds.Count == 0 && result.Processed == result.Matched)
+                        return;
                     var report = new TaskDialog("自動標籤結果")
                     {
                         MainInstruction = result.Message,
@@ -315,6 +333,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 public bool AllowReference(Reference reference, XYZ point) => false;
             }
 
+            private sealed class LinkedTagTargetFilter : ISelectionFilter
+            {
+                private readonly Document doc;
+                private readonly RevitLinkInstance link;
+                internal LinkedTagTargetFilter(Document doc, RevitLinkInstance link) { this.doc = doc; this.link = link; }
+                public bool AllowElement(Element element) => element.Id == link.Id;
+                public bool AllowReference(Reference reference, XYZ point)
+                {
+                    if (reference.ElementId != link.Id || doc.GetElement(reference.ElementId) == null) return false;
+                    var element = link.GetLinkDocument()?.GetElement(reference.LinkedElementId);
+                    return element?.Category != null && !(element is ElementType) && !element.ViewSpecific &&
+                        AutoTagService.CategoryRules.Any(rule => element.Category.Id == new ElementId(rule.ElementCategory));
+                }
+            }
+
             private void RefreshSources(Document doc, string status)
             {
                 _sourceDocument = doc;
@@ -340,14 +373,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                     if (!current.IsValidObject || !expected.IsValidObject)
                         return false;
 
-                    if (!string.IsNullOrWhiteSpace(current.PathName) ||
-                        !string.IsNullOrWhiteSpace(expected.PathName))
-                    {
-                        return string.Equals(current.PathName, expected.PathName, StringComparison.OrdinalIgnoreCase);
-                    }
-
-                    return current.IsFamilyDocument == expected.IsFamilyDocument &&
-                           string.Equals(current.Title, expected.Title, StringComparison.Ordinal);
+                    return current.Equals(expected);
                 }
                 catch
                 {

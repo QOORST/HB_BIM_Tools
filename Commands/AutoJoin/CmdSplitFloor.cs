@@ -10,7 +10,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 {
     /// <summary>
     /// 分割樓板工具
-    /// 依選取的結構構架（梁）將樓板分割為多塊，僅支援可安全驗證的矩形區域。
+    /// 依梁、結構柱將水平樓板分割為多塊，保留分區的直線輪廓與孔洞。
     /// </summary>
     [Transaction(TransactionMode.Manual)]
     public sealed class CmdSplitFloor : IExternalCommand
@@ -35,11 +35,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
             try
             {
-                // 步驟 1：選取樓板與切割構件（梁）
+                // 步驟 1：選取樓板與切割構件（梁、結構柱）
                 var refs = uiDoc.Selection.PickObjects(
                     ObjectType.Element,
                     new FloorAndFramingFilter(),
-                    "請選取要分割的樓板及梁（結構構架），選取後按「完成」");
+                    "請選取要分割的樓板及梁、結構柱，選取後按「完成」");
 
                 var floors = refs
                     .Select(r => doc.GetElement(r) as Floor)
@@ -49,7 +49,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
                 var cutters = refs
                     .Select(r => doc.GetElement(r))
-                    .Where(e => !(e is Floor))
+                    .Where(FloorAndFramingFilter.IsCutter)
+                    .GroupBy(e => e.Id).Select(g => g.First())
                     .ToList();
 
                 if (floors.Count == 0)
@@ -60,7 +61,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
                 if (cutters.Count == 0)
                 {
-                    TaskDialog.Show("分割樓板", "未選取任何切割構件（梁），操作取消。\n\n請同時選取樓板與穿越樓板的梁。");
+                    TaskDialog.Show("分割樓板", "未選取任何切割構件（梁、結構柱），操作取消。\n\n請同時選取樓板及與樓板相交的梁、結構柱。");
                     return Result.Cancelled;
                 }
 
@@ -93,6 +94,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             sb.AppendLine($"目標樓板數量：{result.TargetElements}");
             sb.AppendLine($"已分割樓板數量：{result.OriginalDeleted}");
             sb.AppendLine($"新建樓板數量：{result.NewElementsCreated}");
+            if (result.NewElementsCreated > 0)
+                sb.AppendLine("新樓板沿用原編號、備註及可轉移參數；同一原樓板的分塊會保留相同編號。");
             sb.AppendLine($"跳過（無需分割或不支援，原構件保留）：{result.Skipped}");
             sb.AppendLine($"失敗數量：{result.FailedOperations}");
 

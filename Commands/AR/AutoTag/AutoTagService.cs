@@ -307,6 +307,30 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             Document doc = uiDoc.Document;
             var selectedCategoryIds = new HashSet<long>(selectedRules.Select(item => (long)item.Rule.ElementCategory));
 
+            if (options.Scope == AutoTagScope.LinkedSelection)
+            {
+                var link = string.IsNullOrWhiteSpace(options.LinkInstanceUniqueId) ? null : doc.GetElement(options.LinkInstanceUniqueId) as RevitLinkInstance;
+                var linkedDoc = link?.GetLinkDocument();
+                if (linkedDoc == null) throw new InvalidOperationException("指定連結已卸載或不存在，請重新整理後選擇連結。");
+                var ids = options.LinkedElementUniqueIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
+                if (ids == null || ids.Count == 0) throw new InvalidOperationException("請先按「選取連結構件」建立選取清單；不會自動改成整個連結。");
+                if (options.LinkedSelectionViewUniqueId != view.UniqueId)
+                    throw new InvalidOperationException("目前視圖已變更，請在此視圖重新選取連結構件後再標註。");
+                var picked = ids.Select(linkedDoc.GetElement).ToList();
+                if (picked.Any(element => element == null || !element.IsValidObject))
+                    throw new InvalidOperationException("部分選取的連結構件已刪除或重建，請重新選取；本批尚未建立標籤。");
+                if (link.IsHidden(view) || view.GetCategoryHidden(new ElementId(BuiltInCategory.OST_RvtLinks)))
+                    return new List<TagCandidate>();
+#if REVIT2024 || REVIT2025 || REVIT2026
+                var visible = new HashSet<string>(new FilteredElementCollector(doc, view.Id, link.Id)
+                    .WhereElementIsNotElementType().WherePasses(new ElementIdSetFilter(picked.Select(element => element.Id).ToList()))
+                    .ToElements().Select(element => element.UniqueId));
+                picked = picked.Where(element => visible.Contains(element.UniqueId)).ToList();
+#endif
+                return picked.Where(element => IsCandidateElement(element, selectedCategoryIds))
+                    .Select(element => new TagCandidate(element, link)).ToList();
+            }
+
             if (options.Scope == AutoTagScope.LinkedView)
             {
 #if REVIT2024 || REVIT2025 || REVIT2026

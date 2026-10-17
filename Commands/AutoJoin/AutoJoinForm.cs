@@ -43,7 +43,34 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     };
 
     private readonly ComboBox _scopeCombo = new();
-    private readonly FlowLayoutPanel _categoryChecklist = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+    private readonly FlowLayoutPanel _categoryChecklist = new() { FlowDirection = FlowDirection.LeftToRight, WrapContents = true, AutoScroll = true };
+    private readonly Label _scopeSummary = new() { Dock = DockStyle.Fill, AutoSize = false, Text = "檢查範圍後顯示數量；符合條件不代表一定能接合。" };
+    private Button _primaryButton;
+    private Button _unjoinButton;
+    private bool _scopeValid = true;
+    public bool NeedsScopeCheck { get; private set; } = true;
+    public bool ScopeCanRun => _scopeValid;
+    public event System.Action ScopeCheckRequested;
+    internal static readonly string[] WallAlignKeys = { "Wall", "StructuralWall", "Floor", "StructuralFloor", "StructuralFraming" };
+
+    private void InvalidateScope()
+    {
+        NeedsScopeCheck = true;
+        _scopeSummary.Text = "範圍或類別已變更，請重新檢查數量。";
+        // Keep the check button available even when the previous scope was empty.
+        _scopeValid = true;
+        if (_primaryButton != null) _primaryButton.Enabled = !_busy;
+        if (_unjoinButton != null) _unjoinButton.Enabled = !_busy;
+    }
+
+    public void SetScopeSummary(string text, bool canRun)
+    {
+        NeedsScopeCheck = false;
+        _scopeSummary.Text = text;
+        _scopeValid = canRun;
+        _primaryButton.Enabled = canRun;
+        _unjoinButton.Enabled = canRun;
+    }
     private readonly List<CheckBox> _categoryBoxes = new();
     private readonly Label _categoryCount = new() { AutoSize = true, Margin = new Padding(10, 8, 0, 0), ForeColor = Color.DimGray };
     private readonly ListBox _priorityList = new();
@@ -64,7 +91,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     private void EditTypeRules()
     {
         using var editor = new TypeJoinRuleEditor(_typeChoices, _typeRules);
-        if (editor.ShowDialog(this) != DialogResult.OK) return;
+        if (editor.ShowDialog(_typeRulesButton.FindForm() ?? this) != DialogResult.OK) return;
         _typeRules = editor.Rules.Select(x => x.Clone()).ToList();
         if (_typeRules.Count == 0) _typeRulesEnabled.Checked = false;
         _typeRulesCount.Text = $"{_typeRules.Count} 條";
@@ -75,6 +102,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     private bool _modeless;
     private bool _busy;
     private TableLayoutPanel _root;
+    private Control _advancedContent;
     private readonly FlowLayoutPanel _selectionBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36, Visible = false, WrapContents = false };
     private readonly Panel _resultPanel = new Panel { Dock = DockStyle.Fill, Visible = false, Padding = new Padding(12, 28, 12, 8), BackColor = Color.FromArgb(245, 248, 251) };
     private readonly TextBox _modelessStatus = new TextBox { Dock = DockStyle.Bottom, Height = 105, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.WhiteSmoke };
@@ -85,9 +113,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     public void EnableModeless()
     {
         _modeless = true;
-        MinimumSize = new Size(840, 800);
+        var workArea = Screen.FromControl(this).WorkingArea;
+        MinimumSize = new Size(Math.Min(840, workArea.Width - 32), Math.Min(700, workArea.Height - 48));
         if (CancelButton is Button closeButton) closeButton.Text = "關閉";
-        Height = Math.Min(820, Screen.PrimaryScreen.WorkingArea.Height);
+        Height = Math.Min(760, workArea.Height - 48);
         var current = new Button { Text = "使用目前選取", AutoSize=true, MinimumSize=new Size(125,30) };
         var pick = new Button { Text = "重新選取", AutoSize=true, MinimumSize=new Size(100,30) };
         current.Click += (_, _) => SelectionRequested?.Invoke();
@@ -97,19 +126,26 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         _selectionBar.Controls.Add(current);
         _selectionBar.Controls.Add(pick);
         _selectionBar.Visible = true;
-        _root.RowStyles[1].Height = _scopeCombo.PreferredHeight + _selectionBar.Height + 64;
+        _root.RowStyles[1].Height = 126;
         _resultPanel.Visible = true;
-        _root.RowStyles[5].Height = 108;
+        _root.RowStyles[5].Height = 64;
         FormClosing += (_, e) => { if (_busy) e.Cancel = true; };
-        SetStatus("可保持視窗開啟並操作模型；執行前會重新讀取所選範圍。");
+        SetStatus("執行時記住本機接合設定；關閉不儲存尚未執行的調整。\n執行前會重新讀取所選範圍，不記住構件選取。");
     }
 
-    public void SetStatus(string text) => _modelessStatus.Text = text;
+    public void SetStatus(string text)
+    {
+        _modelessStatus.Text = text;
+        _modelessStatus.Refresh();
+    }
     public void SetBusy(bool busy)
     {
         _busy = busy;
-        foreach (Control control in Controls) control.Enabled = !busy;
+        foreach (Control control in _root.Controls)
+            if (control != _resultPanel) control.Enabled = !busy;
         _modelessStatus.Enabled = true;
+        _primaryButton.Enabled = !busy && _scopeValid;
+        _unjoinButton.Enabled = !busy && _scopeValid;
     }
     public void UseSelectedScope()
     {
@@ -118,7 +154,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
     private void RequestRun(ExecutionAction action)
     {
-        if (_busy || !ValidateBeforeRun()) return;
+        if (!_modeless && NeedsScopeCheck) ScopeCheckRequested?.Invoke();
+        if (_busy || !_scopeValid || !ValidateBeforeRun()) return;
         Action = action;
         if (_modeless) RunRequested?.Invoke();
         else { DialogResult = DialogResult.OK; Close(); }
@@ -134,8 +171,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         _alignOnlyMode = alignOnlyMode;
         Text = alignOnlyMode ? "HB_BIM 對齊牆輪廓" : "HB_BIM 自動接合";
         Width = 920;
-        Height = 750;
-        MinimumSize = new Size(800, 650);
+        Height = alignOnlyMode ? 580 : 750;
+        MinimumSize = new Size(800, alignOnlyMode ? 540 : 650);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
@@ -169,6 +206,13 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         };
 
         settings.Normalize();
+        // Normalize restores defaults for empty saved lists; a live empty selection must stay empty.
+        settings.EnabledCategoryKeys = GetCheckedCategoryKeys();
+        if (_alignOnlyMode)
+        {
+            settings.UseSameCategoryTypeRules = false;
+            settings.SameCategoryTypeRules.Clear();
+        }
         return settings;
     }
 
@@ -214,6 +258,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             new ScopeOption { Value = AutoJoinScope.VisibleInView, Text = "目前視圖可見" },
             new ScopeOption { Value = AutoJoinScope.SelectedElements, Text = "已選元素" }
         });
+        _scopeCombo.SelectedIndexChanged += (_, _) => InvalidateScope();
         scopeGroup.Padding = new Padding(10, 22, 10, 8);
         scopeGroup.Controls.Add(_scopeCombo);
 
@@ -221,7 +266,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         var categoryLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         categoryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
         categoryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        var categoryQuickPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
+        var categoryQuickPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
 
         var selectAllButton = new Button { Text = "全選", Width = 70, Height = 26 };
         var clearAllButton = new Button { Text = "全不選", Width = 70, Height = 26 };
@@ -229,11 +274,19 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         clearAllButton.Click += (_, _) => SetAllCategoriesChecked(false);
         categoryQuickPanel.Controls.Add(selectAllButton);
         categoryQuickPanel.Controls.Add(clearAllButton);
+        var commonButton = new Button { Text = _alignOnlyMode ? "牆與梁板" : "梁柱牆板", Width = 90, Height = 26 };
+        commonButton.Click += (_, _) =>
+        {
+            var keys = new HashSet<string>(WallAlignKeys.Concat(new[] { "Column", "StructuralColumn" }));
+            foreach (var box in _categoryBoxes) box.Checked = keys.Contains((string)box.Tag);
+        };
+        categoryQuickPanel.Controls.Add(commonButton);
         categoryQuickPanel.Controls.Add(_categoryCount);
 
         _categoryChecklist.Dock = DockStyle.Fill;
         foreach (var spec in CategoryCatalog.Specs)
         {
+            if (_alignOnlyMode && !WallAlignKeys.Contains(spec.Key)) continue;
             var row = new CheckBox
             {
                 Text = LocalizeCategoryText(spec.Key, spec.DisplayName),
@@ -246,6 +299,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             {
                 row.BackColor = row.Checked ? Color.FromArgb(232, 242, 252) : Color.White;
                 UpdateCategoryCount();
+                InvalidateScope();
             };
             _categoryBoxes.Add(row);
             _categoryChecklist.Controls.Add(row);
@@ -253,7 +307,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         _categoryChecklist.SizeChanged += (_, _) =>
         {
             foreach (var row in _categoryBoxes)
-                row.Width = Math.Max(100, _categoryChecklist.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4);
+                row.Width = Math.Max(100, (_categoryChecklist.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 8) / 2);
         };
         UpdateCategoryCount();
 
@@ -262,11 +316,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         categoryGroup.Controls.Add(categoryLayout);
 
         var priorityGroup = new GroupBox { Text = "接合優先序（越上方優先序越高）", Dock = DockStyle.Fill, Padding = new Padding(8, 22, 8, 8) };
-        var priorityLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 };
+        var priorityLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
         priorityLayout.Padding = new Padding(2);
         priorityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        priorityLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100f));
         priorityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        priorityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         priorityLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var ruleBar = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
         _typeRulesButton.Enabled = false;
@@ -275,15 +329,29 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         _typeRulesEnabled.CheckedChanged += (_, _) => _sameCategoryCheckbox.Enabled = _alignOnlyMode || !_typeRulesEnabled.Checked;
         var refreshTypes = new Button { Text = "↻", Width = 30, Height = 28, AccessibleName = "重新讀取專案類型" };
         var refreshTip = new ToolTip();
-        refreshTip.SetToolTip(refreshTypes, "重新讀取專案類型");
+        refreshTip.SetToolTip(refreshTypes, "關閉設定視窗並重新讀取專案類型");
         refreshTip.SetToolTip(_typeRulesEnabled, "同類別僅接合符合規則的類型配對；未符合的配對會略過。");
         Disposed += (_, _) => refreshTip.Dispose();
         refreshTypes.Enabled = !_alignOnlyMode;
-        refreshTypes.Click += (_, _) => TypeChoicesRefreshRequested?.Invoke();
+        refreshTypes.Click += (_, _) =>
+        {
+            // Revit handles ExternalEvent only after the modal settings dialog closes.
+            var settingsDialog = refreshTypes.FindForm();
+            if (settingsDialog != null && settingsDialog != this) settingsDialog.Close();
+            TypeChoicesRefreshRequested?.Invoke();
+        };
         ruleBar.Controls.AddRange(new Control[] { _typeRulesEnabled, _typeRulesButton, _typeRulesCount, refreshTypes });
-        priorityLayout.Controls.Add(ruleBar, 0, 1);
-        priorityLayout.SetColumnSpan(ruleBar, 2);
+        priorityLayout.Controls.Add(ruleBar, 0, 2);
         _priorityList.Dock = DockStyle.Fill;
+        _priorityList.DrawMode = DrawMode.OwnerDrawFixed;
+        _priorityList.ItemHeight = 28;
+        _priorityList.DrawItem += (_, e) =>
+        {
+            if (e.Index < 0) return;
+            e.DrawBackground();
+            TextRenderer.DrawText(e.Graphics, $"{e.Index + 1}.  {_priorityList.Items[e.Index]}", e.Font, e.Bounds, e.ForeColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            e.DrawFocusRectangle();
+        };
         _priorityList.Margin = new Padding(3);
         foreach (var key in CategoryCatalog.DefaultPriorityKeys)
         {
@@ -293,10 +361,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         var movePanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.TopDown,
+            FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false,
-            AutoSize = false,
-            Padding = new Padding(8, 6, 8, 6),
+            AutoSize = true,
+            Padding = new Padding(0),
             Margin = new Padding(2)
         };
         var upButton = new Button { Text = "上移", Width = 80, Height = 28, Margin = new Padding(2) };
@@ -310,7 +378,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         movePanel.Controls.Add(resetPriorityButton);
 
         priorityLayout.Controls.Add(_priorityList, 0, 0);
-        priorityLayout.Controls.Add(movePanel, 1, 0);
+        priorityLayout.Controls.Add(movePanel, 0, 1);
         priorityGroup.Controls.Add(priorityLayout);
 
         var detailGroup = new GroupBox { Text = "進階選項", Dock = DockStyle.Fill, Padding = new Padding(8, 20, 8, 6) };
@@ -353,6 +421,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         var unjoinButton = new Button { Text = "解除接合", Width = 100, Height = 32 };
         var alignWallButton = new Button { Text = "對齊牆輪廓", Width = 110, Height = 32 };
         var joinButton = new Button { Text = "自動接合", Width = 110, Height = 32, BackColor = accentColor, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        _primaryButton = _alignOnlyMode ? alignWallButton : joinButton;
+        _unjoinButton = unjoinButton;
         joinButton.FlatAppearance.BorderSize = 0;
         if (_alignOnlyMode)
         {
@@ -390,7 +460,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         CancelButton = cancelButton;
 
         actionPanel.Controls.Add(cancelButton);
-        actionPanel.Controls.Add(alignWallButton);
+        if (_alignOnlyMode) actionPanel.Controls.Add(alignWallButton);
         if (!_alignOnlyMode)
         {
             actionPanel.Controls.Add(unjoinButton);
@@ -401,7 +471,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         root.Padding = new Padding(16);
         root.RowStyles.Clear();
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 106));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
@@ -411,23 +481,67 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         header.Controls.Add(new Label { Text = _alignOnlyMode ? "對齊牆輪廓" : "自動接合", Font = new Font(Font.FontFamily, 17, FontStyle.Bold), AutoSize = true, ForeColor = Color.FromArgb(28, 44, 60) });
         root.Controls.Add(header, 0, 0);
         root.SetColumnSpan(header, 2);
-        scopeGroup.Controls.Add(_selectionBar);
+        scopeGroup.Controls.Clear();
+        var scopeLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        scopeLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        scopeLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        scopeLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var scopeActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
+        _scopeCombo.Dock = DockStyle.None;
+        _scopeCombo.Width = 200;
+        _scopeCombo.Margin = new Padding(0, 4, 12, 0);
+        _selectionBar.Dock = DockStyle.None;
+        _selectionBar.AutoSize = true;
+        _selectionBar.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _selectionBar.Margin = Padding.Empty;
+        var checkScope = new Button { Text = "檢查範圍", Width = 100, Height = 30 };
+        checkScope.Click += (_, _) => { InvalidateScope(); ScopeCheckRequested?.Invoke(); };
+        scopeActions.Controls.Add(_scopeCombo);
+        scopeActions.Controls.Add(_selectionBar);
+        scopeActions.Controls.Add(checkScope);
+        scopeLayout.Controls.Add(scopeActions, 0, 0);
+        scopeLayout.Controls.Add(_scopeSummary, 0, 1);
+        scopeGroup.Controls.Add(scopeLayout);
         root.Controls.Add(FlatSection(scopeGroup, "01  處理範圍"), 0, 1);
         root.SetColumnSpan(root.GetControlFromPosition(0, 1), 2);
-        root.Controls.Add(FlatSection(categoryGroup, "02  處理類別"), 0, 2);
-        root.Controls.Add(FlatSection(priorityGroup, "03  接合優先序 · 上方優先"), 1, 2);
+        root.Controls.Add(FlatSection(categoryGroup, _alignOnlyMode ? "02  處理牆與參考構件" : "02  處理類別"), 0, 2);
+        if (_alignOnlyMode)
+        {
+            Disposed += (_, _) => priorityGroup.Dispose();
+            var help = new Label { Dock = DockStyle.Fill, Padding = new Padding(16), Text = "處理對象：基本牆\n\n參考構件：梁、樓板及結構樓板\n\n依參考構件調整牆頂／牆底。請將要調整的牆與參考梁板一起納入範圍。\n\n此工具不需要先執行自動接合。", BackColor = Color.White };
+            root.Controls.Add(help, 1, 2);
+        }
+        else root.Controls.Add(FlatSection(priorityGroup, "03  接合優先序 · 上方優先"), 1, 2);
+        // Keep infrequent settings out of the primary workflow.
+        priorityLayout.Controls.Remove(ruleBar);
+        priorityLayout.Controls.Add(new Label { Text = "上方構件切割下方構件；同類別依類型規則判定。", Dock = DockStyle.Fill, AutoSize = true, MaximumSize = new Size(340, 0), Padding = new Padding(2, 6, 2, 0) }, 0, 2);
+        detailLayout.Controls.Add(ruleBar);
         var detailSection = FlatSection(detailGroup, "接合選項");
         detailSection.AutoSize = true;
         detailSection.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        root.Controls.Add(detailSection, 0, 3);
-        root.SetColumnSpan(root.GetControlFromPosition(0, 3), 2);
+        if (!_alignOnlyMode)
+        {
+            _advancedContent = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12) };
+            detailSection.Dock = DockStyle.Top;
+            ioPanel.Dock = DockStyle.Bottom;
+            _advancedContent.Controls.Add(detailSection);
+            _advancedContent.Controls.Add(ioPanel);
+            Disposed += (_, _) => _advancedContent.Dispose();
+        }
+        else Disposed += (_, _) => detailSection.Dispose();
         var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         ioPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         actionPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         footer.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        footer.Controls.Add(ioPanel, 0, 0);
+        if (_alignOnlyMode) footer.Controls.Add(ioPanel, 0, 0);
+        else
+        {
+            var settingsButton = new Button { Text = "進階設定…", Width = 110, Height = 32, Margin = new Padding(4) };
+            settingsButton.Click += (_, _) => { using var dialog = CreateAdvancedDialog(); dialog.ShowDialog(this); };
+            footer.Controls.Add(settingsButton, 0, 0);
+        }
         footer.Controls.Add(actionPanel, 1, 0);
         root.Controls.Add(footer, 0, 4);
         root.SetColumnSpan(footer, 2);
@@ -452,9 +566,27 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         actionPanel.WrapContents = true;
         actionPanel.Controls.Add(primary);
         actionPanel.Controls.Add(cancelButton);
-        if (!_alignOnlyMode) { actionPanel.Controls.Add(unjoinButton); actionPanel.Controls.Add(alignWallButton); }
+        if (!_alignOnlyMode) actionPanel.Controls.Add(unjoinButton);
 
         Controls.Add(root);
+    }
+
+    internal Form CreateAdvancedDialog()
+    {
+        var dialog = new Form { Text = "自動接合－進階設定", Size = new Size(610, 370), MinimumSize = new Size(570, 350), Font = Font, StartPosition = FormStartPosition.CenterParent, ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false, AutoScaleMode = AutoScaleMode.Dpi };
+        var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6) };
+        var done = new Button { Text = "完成", Width = 90, Height = 30, DialogResult = DialogResult.OK };
+        footer.Controls.Add(done);
+        var hint = new Label { Text = "設定立即套用至主畫面；執行接合時才儲存。", Dock = DockStyle.Top, Height = 34, Padding = new Padding(12, 10, 0, 0) };
+        dialog.Controls.Add(_advancedContent);
+        dialog.Controls.Add(hint);
+        dialog.Controls.Add(footer);
+        foreach (var button in AllControls(dialog).OfType<Button>()) StyleButton(button);
+        dialog.AcceptButton = done;
+        dialog.CancelButton = done;
+        // Preserve the shared controls when this temporary dialog closes.
+        dialog.FormClosed += (_, _) => dialog.Controls.Remove(_advancedContent);
+        return dialog;
     }
 
     private static IEnumerable<Control> AllControls(Control parent) => parent.Controls.Cast<Control>().SelectMany(c => new[] { c }.Concat(AllControls(c)));
@@ -584,7 +716,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         using var dialog = new OpenFileDialog
         {
             Filter = "XML files (*.xml)|*.xml|所有檔案 (*.*)|*.*",
-            Title = "匯入自動接合設定"
+            Title = _alignOnlyMode ? "匯入牆輪廓設定" : "匯入自動接合設定"
         };
 
         if (dialog.ShowDialog() != DialogResult.OK)
@@ -603,8 +735,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         using var dialog = new SaveFileDialog
         {
             Filter = "XML files (*.xml)|*.xml|所有檔案 (*.*)|*.*",
-            Title = "匯出自動接合設定",
-            FileName = "AutoJoin.Settings.xml"
+            Title = _alignOnlyMode ? "匯出牆輪廓設定" : "匯出自動接合設定",
+            FileName = _alignOnlyMode ? "WallAlign.Settings.xml" : "AutoJoin.Settings.xml"
         };
 
         if (dialog.ShowDialog() != DialogResult.OK)

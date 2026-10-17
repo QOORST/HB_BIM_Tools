@@ -26,6 +26,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.PipeToISO
         public MainWindow(Document doc, UIDocument uidoc)
         {
             InitializeComponent();
+            void RefreshOutputPath()
+            {
+                OutputPathPanel.Visibility = ExportBOMCheckBox.IsChecked == true || ExportImageCheckBox.IsChecked == true
+                    ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+            }
+            ExportBOMCheckBox.Checked += (_, _) => RefreshOutputPath();
+            ExportBOMCheckBox.Unchecked += (_, _) => RefreshOutputPath();
+            ExportImageCheckBox.Checked += (_, _) => RefreshOutputPath();
+            ExportImageCheckBox.Unchecked += (_, _) => RefreshOutputPath();
+            RefreshOutputPath();
             
             _doc = doc;
             _uidoc = uidoc;

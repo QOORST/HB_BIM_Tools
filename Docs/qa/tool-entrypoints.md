@@ -34,7 +34,7 @@
 | COBie 欄位設定 | [Commands/Data/CmdCobieFieldManager.cs](../../Commands/Data/CmdCobieFieldManager.cs) | 入口對照完成；模型及介面待逐項驗收 |
 | COBie 匯入 | [Commands/Data/CmdCobieImportEnhanced.cs](../../Commands/Data/CmdCobieImportEnhanced.cs) | 入口對照完成；模型及介面待逐項驗收 |
 | 標準 COBie | [Commands/Data/CmdCobieStandardExport.cs](../../Commands/Data/CmdCobieStandardExport.cs) | 入口對照完成；模型及介面待逐項驗收 |
-| 模型資料管理 | [Commands/Data/CmdModelDataManager.cs](../../Commands/Data/CmdModelDataManager.cs) | 入口對照完成；模型及介面待逐項驗收 |
+| 模型名稱整理（原模型資料管理） | [Commands/Data/CmdModelDataManager.cs](../../Commands/Data/CmdModelDataManager.cs) | 模型管理選單；七類名稱、預覽／套用與刪除影響預演；本次自動化測試通過，原生驗收見 model-name-organizer.md |
 | 明細表匯出 | [Commands/Data/CmdScheduleExport.cs](../../Commands/Data/CmdScheduleExport.cs) | 入口對照完成；模型及介面待逐項驗收 |
 | 族群資料庫 | 外部族庫組件 | 公司內網環境驗收 |
 | 族參數名稱修改 | [Commands/FamilyParameterRename/CmdFamilyParameterRename.cs](../../Commands/FamilyParameterRename/CmdFamilyParameterRename.cs) | 入口對照完成；模型及介面待逐項驗收 |

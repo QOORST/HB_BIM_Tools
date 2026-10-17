@@ -50,6 +50,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         {
             if (!string.IsNullOrEmpty(key))
                 return doc.GetElement(key) as Level ?? throw new InvalidOperationException("指定的約束樓層已不存在，請重新設定。");
+            if (source != null && !source.Document.Equals(doc))
+                throw new InvalidOperationException("連結管線來源須指定目前模型的約束樓層；不使用連結文件的樓層 ID，也不依名稱或高度猜測。");
             var level = (source as MEPCurve)?.ReferenceLevel ?? doc.GetElement(source?.LevelId ?? ElementId.InvalidElementId) as Level;
             if (level == null)
                 throw new InvalidOperationException($"來源 {source?.Id} 無有效樓層；請指定約束樓層，不依高度猜測。");

@@ -56,7 +56,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             // CAD records also include non-sleeve components. Names alone never enroll a manual instance.
             string name = (fi.Symbol?.FamilyName ?? "") + " " + (fi.Symbol?.Name ?? "");
             bool sleeve = name.IndexOf("套管", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("sleeve", StringComparison.OrdinalIgnoreCase) >= 0;
-            return sleeve && (RaftCadRecord.IsManaged(fi) || long.TryParse(Text(fi, "來源管線Id", "Pipe Id", "Source Pipe Id"), out long source) && source > 0);
+            return sleeve && (RaftCadRecord.IsManaged(fi) || SleeveSourceRecord.HasRecord(fi) || long.TryParse(Text(fi, "來源管線Id", "Pipe Id", "Source Pipe Id"), out long source) && source > 0);
         }
 
         internal static List<SleeveQuantityRow> Read(Document doc, ISet<long> manual = null, ISet<long> affected = null)
@@ -71,7 +71,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         {
             string control = manual ? "納入" : fi.get_Parameter(Id(1))?.AsString() ?? "";
             var original = PipeSleeveManagerForm.PipeSleeveManagerRow.From(doc, fi);
-            bool hasSource = long.TryParse(Text(fi, "來源管線Id", "Pipe Id", "Source Pipe Id"), out long source) && source > 0;
+            bool hasSource = SleeveSourceRecord.HasRecord(fi) || long.TryParse(Text(fi, "來源管線Id", "Pipe Id", "Source Pipe Id"), out long source) && source > 0;
             string status = !hasSource && !RaftCadRecord.IsManaged(fi) ? "手動套管待確認" : original.Status;
             if (!string.IsNullOrWhiteSpace(control) && control != "納入" && control != "排除" && control != "作廢") status = "統計設定無效";
             double length = Size(fi, "套管長度", "長度", "Length", "Sleeve Length", "深度", "Depth");

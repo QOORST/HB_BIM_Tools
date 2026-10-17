@@ -123,19 +123,20 @@
 
             <!-- 輸出選項 -->
             <GroupBox Grid.Row="1" Header="輸出選項" Padding="10">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel>
+                    <TextBlock Text="模型內成果" FontWeight="Bold"/>
                     <CheckBox x:Name="GenerateISOViewCheckBox" 
                               Content="建立管路等角視圖（輔助檢視）"
                               IsChecked="True"
                               Margin="0,5"/>
                     
-                    <CheckBox x:Name="ExportPCFCheckBox" 
-                              Content="PCF（暫停：待端點與加工規則驗證）" IsEnabled="False"
-                              IsChecked="False"
-                              Margin="0,5"/>
                     <CheckBox x:Name="GenerateDimensionReviewCheckBox"
                               Content="建立尺寸核對詳圖（水平文字、模型長度，非加工圖）"
                               IsChecked="True" Margin="0,5"/>
+                    <CheckBox x:Name="GenerateScheduleCheckBox" Content="建立 Revit 管線／配件明細表" IsChecked="True" Margin="0,5"
+                              ToolTip="只統計選定系統的管線與配件；不含管路附件及設備，材料清單為模型數量，非採購或加工量"/>
+                    <TextBlock Text="匯出檔案" FontWeight="Bold" Margin="0,12,0,0"/>
                     
                     <CheckBox x:Name="ExportBOMCheckBox" 
                               Content="匯出材料清單與逐件核對表 (CSV)"
@@ -147,14 +148,11 @@
                               IsChecked="False"
                               Margin="0,5"/>
                     
-                    <CheckBox x:Name="GenerateScheduleCheckBox" 
-                              Content="建立 Revit 管線／配件明細表"
-                              IsChecked="True"
-                              Margin="0,5"
-                              ToolTip="只統計選定系統的管線與配件；不含管路附件及設備，材料清單為模型數量，非採購或加工量"/>
+                    <CheckBox x:Name="ExportPCFCheckBox" Content="PCF（未開放：待端點與加工規則驗證）" IsEnabled="False" IsChecked="False" Margin="0,5"/>
 
                     <Separator Margin="0,15,0,15"/>
 
+                    <StackPanel x:Name="OutputPathPanel">
                     <TextBlock Text="輸出路徑：" FontWeight="Bold" Margin="0,0,0,5"/>
                     
                     <Grid>
@@ -177,12 +175,14 @@
                                 Click="BrowseButton_Click"
                                 Style="{StaticResource SecondaryButton}"/>
                     </Grid>
+                    </StackPanel>
 
                     <TextBlock Text="ISO 編號：" FontWeight="Bold" Margin="0,15,0,5"/>
                     <TextBox x:Name="ISONumberTextBox"
                              Height="30"
                              VerticalContentAlignment="Center"/>
                 </StackPanel>
+                </ScrollViewer>
             </GroupBox>
 
             <!-- 進度顯示 -->

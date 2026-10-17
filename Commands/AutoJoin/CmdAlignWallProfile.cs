@@ -25,9 +25,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                 return Result.Failed;
             }
 
-            var settings = SettingsSerializer.LoadOrDefault(SettingsSerializer.DefaultPath);
+            var settings = SettingsSerializer.LoadOrDefault(SettingsSerializer.WallAlignPath);
 
             using var form = new AutoJoinForm(settings, true);
+            form.ScopeCheckRequested += () => ElementCollectorService.UpdateScopeSummary(uiDoc, form, true);
+            ElementCollectorService.UpdateScopeSummary(uiDoc, form, true);
             var dialogResult = form.ShowDialog();
             if (dialogResult != DialogResult.OK || form.Action != ExecutionAction.AlignWallProfile)
             {
@@ -35,7 +37,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             }
 
             settings = form.BuildSettings();
-            SettingsSerializer.Save(SettingsSerializer.DefaultPath, settings);
+            SettingsSerializer.Save(SettingsSerializer.WallAlignPath, settings);
 
             var scopedElements = ElementCollectorService.Collect(uiDoc, settings);
             if (scopedElements.Count == 0)

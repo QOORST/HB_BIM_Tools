@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net48</TargetFramework><LangVersion>9.0</LangVersion><AssemblyName>HB.SplitFloor.Native</AssemblyName><DefineConstants>REVIT2024</DefineConstants></PropertyGroup>
+  <ItemGroup>
+    <Reference Include="RevitAPI"><HintPath>C:/Program Files/Autodesk/Revit 2024/RevitAPI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="RevitAPIUI"><HintPath>C:/Program Files/Autodesk/Revit 2024/RevitAPIUI.dll</HintPath><Private>false</Private></Reference>
+    <Compile Include="../../Commands/AutoJoin/SplitEngine.cs" Link="SplitEngine.cs" />
+    <Compile Include="../../Helpers/RevitApiCompatibility.cs" Link="RevitApiCompatibility.cs" />
+  </ItemGroup>
+</Project>

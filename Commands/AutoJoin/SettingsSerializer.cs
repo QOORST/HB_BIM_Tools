@@ -17,6 +17,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         }
     }
 
+    public static string WallAlignPath => Path.Combine(Path.GetDirectoryName(DefaultPath), "wall-align.xml");
+
     public static AutoJoinSettings LoadOrDefault(string path)
     {
         try

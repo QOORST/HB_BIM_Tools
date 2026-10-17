@@ -40,12 +40,16 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoAvoid.UI
                 var direction = new XYZ(delta.X, delta.Y, 0).Normalize();
                 var points = path.Select(p => new { X = (p - origin).DotProduct(direction) * 304.8, Y = (p.Z - origin.Z) * 304.8 }).ToList();
                 double minX = points.Min(p => p.X), maxX = points.Max(p => p.X), minY = points.Min(p => p.Y), maxY = points.Max(p => p.Y);
-                double scale = Math.Min(Math.Max(1, canvas.Width - 90) / Math.Max(1, maxX - minX), Math.Max(1, canvas.Height - 80) / Math.Max(1, maxY - minY));
+                double scale = Math.Min(Math.Max(1, canvas.Width - 90) / Math.Max(1, maxX - minX), Math.Max(1, canvas.Height - 105) / Math.Max(1, maxY - minY));
                 var screen = points.Select(p => new PointF((float)(45 + (p.X - minX) * scale), (float)(canvas.Height - 40 - (p.Y - minY) * scale))).ToArray();
                 using (var original = new Pen(Color.Gray, 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash }) e.Graphics.DrawLine(original, screen.First(), screen.Last());
                 using (var route = new Pen(Color.FromArgb(0, 105, 180), 2)) e.Graphics.DrawLines(route, screen);
                 double slope = 100 * delta.Z / Math.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
                 e.Graphics.DrawString($"水平投影長 {maxX - minX:0} mm｜原管坡度 {slope:+0.##;-0.##;0}%（沿圖面左→右）", Font, Brushes.Black, 8, 8);
+                double originalRun = Math.Sqrt(delta.X * delta.X + delta.Y * delta.Y) * 304.8;
+                var offsets = points.Select(p => p.Y - (originalRun > 1e-9 ? delta.Z * 304.8 * p.X / originalRun : 0)).ToList();
+                double shift = offsets.OrderByDescending(Math.Abs).FirstOrDefault();
+                e.Graphics.DrawString($"候選高差：{(shift > 0.1 ? "向上" : shift < -0.1 ? "向下" : "無明顯高差")} {Math.Abs(shift):0.#} mm｜整批複查：{(issues.Count == 0 ? "通過" : $"{issues.Count} 項待處理")}", Font, Brushes.Black, 8, 28);
             };
             choice.SelectedIndexChanged += (_, _) => canvas.Invalidate();
             canvas.Resize += (_, _) => canvas.Invalidate();

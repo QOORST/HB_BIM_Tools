@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><UseWPF>true</UseWPF></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <Compile Include="../../Commands/Drawing/LegendForm.cs" Link="LegendForm.cs" />
+    <Compile Include="../../Commands/Drawing/LegendPolicy.cs" Link="LegendPolicy.cs" />
+    <Compile Include="../../Commands/AR/AutoTag/AutoTagOptionsForm.cs" Link="AutoTagOptionsForm.cs" />
+    <Compile Include="../../Commands/AR/AutoTag/AutoTagOptions.cs" Link="AutoTagOptions.cs" />
+    <Compile Include="../../Commands/AR/AutoTag/AutoTagMode.cs" Link="AutoTagMode.cs" />
+    <Compile Include="../../Helpers/UI/ToolSettingsDialog.cs" Link="ToolSettingsDialog.cs" />
+    <Compile Include="../../Commands/MEP/MepCheck/MepCheckModels.cs" Link="MepCheckModels.cs" />
+    <Compile Include="../../Commands/MEP/MepCheck/MepCheckOptionsForm.cs" Link="MepCheckOptionsForm.cs" />
+    <Page Include="../../Commands/MEP/AutoPipeRouting/UI/MainWindow.xaml" Link="RoutingWindow.xaml" />
+    <Compile Include="../../Commands/MEP/AutoPipeRouting/UI/MainWindow.xaml.cs" Link="RoutingWindow.xaml.cs" />
+  </ItemGroup>
+</Project>

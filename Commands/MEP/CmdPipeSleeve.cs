@@ -36,11 +36,25 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
                 Document doc = uidoc.Document;
 
-#if REVIT2025 || REVIT2026
+                var sourceDialog = new TaskDialog("自動套管｜管線來源") {
+                    MainInstruction = "選擇管線來源",
+                    MainContent = "套管一律建立於目前模型。連結管線模式支援已載入的直接連結，可穿越目前模型或連結模型的構件。",
+                    CommonButtons = TaskDialogCommonButtons.Cancel
+                };
+                sourceDialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "目前模型管線");
+                sourceDialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "連結管線來源", "選取連結中的管線；需指定目前模型的約束樓層。");
+                var mode = sourceDialog.Show();
+                if (mode != TaskDialogResult.CommandLink1 && mode != TaskDialogResult.CommandLink2) return Result.Cancelled;
+                bool linkedMode = mode == TaskDialogResult.CommandLink2;
+                if (linkedMode && !new FilteredElementCollector(doc).OfClass(typeof(RevitLinkInstance)).Cast<RevitLinkInstance>().Any(l => l.GetLinkDocument() != null))
+                {
+                    TaskDialog.Show("連結管線來源", "目前沒有已載入的直接 Revit 連結，請先載入來源模型。");
+                    return Result.Cancelled;
+                }
                 IList<Reference> selectedRefs = uidoc.Selection.PickObjects(
-                    ObjectType.Element,
-                    new PipeSelectionFilter(),
-                    "請選擇要放置套管的管線、風管、電管或電纜線架");
+                    linkedMode ? ObjectType.LinkedElement : ObjectType.Element,
+                    linkedMode ? (ISelectionFilter)new LinkedPipeSelectionFilter(doc) : new PipeSelectionFilter(),
+                    linkedMode ? "選取直接連結中的管線、風管、電管或電纜線架；完成後按完成" : "請選擇要放置套管的管線、風管、電管或電纜線架");
 
                 if (selectedRefs == null || selectedRefs.Count == 0)
                 {
@@ -48,16 +62,38 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     return Result.Cancelled;
                 }
 
-                List<Element> pipes = selectedRefs
-                    .Select(reference => doc.GetElement(reference))
-                    .Where(element => element != null)
-                    .ToList();
+                var sources = selectedRefs.Select(reference => {
+                    var link = linkedMode ? doc.GetElement(reference.ElementId) as RevitLinkInstance : null;
+                    return new SleevePipeSource(linkedMode ? link?.GetLinkDocument()?.GetElement(reference.LinkedElementId) : doc.GetElement(reference), link);
+                }).GroupBy(source => source.Key).Select(g => g.First()).ToList();
+                List<Element> pipes = sources.Select(source => source.Element).ToList();
+
+#if !REVIT2025 && !REVIT2026
+                if (!linkedMode)
+                {
+                    var sleeveWindow = new PipeSleeveWindow(doc, pipes);
+                    new System.Windows.Interop.WindowInteropHelper(sleeveWindow).Owner = commandData.Application.MainWindowHandle;
+                    sleeveWindow.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner;
+                    sleeveWindow.ShowInTaskbar = false;
+                    sleeveWindow.ShowDialog();
+                    return sleeveWindow.HasUnrecoveredFailure ? Result.Failed : Result.Succeeded;
+                }
+#endif
 
                 PipeSleeveOptions options;
                 LoadMissingPresetFamilies(doc);
                 using (var settings = new PipeSleeveSettingsForm(pipes.Count))
                 {
-                    settings.ConfigureLevels(SleeveLevelPolicy.Choices(doc), SleeveLevelPolicy.Read(doc));
+                    var levels = SleeveLevelPolicy.Choices(doc);
+                    if (linkedMode)
+                    {
+                        settings.Text = "自動套管｜連結管線來源 → 目前模型";
+                        levels = levels.Where(level => !string.IsNullOrEmpty(level.Key) && doc.GetElement(level.Key) is Level).ToList();
+                        if (levels.Count == 0) { TaskDialog.Show("連結管線來源", "目前模型沒有可用約束樓層，請先建立樓層。"); return Result.Succeeded; }
+                        levels.Insert(0, new SleeveLevelPolicy.Choice { Key = "", Name = "請指定目前模型的約束樓層" });
+                    }
+                    settings.ConfigureLevels(levels, SleeveLevelPolicy.Read(doc));
+                    if (linkedMode) settings.ConfigureSourceSummary($"來源：{sources.Select(s => s.Link.UniqueId).Distinct().Count()} 個直接連結實例；套管建立於目前模型。");
                     settings.ValidateLevelRule = key => SleeveLevelPolicy.Summary(doc, pipes, key);
                     var symbols = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
                         .Where(SleeveFamilyCatalog.IsSleeveSymbol)
@@ -74,6 +110,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     finally { owner.ReleaseHandle(); }
                     options = new PipeSleeveOptions
                     {
+                        PipeSources = sources,
                         CreationLevelUniqueId = settings.CreationLevelUniqueId,
                         PreserveNominalTypeDimensions = true,
                         UseDiameterSymbolMap = settings.UseDiameterMap,
@@ -100,37 +137,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     TaskDialog.Show("管線套管", result.ToTaskDialogText());
                     return Result.Succeeded;
                 }
-#else
-                // 選擇管線
-                IList<Reference> selectedRefs = uidoc.Selection.PickObjects(
-                    ObjectType.Element,
-                    new PipeSelectionFilter(),
-                    "請選擇要放置套管的管線、風管、電管或電纜線架");
-
-                if (selectedRefs == null || selectedRefs.Count == 0)
-                {
-                    TaskDialog.Show("提示", "未選擇任何管線、風管、電管或電纜線架。");
-                    return Result.Cancelled;
-                }
-
-                // 收集選取的管線
-                List<Element> pipes = new List<Element>();
-                foreach (Reference refElem in selectedRefs)
-                {
-                    Element elem = doc.GetElement(refElem);
-                    pipes.Add(elem);
-                }
-
-                // 開啟 UI 視窗進行設定
-                var sleeveWindow = new PipeSleeveWindow(doc, pipes);
-                new System.Windows.Interop.WindowInteropHelper(sleeveWindow).Owner = commandData.Application.MainWindowHandle;
-                sleeveWindow.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner;
-                sleeveWindow.ShowInTaskbar = false;
-                sleeveWindow.ShowDialog();
-                if (sleeveWindow.HasUnrecoveredFailure)
-                    return Result.Failed;
-                return Result.Succeeded;
-#endif
             }
             catch (SleeveOperationRolledBackException ex)
             {
@@ -155,6 +161,18 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         {
             var errors = SleeveFamilyCatalog.LoadMissing(doc);
             if (errors.Count > 0) TaskDialog.Show("預設族群載入", string.Join("\n", errors) + "\n\n仍可選用模型內既有的族群。");
+        }
+    }
+
+    internal sealed class LinkedPipeSelectionFilter : ISelectionFilter
+    {
+        private readonly Document doc;
+        internal LinkedPipeSelectionFilter(Document doc) { this.doc = doc; }
+        public bool AllowElement(Element element) => element is RevitLinkInstance link && link.GetLinkDocument() != null;
+        public bool AllowReference(Reference reference, XYZ point)
+        {
+            var link = doc.GetElement(reference.ElementId) as RevitLinkInstance;
+            return SleevePipeSource.Supported(link?.GetLinkDocument()?.GetElement(reference.LinkedElementId));
         }
     }
 

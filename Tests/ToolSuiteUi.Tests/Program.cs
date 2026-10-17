@@ -57,6 +57,7 @@ internal static class Program {
         catch(ArgumentException) { badLayout=true; }
         Check(badLayout,"reject nonfinite layout inputs");
         using(var sleeves=new YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveSettingsForm(12)) {
+            sleeves.ConfigureSourceSummary("來源：2 個直接連結實例；套管建立於目前模型。");
             var savedSleeves=new YD_RevitTools.LicenseManager.Commands.MEP.PipeSleeveSettings {
                 IncludeCurrentModel=true, DefaultWallSleeveDisplayName="測試套管: 100A",
                 SizeMappings=new() { new() { NominalDiameterMm=50,SleeveDisplayName="測試套管: 100A" } }
@@ -68,6 +69,7 @@ internal static class Program {
                 new() { Id="2",Name="測試套管: 125A",Family="測試套管",Type="125A" }
             },savedSleeves);
             ShowForPreview(sleeves);
+            Check(Descendants(sleeves).OfType<Label>().Any(l=>l.Text.Contains("2 個直接連結實例")),"linked source summary remains visible in sleeve settings");
             sleeves.Size = new Size(1800,1000);
             Application.DoEvents();
             Check(sleeves.SizeRows.Single(r=>r.DN==50).SymbolId=="1","saved 2024 mapping overrides default");
@@ -155,7 +157,12 @@ internal static class Program {
         foreach (bool alignOnly in new[] {false,true}) {
             using var form = new AutoJoinForm(new AutoJoinSettings(),alignOnly); ShowForPreview(form);
             Descendants(form).OfType<Button>().Single(b=>b.Text=="全選").PerformClick();
-            Check(form.BuildSettings().EnabledCategoryKeys.Count == CategoryCatalog.AllKeys.Count,"UI all-selection preserved");
+            Check(form.BuildSettings().EnabledCategoryKeys.Count == (alignOnly ? AutoJoinForm.WallAlignKeys.Length : CategoryCatalog.AllKeys.Count),"UI all-selection respects tool scope");
+            if (alignOnly)
+            {
+                Check(!Descendants(form).OfType<CheckBox>().Any(c => c.Text == "允許同類別接合"), "wall align hides unrelated join options");
+                Check(!form.BuildSettings().UseSameCategoryTypeRules, "wall align never enables join rules");
+            }
             Check(((Button)form.AcceptButton).Text == (alignOnly ? "執行對齊" : "自動接合"),"correct primary action");
             Render(form,Path.Combine(output,alignOnly ? "wall-align.png" : "auto-join.png"));
         }
@@ -170,6 +177,10 @@ internal static class Program {
             form.Close(); Check(!form.IsDisposed,"busy modeless form cannot close pending request");
             form.SetBusy(false); run.PerformClick();
             Check(requests==2,"modeless form can run again after completion");
+            form.SetScopeSummary("範圍內沒有可處理的構件",false);
+            form.SetBusy(true); form.SetBusy(false); run.PerformClick();
+            Check(requests==2 && !run.Enabled,"empty scope stays blocked after busy transition");
+            form.SetScopeSummary("符合條件 2 個",true);
             int selections=0,picks=0;
             form.SelectionRequested += () => selections++;
             form.PickRequested += () => picks++;
@@ -183,6 +194,10 @@ internal static class Program {
             var categoryRow=categoryRows[0]; categoryRow.Checked=!categoryRow.Checked;
             Check(form.BuildSettings().EnabledCategoryKeys.Contains((string)categoryRow.Tag)==categoryRow.Checked,"row check updates settings");
             Check(Descendants(form).OfType<Label>().Any(l=>l.Text==$"已選 {categoryRows.Count(c=>c.Checked)}／11"),"selected category count updates");
+            Descendants(form).OfType<Button>().Single(b=>b.Text=="全不選").PerformClick();
+            Check(form.BuildSettings().EnabledCategoryKeys.Count==0,"empty live categories do not silently restore defaults");
+            Descendants(form).OfType<Button>().Single(b=>b.Text=="梁柱牆板").PerformClick();
+            Check(form.BuildSettings().EnabledCategoryKeys.Contains("StructuralColumn") && !form.BuildSettings().EnabledCategoryKeys.Contains("Ceiling"),"common preset includes columns and excludes ceilings");
             Render(form,Path.Combine(output,"auto-join-modeless.png"));
             form.Size = form.MinimumSize;
             Application.DoEvents();
@@ -190,10 +205,31 @@ internal static class Program {
             foreach(var button in Descendants(form).OfType<Button>().Where(b=>b.Visible))
                 Check(form.ClientRectangle.Contains(form.PointToClient(button.PointToScreen(new Point(button.Width-1,button.Height-1)))),"modeless button within form: "+button.Text);
             foreach(var control in Descendants(form).Where(c=>c.Visible && (c is Button || c is CheckBox))) {
-                if(control is CheckBox && control.Tag is string) continue; // 類別清單允許垂直捲動。
                 for(var parent=control.Parent; parent!=null; parent=parent.Parent)
                     Check(parent.ClientRectangle.Contains(parent.PointToClient(control.PointToScreen(new Point(control.Width-1,control.Height-1)))),"control not clipped by parent: "+control.Text);
             }
+            using (var advanced = form.CreateAdvancedDialog()) {
+                ShowForPreview(advanced);
+                var sameCategory = Descendants(advanced).OfType<CheckBox>().Single(c=>c.Text=="允許同類別接合");
+                sameCategory.Checked=true;
+                Check(form.BuildSettings().AllowSameCategoryJoin,"advanced dialog edits feed main settings");
+                advanced.Size = advanced.MinimumSize;
+                Application.DoEvents();
+                foreach(var control in Descendants(advanced).Where(c=>c.Visible && (c is Button || c is CheckBox)))
+                    for(var parent=control.Parent; parent!=null; parent=parent.Parent)
+                        Check(parent.ClientRectangle.Contains(parent.PointToClient(control.PointToScreen(new Point(control.Width-1,control.Height-1)))),"settings control not clipped: "+control.Text);
+                Render(advanced,Path.Combine(output,"auto-join-settings.png"));
+                advanced.Close();
+            }
+            using (var reopened = form.CreateAdvancedDialog()) {
+                ShowForPreview(reopened);
+                Check(Descendants(reopened).OfType<CheckBox>().Single(c=>c.Text=="允許同類別接合").Checked,"reopening settings preserves edits and live controls");
+                bool refreshedAfterClose=false;
+                form.TypeChoicesRefreshRequested += () => refreshedAfterClose=!reopened.Visible;
+                Descendants(reopened).OfType<Button>().Single(b=>b.Text=="↻").PerformClick();
+                Check(refreshedAfterClose,"type refresh closes modal settings before requesting Revit API work");
+            }
+            Check(!Descendants(form).OfType<TableLayoutPanel>().Any(p=>p.VerticalScroll.Visible),"main form never needs whole-window scrolling");
             form.Close(); Check(form.IsDisposed,"idle modeless form closes normally");
         }
         var slider = new YD_RevitTools.LicenseManager.Commands.Family.SliderSettingsWindow(0,1000,10);

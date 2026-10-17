@@ -21,6 +21,7 @@ internal static class Program
     private static void Main(string[] args)
     {
         RevisionChecks.Run(Check);
+        ConstructionChecks.Run(Check);
         Check(Math.Abs(SleeveRoundClearancePolicy.Remaining(150,100,1,5)-20)<1e-9,"parallel clearance retains radial offset");
         double slopeCos=1/Math.Sqrt(1+.01*.01);
         Check(SleeveRoundClearancePolicy.Remaining(150,100,slopeCos,1)>23.99,"one percent slope can retain adequate clearance");
@@ -81,10 +82,12 @@ internal static class Program
         {
             form.ShowInTaskbar = false; form.StartPosition = FormStartPosition.Manual; form.Location = new Point(-16000, -16000);
             form.Show(); Application.DoEvents();
-            var controls = Children(form).ToList(); var grid = controls.OfType<DataGridView>().Single();
+            var controls = Children(form).ToList(); var grid = controls.OfType<DataGridView>().Single(g => g.Parent.Text == "數量表預覽");
+            var pending = controls.OfType<DataGridView>().Single(g => g.Parent.Text == "待確認項目");
             Check(grid.Rows.Count == 6, "preview excludes void row");
             controls.OfType<CheckBox>().Single().Checked = true;
             Check(grid.Rows.Count == 7, "manual selection enters preview");
+            Check(pending.Rows.Cast<DataGridViewRow>().Any(r => (string)r.Cells["狀態"].Value == "手動套管待確認"), "pending tab includes manually enrolled uncertain sleeve");
             var combos = controls.OfType<ComboBox>().ToList();
             var sheet = combos.Single(c => c.Items[0].ToString().Contains("只建立"));
             Check(sheet.Items.Count == 2, "placeholder sheet excluded");
@@ -110,7 +113,7 @@ internal static class Program
             form.Show(); Application.DoEvents();
             var controls = Children(form).ToList(); var tabs = controls.OfType<TabControl>().Single();
             var review = controls.OfType<DataGridView>().Single(g => g.Columns.Contains("Control"));
-            var preview = controls.OfType<DataGridView>().Single(g => g != review);
+            var preview = controls.OfType<DataGridView>().Single(g => g.Parent.Text == "2 數量表預覽");
             var execute = controls.OfType<Button>().Single(b => b.Text == "建立表格並存基準");
             Check(!execute.Enabled && review.Rows.Count == 7, "issue requires baseline name and shows excluded sleeves for review");
             review.Rows[0].Cells[0].Value = "作廢"; Application.DoEvents();

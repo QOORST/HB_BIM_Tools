@@ -11,6 +11,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 {
     internal sealed class PipeSleeveOptions
     {
+        internal List<SleevePipeSource> PipeSources { get; set; }
         public string CreationLevelUniqueId { get; set; } = "";
         public bool PreserveNominalTypeDimensions { get; set; }
         public double ClearanceMm { get; set; } = 50.0;
@@ -60,6 +61,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
     internal sealed class PipeSleeveCandidate
     {
+        internal SleevePipeSource Source { get; set; }
+        internal string SourceKey => (Source ?? new SleevePipeSource(Pipe)).Key;
+        internal string HostLinkUniqueId { get; set; }
         public Element Pipe { get; set; }
         public Element HostElement { get; set; }
         public string HostType { get; set; }
@@ -186,7 +190,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
         private static string UnresolvedUpdateReason(FamilyInstance sleeve, int count, IList<string> diagnostics)
         {
-            string source = ReadString(sleeve, "來源管線Id", "Pipe Id", "Source Pipe Id");
+            var resolved = SleeveSourceRecord.Resolve(sleeve.Document, sleeve, out string missingReason);
+            if (resolved == null) return missingReason;
+            string source = resolved.Label;
             var related = diagnostics.Where(message => message.StartsWith("管線 " + source + "：") ||
                 message.StartsWith("管線 " + source + "／")).Take(3).ToList();
             return $"套管 {sleeve.Id} 找到 {count} 個可配對的完整實體穿越點；保留原件，不自動刪除。" +
@@ -431,11 +437,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return 0;
             }
 
-            var sourceIds = new HashSet<string>(pipes
-                .Where(p => p != null)
-                .Select(p => p.Id.GetIdValue().ToString()), StringComparer.OrdinalIgnoreCase);
+            var sources = SleevePipeSource.For(doc, pipes, options);
 
-            if (sourceIds.Count == 0)
+            if (sources.Count == 0)
             {
                 return 0;
             }
@@ -444,7 +448,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 .OfClass(typeof(FamilyInstance))
                 .OfType<FamilyInstance>()
                 .Where(fi => IsSleeveInstance(fi))
-                .Where(fi => sourceIds.Contains(ReadString(fi, "來源管線Id", "Pipe Id", "Source Pipe Id")))
+                .Where(fi => sources.Any(source => SleeveSourceRecord.Matches(fi, source)))
                 .Where(fi => IsSleeveLocationInActiveViewScope(doc, options, fi))
                 .Where(fi => !MatchesAnyCandidate(fi, candidates))
                 .Select(fi => fi.Id)
@@ -487,14 +491,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             XYZ sleevePoint = location?.Point;
             if (sleevePoint == null) return false;
 
-            string sourceId = ReadString(sleeve, "來源管線Id", "Pipe Id", "Source Pipe Id");
             string crossing = ReadSleeveCrossing(sleeve);
 
             return (candidates ?? Enumerable.Empty<PipeSleeveCandidate>()).Any(candidate =>
             {
                 if (candidate?.Pipe == null || candidate.Point == null) return false;
-                string candidateSourceId = candidate.Pipe.Id.GetIdValue().ToString();
-                if (!string.Equals(sourceId, candidateSourceId, StringComparison.OrdinalIgnoreCase)) return false;
+                if (!SleeveSourceRecord.Matches(sleeve, candidate.Source ?? new SleevePipeSource(candidate.Pipe))) return false;
 
                 string candidateCrossing = GetCrossingTypeText(candidate.HostType);
                 if (!TextContains(crossing, candidateCrossing)) return false;
@@ -505,16 +507,18 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private static IEnumerable<PipeSleeveCandidate> Analyze(Document doc, IList<Element> pipes, PipeSleeveOptions options, List<string> diagnostics)
         {
             options.ReportProgress?.Invoke("正在收集牆、樓板、梁與連結模型。");
-            Outline searchOutline = CreatePipeSearchOutline(pipes, 500.0 * MmToFeet);
+            var sources = SleevePipeSource.For(doc, pipes, options);
+            Outline searchOutline = CreatePipeSearchOutline(sources, 500.0 * MmToFeet);
             var hosts = options.IncludeCurrentModel ? CollectHostElements(doc, searchOutline).ToList() : new List<Element>();
-            var links = options.IncludeLinks ? CollectLinkHosts(doc, searchOutline).ToList() : new List<Tuple<Element, Document, Transform, string>>();
+            var links = options.IncludeLinks ? CollectLinkHosts(doc, searchOutline).ToList() : new List<Tuple<Element, Document, Transform, string, string>>();
             var candidatesByKey = new Dictionary<string, PipeSleeveCandidate>();
 
             int checkedPipes = 0;
-            foreach (Element pipe in pipes.Where(IsSupportedCurve))
+            foreach (var source in sources)
             {
+                Element pipe = source.Element;
                 options.ReportProgress?.Invoke($"正在分析管線 {++checkedPipes}／{pipes.Count} 的穿越位置。");
-                Curve curve = ((LocationCurve)pipe.Location).Curve;
+                Curve curve = source.ModelCurve;
                 XYZ direction = GetCurveDirection(curve);
                 double ductWidth;
                 double ductHeight;
@@ -525,7 +529,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     : ToNominalDiameterMm(diameter);
                 if (!isRectangularDuct && options.UseDiameterSymbolMap && nominalDiameterMm == 0)
                 {
-                    diagnostics.Add($"管線 {pipe.Id}：管徑 {diameter / MmToFeet:0.###} mm 未明確匹配，請新增並指定對應族型。");
+                    diagnostics.Add($"管線 {source.Label}：管徑 {diameter / MmToFeet:0.###} mm 未明確匹配，請新增並指定對應族型。");
                     continue;
                 }
 
@@ -541,7 +545,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     XYZ sleeveDirection;
                     if (!TryGetIntersectionData(curve, host, hostType, out point, out hostThickness, out sleeveDirection))
                     {
-                        if (MayCurveIntersectElementBox(curve, host)) diagnostics.Add($"管線 {pipe.Id}／宿主 {host.Id}：未確認完整實體穿越或平行穿越面；保留舊套管，請確認構件幾何。");
+                        if (MayCurveIntersectElementBox(curve, host)) diagnostics.Add($"管線 {source.Label}／宿主 {host.Id}：未確認完整實體穿越或平行穿越面；保留舊套管，請確認構件幾何。");
                         continue;
                     }
 
@@ -549,6 +553,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                     AddOrMergeCandidate(candidatesByKey, new PipeSleeveCandidate
                     {
+                        Source = source,
                         Pipe = pipe,
                         HostElement = host,
                         HostType = hostType,
@@ -580,7 +585,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     XYZ sleeveDirection;
                     if (!TryGetIntersectionData(curveInLink, host, hostType, out pointInLink, out hostThickness, out sleeveDirection))
                     {
-                        if (MayCurveIntersectElementBox(curveInLink, host)) diagnostics.Add($"管線 {pipe.Id}／連結宿主 {host.Id}：未確認完整實體穿越或平行穿越面；保留舊套管，請確認構件幾何。");
+                        if (MayCurveIntersectElementBox(curveInLink, host)) diagnostics.Add($"管線 {source.Label}／連結宿主 {host.Id}：未確認完整實體穿越或平行穿越面；保留舊套管，請確認構件幾何。");
                         continue;
                     }
 
@@ -588,6 +593,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     if (!IsPointInActiveViewScope(doc, options, point)) continue;
                     AddOrMergeCandidate(candidatesByKey, new PipeSleeveCandidate
                     {
+                        Source = source,
+                        HostLinkUniqueId = linkHost.Item5,
                         Pipe = pipe,
                         HostElement = host,
                         HostType = hostType,
@@ -683,7 +690,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     continue;
                 }
 
-                if (beamCandidate.Pipe.Id.GetIdValue() != wallCandidate.Pipe.Id.GetIdValue())
+                if (beamCandidate.SourceKey != wallCandidate.SourceKey)
                 {
                     continue;
                 }
@@ -906,7 +913,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             string source = candidate.IsFromLink ? "L" : "M";
             string documentTitle = candidate.HostElement?.Document?.Title ?? string.Empty;
             long id = candidate.HostElement?.Id.GetIdValue() ?? -1;
-            return source + ":" + documentTitle + ":" + id;
+            return source + ":" + (candidate.HostLinkUniqueId ?? "") + ":" + documentTitle + ":" + id;
         }
 
         private static void AppendBeamRisk(PipeSleeveCandidate candidate, string risk, string note)
@@ -963,7 +970,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 }
             }
 
-            string key = MakeKey(candidate.Pipe.Id, candidate.HostType, candidate.Point);
+            string key = candidate.SourceKey + ":" + (candidate.HostLinkUniqueId ?? "") + ":" + MakeKey(candidate.Pipe.Id, candidate.HostType, candidate.Point);
             key += ":" + candidate.HostElement.UniqueId + ":" + candidate.HostElement.Document.GetHashCode();
             PipeSleeveCandidate existingByKey;
             if (!candidatesByKey.TryGetValue(key, out existingByKey))
@@ -994,7 +1001,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return false;
             }
 
-            if (existing.Pipe.Id.GetIdValue() != candidate.Pipe.Id.GetIdValue() || existing.Direction == null || candidate.Direction == null)
+            if (existing.SourceKey != candidate.SourceKey || existing.Direction == null || candidate.Direction == null)
             {
                 return false;
             }
@@ -1115,18 +1122,19 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 parts.Add(value);
             }
         }
-        private static Outline CreatePipeSearchOutline(IList<Element> pipes, double paddingFeet)
+        private static Outline CreatePipeSearchOutline(IList<SleevePipeSource> sources, double paddingFeet)
         {
             XYZ min = null;
             XYZ max = null;
 
-            foreach (Element pipe in pipes ?? new List<Element>())
+            foreach (var source in sources ?? new List<SleevePipeSource>())
             {
+                Element pipe = source.Element;
                 BoundingBoxXYZ box = pipe?.get_BoundingBox(null);
                 if (box != null)
                 {
-                    ExpandBounds(box.Min, ref min, ref max);
-                    ExpandBounds(box.Max, ref min, ref max);
+                    foreach (var corner in GetOutlineCorners(box.Min, box.Max))
+                        ExpandBounds(source.ToModel.OfPoint(box.Transform.OfPoint(corner)), ref min, ref max);
                     continue;
                 }
 
@@ -1135,15 +1143,15 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
 
                 try
                 {
-                    foreach (XYZ point in locationCurve.Curve.Tessellate())
+                    foreach (XYZ point in source.ModelCurve.Tessellate())
                     {
                         ExpandBounds(point, ref min, ref max);
                     }
                 }
                 catch
                 {
-                    ExpandBounds(locationCurve.Curve.GetEndPoint(0), ref min, ref max);
-                    ExpandBounds(locationCurve.Curve.GetEndPoint(1), ref min, ref max);
+                    ExpandBounds(source.ToModel.OfPoint(locationCurve.Curve.GetEndPoint(0)), ref min, ref max);
+                    ExpandBounds(source.ToModel.OfPoint(locationCurve.Curve.GetEndPoint(1)), ref min, ref max);
                 }
             }
 
@@ -1221,7 +1229,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             foreach (Element host in CollectRecognizedHostLikeElements(doc, searchOutline)) yield return host;
         }
 
-        private static IEnumerable<Tuple<Element, Document, Transform, string>> CollectLinkHosts(Document doc, Outline searchOutline)
+        private static IEnumerable<Tuple<Element, Document, Transform, string, string>> CollectLinkHosts(Document doc, Outline searchOutline)
         {
             foreach (RevitLinkInstance link in new FilteredElementCollector(doc).OfClass(typeof(RevitLinkInstance)).Cast<RevitLinkInstance>())
             {
@@ -1231,20 +1239,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 Outline linkOutline = TransformOutline(searchOutline, transform.Inverse);
 
                 foreach (Wall wall in ApplyOutlineFilter(new FilteredElementCollector(linkDoc), linkOutline).OfClass(typeof(Wall)).Cast<Wall>())
-                    yield return Tuple.Create((Element)wall, linkDoc, transform, "Wall");
+                    yield return Tuple.Create((Element)wall, linkDoc, transform, "Wall", link.UniqueId);
                 foreach (Floor floor in ApplyOutlineFilter(new FilteredElementCollector(linkDoc), linkOutline).OfClass(typeof(Floor)).Cast<Floor>())
-                    yield return Tuple.Create((Element)floor, linkDoc, transform, "Floor");
+                    yield return Tuple.Create((Element)floor, linkDoc, transform, "Floor", link.UniqueId);
                 foreach (FamilyInstance beam in ApplyOutlineFilter(new FilteredElementCollector(linkDoc), linkOutline)
                     .OfCategory(BuiltInCategory.OST_StructuralFraming)
                     .WhereElementIsNotElementType()
                     .OfType<FamilyInstance>())
-                    yield return Tuple.Create((Element)beam, linkDoc, transform, "Beam");
+                    yield return Tuple.Create((Element)beam, linkDoc, transform, "Beam", link.UniqueId);
                 foreach (Element host in CollectRecognizedHostLikeElements(linkDoc, linkOutline))
                 {
                     string hostType = GetHostType(host);
                     if (!string.IsNullOrWhiteSpace(hostType))
                     {
-                        yield return Tuple.Create(host, linkDoc, transform, hostType);
+                        yield return Tuple.Create(host, linkDoc, transform, hostType, link.UniqueId);
                     }
                 }
             }
@@ -2209,6 +2217,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             SetString(sleeve, candidate.IsFromLink ? "連結模型" : "當前模型", "穿越來源", "Host Source");
             SetString(sleeve, $"DN{candidate.PipeNominalDiameterMm}", "管道標稱直徑", "Nominal Diameter");
             SetString(sleeve, candidate.Pipe.Id.GetIdValue().ToString(), "來源管線Id", "Pipe Id", "Source Pipe Id");
+            SleeveSourceRecord.Save(sleeve, candidate);
         }
 
         private static string GetSleeveCheckInfo(PipeSleeveCandidate candidate, string crossingType)
@@ -2350,7 +2359,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return null;
             }
 
-            string sourceId = candidate.Pipe.Id.GetIdValue().ToString();
             string crossingType = GetCrossingTypeText(candidate.HostType);
             double nearTolerance = GetExistingSleeveTolerance(candidate);
 
@@ -2368,14 +2376,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 .Select(x =>
                 {
                     x.Distance = x.Location.DistanceTo(candidate.Point);
-                    x.SourceMatches = string.Equals(x.Source, sourceId, StringComparison.OrdinalIgnoreCase);
+                    x.SourceMatches = SleeveSourceRecord.Matches(x.Instance, candidate.Source ?? new SleevePipeSource(candidate.Pipe));
                     x.CrossingMatches = TextContains(x.Crossing, crossingType);
                     x.IsNear = x.Distance <= nearTolerance;
                     return x;
                 })
                 .Where(x => x.CrossingMatches &&
-                    ((x.SourceMatches && (x.IsNear || IsOriginalSleeveHost(x.Instance, candidate))) ||
-                    (x.IsNear && string.IsNullOrWhiteSpace(x.Source) && x.Distance <= 25.0 * MmToFeet)))
+                    ((x.SourceMatches && (SleeveSourceRecord.MatchesHost(x.Instance, candidate) ?? (x.IsNear || IsOriginalSleeveHost(x.Instance, candidate)))) ||
+                    (candidate.Source?.Link == null && !SleeveSourceRecord.HasRecord(x.Instance) && x.IsNear && string.IsNullOrWhiteSpace(x.Source) && x.Distance <= 25.0 * MmToFeet)))
                 .OrderBy(x => x.SourceMatches ? 0 : 1)
                 .ThenBy(x => x.CrossingMatches ? 0 : 1)
                 .ThenBy(x => x.Distance)
@@ -2498,7 +2506,6 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 return false;
             }
 
-            string sourceId = candidate.Pipe.Id.GetIdValue().ToString();
             string crossingType = GetCrossingTypeText(candidate.HostType);
             double tolerance = GetExistingSleeveTolerance(candidate);
             XYZ point = candidate.Point;
@@ -2521,7 +2528,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                     if (distance > tolerance) return false;
 
                     string source = ReadString(fi, "來源管線Id", "Pipe Id", "Source Pipe Id");
-                    if (string.Equals(source, sourceId, StringComparison.OrdinalIgnoreCase)) return true;
+                    if (SleeveSourceRecord.Matches(fi, candidate.Source ?? new SleevePipeSource(candidate.Pipe))) return true;
+                    if (candidate.Source?.Link != null || SleeveSourceRecord.HasRecord(fi)) return false;
 
                     string crossing = ReadSleeveCrossing(fi);
                     if (!string.IsNullOrWhiteSpace(source) || !TextContains(crossing, crossingType)) return false;
@@ -2581,7 +2589,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             if (!IsSleeveInstance(instance)) return false;
 
             string source = ReadString(instance, "來源管線Id", "Pipe Id", "Source Pipe Id");
-            return long.TryParse(source, out long sourceId) && sourceId > 0;
+            return SleeveSourceRecord.HasRecord(instance) || long.TryParse(source, out long sourceId) && sourceId > 0;
         }
 
         private static string GetFamilyInstanceSearchText(FamilyInstance instance)

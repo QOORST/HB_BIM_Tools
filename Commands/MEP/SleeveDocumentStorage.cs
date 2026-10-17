@@ -16,7 +16,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var schema = Schema.Lookup(id);
             if (schema != null) return schema;
             var builder = new SchemaBuilder(id);
-            builder.SetSchemaName(id == NumberSchema ? "HBSleeveNumbersV1" : "HBSleeveRevisionV1");
+            builder.SetSchemaName(id == NumberSchema ? "HBSleeveNumbersV1" : id == RevisionSchema ? "HBSleeveRevisionV1" : "HBSleeveConstructionV1");
             builder.SetReadAccessLevel(AccessLevel.Public); builder.SetWriteAccessLevel(AccessLevel.Public);
             builder.AddSimpleField("Json", typeof(string));
             return builder.Finish();

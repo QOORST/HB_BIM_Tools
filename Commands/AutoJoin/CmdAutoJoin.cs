@@ -41,8 +41,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         }
     }
 
-    internal static string Run(UIDocument uiDoc, AutoJoinSettings settings, ExecutionAction action)
+    internal static string Run(UIDocument uiDoc, AutoJoinSettings settings, ExecutionAction action, System.Action<string> report = null)
     {
+        report?.Invoke("正在收集範圍內的構件…");
         SettingsSerializer.Save(SettingsSerializer.DefaultPath, settings);
         var scopedElements = ElementCollectorService.Collect(uiDoc, settings);
         if (scopedElements.Count == 0)
@@ -74,6 +75,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         }
 
         JoinEngineResult result;
+        report?.Invoke($"已收集 {scopedElements.Count} 個構件，正在檢查配對並執行；請稍候…");
         if (action == ExecutionAction.AutoJoin)
         {
             result = JoinEngine.RunAutoJoin(uiDoc.Document, scopedElements, settings);

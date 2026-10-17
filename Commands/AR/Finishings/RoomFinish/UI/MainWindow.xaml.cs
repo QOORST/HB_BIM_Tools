@@ -443,6 +443,14 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.Finishings.RoomFinish.UI
             CreateCheckViewsHandler createCheckViewsHandler, ExternalEvent createCheckViewsEvent)
         {
             InitializeComponent();
+            Loaded += (_, _) =>
+            {
+                var screen = System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle).WorkingArea;
+                var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? System.Windows.Media.Matrix.Identity;
+                var extent = transform.Transform(new System.Windows.Point(screen.Width, screen.Height));
+                MinWidth = Math.Min(900, extent.X - 24); MinHeight = Math.Min(560, extent.Y - 24);
+                Width = Math.Min(Width, extent.X - 24); Height = Math.Min(Height, extent.Y - 24);
+            };
             DataContext = this;
             _uiDoc = uiDoc;
             _syncHandler = syncHandler;             _syncEvent = syncEvent;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -61,6 +61,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             _form.SelectionRequested += () => Queue("selection");
             _form.PickRequested += () => Queue("pick");
             _form.TypeChoicesRefreshRequested += () => Queue("types");
+            _form.ScopeCheckRequested += () => Queue("scope");
+            ElementCollectorService.UpdateScopeSummary(app.ActiveUIDocument, _form);
             _form.FormClosed += (_, __) =>
             {
                 // WinForms callbacks are outside Revit API context. Defer API cleanup.
@@ -199,25 +201,49 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
                     _form.SetStatus($"已重新讀取 {choices.Count} 個類別／類型選項。\n模型：{_document.Title}");
                     return;
                 }
+                if (request == "scope")
+                {
+                    ElementCollectorService.UpdateScopeSummary(uiDoc, _form);
+                    _form.SetStatus("範圍檢查完成；尚未變更模型。");
+                    return;
+                }
                 if (request == "pick")
                 {
+                    var previous = uiDoc.Selection.GetElementIds().ToList();
                     _form.Hide();
-                    var picked = uiDoc.Selection.PickObjects(ObjectType.Element, "選取接合構件，按完成結束；Esc 取消。");
-                    uiDoc.Selection.SetElementIds(picked.Select(x => x.ElementId).ToList());
+                    try
+                    {
+                        var picked = uiDoc.Selection.PickObjects(ObjectType.Element, "選取接合構件，按完成結束；Esc 保留原選取。");
+                        uiDoc.Selection.SetElementIds(picked.Select(x => x.ElementId).Distinct().ToList());
+                    }
+                    catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                    {
+                        uiDoc.Selection.SetElementIds(previous);
+                        throw;
+                    }
                 }
                 if (request == "pick" || request == "selection")
                 {
                     _form.UseSelectedScope();
+                    ElementCollectorService.UpdateScopeSummary(uiDoc, _form);
                     _form.SetStatus($"已選取 {uiDoc.Selection.GetElementIds().Count} 個元素；執行時依勾選類別篩選。\n模型：{_document.Title}");
                 }
                 else
                 {
-                    _form.SetStatus(CmdAutoJoin.Run(uiDoc, _settings, _action));
+                    ElementCollectorService.UpdateScopeSummary(uiDoc, _form);
+                    if (!_form.ScopeCanRun)
+                    {
+                        _form.SetStatus("未執行：請依範圍檢查提示調整選取或類別。");
+                        return;
+                    }
+                    _form.SetStatus("正在收集構件並執行接合檢查…");
+                    _form.SetStatus(CmdAutoJoin.Run(uiDoc, _settings, _action, _form.SetStatus));
+                    ElementCollectorService.UpdateScopeSummary(uiDoc, _form);
                 }
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
-                _form.SetStatus("已取消選取，未執行接合。");
+                _form.SetStatus("已取消選取，保留原選取；未執行接合。");
             }
             catch (Exception ex)
             {

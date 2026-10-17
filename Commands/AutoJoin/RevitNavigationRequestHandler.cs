@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -9,6 +9,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 {
     private readonly object _sync = new();
     private List<ElementId> _pendingIds;
+    private bool _selectionOnly;
     private JoinFailureDetail _pendingDiagnostic;
     public event System.Action<JoinFailureDetail, string> DiagnosticCompleted;
     public void RequestDiagnostic(JoinFailureDetail item)
@@ -31,7 +32,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         }
     }
 
-    public void RequestShowElements(IList<ElementId> ids)
+    public void RequestShowElements(IList<ElementId> ids, bool selectionOnly = false)
     {
         if (ids == null || ids.Count == 0)
         {
@@ -40,6 +41,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
         lock (_sync)
         {
+            _selectionOnly = selectionOnly;
             _pendingIds = ids.Where(id => id != null && id != ElementId.InvalidElementId).Distinct().ToList();
         }
     }
@@ -56,9 +58,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     private void ExecuteNavigation(UIApplication app)
     {
         List<ElementId> ids;
+        bool selectionOnly;
         lock (_sync)
         {
             ids = _pendingIds;
+            selectionOnly = _selectionOnly;
             _pendingIds = null;
         }
 
@@ -78,6 +82,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         if (ids.Count == 0)
         {
             Fail("這筆結果的構件已不存在，請重新執行檢查。");
+            return;
+        }
+        if (selectionOnly)
+        {
+            uiDoc.Selection.SetElementIds(ids);
+            StatusChanged?.Invoke("已選取 " + ids.Count + " 個構件；保留目前視圖，隱藏構件可能不會顯示。");
             return;
         }
         var view3D = PrepareInspectionView(uiDoc.Document, ids);

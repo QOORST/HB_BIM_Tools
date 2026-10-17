@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -130,6 +130,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         };
 
         var closeButton = new Button { Text = "關閉", Width = 110, Height = 30 };
+        var selectButton = new Button { Text = "僅選取構件", Width = 120, Height = 30 };
+        selectButton.Click += (_, _) => NavigateSelectedFailureIn3D(selectionOnly: true);
         var showButton = new Button { Text = "定位到 3D", Width = 130, Height = 30 };
         var showA = new Button { Text = "定位 A", AutoSize = true };
         var showB = new Button { Text = "定位 B", AutoSize = true };
@@ -154,6 +156,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
 
         actionPanel.Controls.Add(closeButton);
         actionPanel.Controls.Add(showButton);
+        actionPanel.Controls.Add(selectButton);
         actionPanel.Controls.Add(showB);
         actionPanel.Controls.Add(showA);
         actionPanel.Controls.Add(diagnose);
@@ -167,11 +170,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         Controls.Add(root);
     }
 
-    private void NavigateSelectedFailureIn3D(int target = 0)
+    private void NavigateSelectedFailureIn3D(int target = 0, bool selectionOnly = false)
     {
         if (_failureList.SelectedItem is not JoinFailureDetail selected)
         {
-            MessageBox.Show("請先選擇一筆失敗項目。", "Auto Join", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("請先選擇一筆失敗項目。", "自動接合結果", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
@@ -189,11 +192,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         ids = ids.Distinct().ToList();
         if (ids.Count == 0)
         {
-            MessageBox.Show("此項目沒有可定位元素。", "Auto Join", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("此項目沒有可定位元素。", "自動接合結果", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        _navigationHandler.RequestShowElements(ids);
+        _navigationHandler.RequestShowElements(ids, selectionOnly);
         var status = _navigationEvent.Raise();
         if (status == Autodesk.Revit.UI.ExternalEventRequest.Accepted || status == Autodesk.Revit.UI.ExternalEventRequest.Pending)
             _hintLabel.Text = "定位請求已排入 Revit，等待處理。";

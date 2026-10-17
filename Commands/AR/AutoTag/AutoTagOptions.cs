@@ -14,7 +14,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
     {
         ActiveView,
         Selection,
-        LinkedView
+        LinkedView,
+        LinkedSelection
     }
 
     internal enum AutoTagPlacement
@@ -84,6 +85,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         public AutoTagScope Scope { get; set; } = AutoTagScope.ActiveView;
 
         public string LinkInstanceUniqueId { get; set; } = string.Empty;
+        // Session-only selection, never serialized into project defaults.
+        internal System.Collections.Generic.List<string> LinkedElementUniqueIds { get; set; } = new System.Collections.Generic.List<string>();
+        internal string LinkedSelectionViewUniqueId { get; set; } = "";
 
         public AutoTagPlacement Placement { get; set; } = AutoTagPlacement.Above;
 

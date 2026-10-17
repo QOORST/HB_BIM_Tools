@@ -24,6 +24,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         }
         private readonly Label summary = new Label { AutoSize=false, Dock=DockStyle.Fill, TextAlign=ContentAlignment.MiddleLeft, ForeColor=Color.FromArgb(90,100,110) };
         private int selectedCount;
+        private string sourceSummary = "";
+        internal void ConfigureSourceSummary(string value) { sourceSummary = value ?? ""; RefreshSummary(); }
         private readonly ComboBox levelRule = new ComboBox { DropDownStyle=ComboBoxStyle.DropDownList, Dock=DockStyle.Fill, DropDownWidth=600 };
         internal string CreationLevelUniqueId => levelRule.SelectedValue as string ?? "";
         internal Action<string> ValidateLevelRule = null;
@@ -35,7 +37,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
         private void RefreshSummary()
         {
             int pending=SizeRows.Count(r=>string.IsNullOrEmpty(r.SymbolId));
-            summary.Text=$"已選取 {selectedCount} 個構件 ｜ {SizeRows.Count} 種管徑 ｜ {pending} 項族型待指定";
+            summary.Text=$"已選取 {selectedCount} 個構件 ｜ {SizeRows.Count} 種管徑 ｜ {pending} 項族型待指定" +
+                (string.IsNullOrEmpty(sourceSummary) ? "" : "\n" + sourceSummary);
             sizes.Invalidate();
         }
         private readonly ComboBox wall = new ComboBox { DropDownStyle=ComboBoxStyle.DropDownList, Width=470 };
@@ -99,8 +102,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             });
         }
         private readonly NumericUpDown clearance = new NumericUpDown { Minimum=0, Maximum=1000, DecimalPlaces=1, Value=50, Width=110 };
-        private readonly CheckBox current = Option("包含本機模型", true);
-        private readonly CheckBox links = Option("包含連結模型", true);
+        private readonly CheckBox current = Option("穿越構件：包含本機模型", true);
+        private readonly CheckBox links = Option("穿越構件：包含連結模型", true);
         private readonly CheckBox exclude = Option("排除增建構件", true);
         private readonly CheckBox number = Option("自動編號", true);
         private readonly CheckBox existing = Option("略過既有套管", true);

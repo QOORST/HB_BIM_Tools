@@ -44,6 +44,8 @@ internal sealed class DimensionOptionsForm : Form
     private CheckBox _includeBeamSpacing = null!;
     private ComboBox _beamScope = null!;
     private TabControl _distanceTabs = null!;
+    private readonly List<TabPage> _distancePages = new List<TabPage>();
+    private readonly Label _liveSummary = new Label { AutoSize = true, Dock = DockStyle.Fill, ForeColor = Color.Gainsboro };
     private NumericUpDown _beamWidthOffset = null!;
     private NumericUpDown _beamSpacingOffset = null!;
     private Label _gridScaleHint = null!;
@@ -150,6 +152,7 @@ internal sealed class DimensionOptionsForm : Form
             Controls.Add(lockedRoot);
             ApplyModernTheme();
             ApplySavedSettingsForMode(_initialMode);
+            ConfigureLiveSummary();
             return;
         }
 
@@ -173,6 +176,7 @@ internal sealed class DimensionOptionsForm : Form
 
         ApplyModernTheme();
         ApplySavedSettingsForMode(_initialMode);
+        ConfigureLiveSummary();
     }
 
     private void FitToCurrentScreen()
@@ -614,7 +618,7 @@ internal sealed class DimensionOptionsForm : Form
                 Add(CreateDistanceRow("梁間距標註偏移",_beamSpacingOffset,"模型 mm"),42);
             }
             var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-            host.Controls.Add(panel); tab.Controls.Add(host); _distanceTabs.TabPages.Add(tab);
+            host.Controls.Add(panel); tab.Controls.Add(host); _distancePages.Add(tab); _distanceTabs.TabPages.Add(tab);
         }
         SyncDistanceTab(_initialMode);
         _distanceTabs.SelectedIndexChanged += (_, _) => {
@@ -622,13 +626,18 @@ internal sealed class DimensionOptionsForm : Form
                 foreach (TabPage page in _modeTabControl.TabPages) if (Equals(page.Tag,mode)) _modeTabControl.SelectedTab=page;
         };
         UpdateGridScaleHint();
+        Disposed += (_, _) => { foreach (var page in _distancePages) page.Dispose(); };
         return _distanceTabs;
     }
 
     private void SyncDistanceTab(DimensionMode mode)
     {
         if (_distanceTabs == null) return;
-        foreach (TabPage page in _distanceTabs.TabPages) if (Equals(page.Tag,mode)) _distanceTabs.SelectedTab=page;
+        var page = _distancePages.FirstOrDefault(p => Equals(p.Tag, mode));
+        if (page == null || (_distanceTabs.TabPages.Count == 1 && _distanceTabs.TabPages[0] == page)) return;
+        _distanceTabs.TabPages.Clear();
+        _distanceTabs.TabPages.Add(page);
+        ApplyDarkTheme(page);
     }
 
     private static Control CreateDistanceRow(string text, NumericUpDown numeric, string unit)
@@ -1244,7 +1253,43 @@ internal sealed class DimensionOptionsForm : Form
         panel.Controls.Add(close);
         panel.Controls.Add(_refreshButton);
         panel.Controls.Add(_statusLabel);
+        _liveSummary.Dock = DockStyle.None; _liveSummary.AutoSize = false;
+        _liveSummary.Height = 24; _liveSummary.AutoEllipsis = true;
+        panel.Controls.Add(_liveSummary); panel.Controls.SetChildIndex(_liveSummary, 0);
+        panel.SetFlowBreak(_liveSummary, true);
+        panel.SizeChanged += (_, _) => _liveSummary.Width = Math.Max(100, panel.ClientSize.Width - 12);
         return panel;
+    }
+
+    private void ConfigureLiveSummary()
+    {
+        void Bind(Control parent)
+        {
+            foreach (Control child in parent.Controls)
+            {
+                if (child is NumericUpDown number) number.ValueChanged += (_, _) => UpdateLiveSummary();
+                else if (child is ComboBox combo) combo.SelectedIndexChanged += (_, _) => UpdateLiveSummary();
+                else if (child is TabControl tabs) tabs.SelectedIndexChanged += (_, _) => UpdateLiveSummary();
+                else if (child is Button button) button.Click += (_, _) => UpdateLiveSummary();
+                Bind(child);
+            }
+        }
+        Bind(this);
+        foreach (var page in _distancePages.Where(p => p.Parent == null)) Bind(page);
+        UpdateLiveSummary();
+    }
+
+    private void UpdateLiveSummary()
+    {
+        var mode = _isModeLocked ? _initialMode : _modeTabControl.SelectedTab?.Tag is DimensionMode selected ? selected : _initialMode;
+        string distance = mode == DimensionMode.BeamGrid
+            ? $"A {_gridPrimaryOffsetNumeric.Value:0.##}、B {_gridOverallOffsetNumeric.Value:0.##} 紙面 mm"
+            : mode == DimensionMode.BeamWidth
+                ? $"梁寬偏移 {_beamWidthOffset.Value:0.##}、間距偏移 {_beamSpacingOffset.Value:0.##} 模型 mm"
+                : $"偏移 {_offsetNumeric.Value:0.##} 模型 mm（紙面 {_offsetNumeric.Value / _viewScale:0.##} mm）";
+        string task = mode == DimensionMode.BeamGrid ? "軸線" : mode == DimensionMode.BeamWidth ? "梁" : "柱";
+        _liveSummary.Text = IsBubblePage ? "本次操作：軸線標頭顯示設定，不建立尺寸。" :
+            $"本次標註：{task}｜{_typeCombo.Text}｜1:{_viewScale}｜{distance}";
     }
 
     private void BeginApply()
@@ -1296,6 +1341,7 @@ internal sealed class DimensionOptionsForm : Form
     {
         _viewScale = Math.Max(1, viewScale);
         UpdateGridScaleHint();
+        UpdateLiveSummary();
         string? selectedType = _typeCombo.SelectedIndex > 0 ? _typeCombo.SelectedItem?.ToString() : null;
         HashSet<int> selectedHorizontalIds = GetCheckedGridIds(_horizontalGridList);
         HashSet<int> selectedVerticalIds = GetCheckedGridIds(_verticalGridList);

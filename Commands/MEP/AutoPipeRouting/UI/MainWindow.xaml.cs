@@ -17,6 +17,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoPipeRouting.UI
         public MainWindow()
         {
             InitializeComponent();
+            txtSlope.TextChanged += (_, _) =>
+            {
+                bool valid = double.TryParse(txtSlope.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out double value)
+                    && !double.IsNaN(value) && !double.IsInfinity(value) && value > 0;
+                SlopeHint.Text = valid ? $"  1/{value:0.##} = {100 / value:0.###}%" : "  請輸入大於 0 的分母";
+            };
         }
 
         private void Ok_Click(object sender, RoutedEventArgs e)
@@ -44,12 +50,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoPipeRouting.UI
             if (!double.TryParse(txtDistancePipe.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double distance)
                 && !double.TryParse(txtDistancePipe.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out distance))
             {
-                fail = "Distance Pipe 請輸入數字。";
+                fail = "接入前保留長度請輸入數字。";
                 return false;
             }
-            if (distance < 0)
+            if (double.IsNaN(distance) || double.IsInfinity(distance) || distance < 0)
             {
-                fail = "Distance Pipe 不可小於 0。";
+                fail = "接入前保留長度需為大於或等於 0 的有限數字。";
                 return false;
             }
             Options.DistancePipeMm = distance;
@@ -57,12 +63,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.AutoPipeRouting.UI
             if (!double.TryParse(txtSlope.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double slope)
                 && !double.TryParse(txtSlope.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out slope))
             {
-                fail = "Slope 請輸入數字。";
+                fail = "洩水坡度請輸入數字。";
                 return false;
             }
-            if (slope <= 0)
+            if (double.IsNaN(slope) || double.IsInfinity(slope) || slope <= 0)
             {
-                fail = "Slope 需大於 0（例如 100 代表 1/100）。";
+                fail = "坡度分母需為大於 0 的有限數字（例如 100 代表 1/100＝1%）。";
                 return false;
             }
             Options.SlopeDenominator = slope;

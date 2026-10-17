@@ -10,12 +10,38 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 {
     internal sealed class AutoTagOptionsForm : Forms.Form
     {
-        private readonly RevitDB.Document _doc;
+        private RevitDB.Document _doc;
         private readonly AutoTagMode _mode;
         private int _viewScale;
         private readonly Action<AutoTagOptions, IReadOnlyList<AutoTagRuleSelection>> _applyAction;
         private readonly Action _refreshAction;
         private readonly Action _pickAction;
+        private RevitDB.Document _selectionDocument;
+        private string _pickedLink = "";
+        private string _pickedView = "";
+        private List<string> _linkedSelection = new List<string>();
+        private int _localSelectionCount;
+        internal AutoTagScope SelectedScope
+        {
+            get {
+#if REVIT2024 || REVIT2025 || REVIT2026
+                return (AutoTagScope)Math.Max(0, _scopeCombo.SelectedIndex);
+#else
+                return _scopeCombo.SelectedIndex == 2 ? AutoTagScope.LinkedSelection : (AutoTagScope)Math.Max(0, _scopeCombo.SelectedIndex);
+#endif
+            }
+        }
+        private bool UsesLink => SelectedScope == AutoTagScope.LinkedView || SelectedScope == AutoTagScope.LinkedSelection;
+        internal AutoTagOptions PickRequest => new AutoTagOptions { Scope = SelectedScope, LinkInstanceUniqueId = (_linkCombo.SelectedItem as LinkChoice)?.UniqueId ?? "" };
+        internal void SetLinkedSelection(string linkId, IEnumerable<string> ids, string viewId)
+        {
+            if ((_linkCombo.SelectedItem as LinkChoice)?.UniqueId != linkId) return;
+            _pickedLink = linkId;
+            _pickedView = viewId;
+            _linkedSelection = ids.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
+            UpdateSummary();
+        }
+        private void ClearLinkedSelection() { _pickedLink = ""; _pickedView = ""; _linkedSelection.Clear(); }
         private readonly Forms.Button _pickButton = new Forms.Button { Text = "選取構件", AutoSize = true, MinimumSize = new Size(100, 30) };
         private readonly Forms.Label _selectionLabel = new Forms.Label { Text = "尚未讀取選取數量", AutoSize = true, Margin = new Forms.Padding(8, 8, 0, 0) };
         private readonly string _windowTitle;
@@ -58,6 +84,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             Action refreshAction, Action pickAction = null)
         {
             _doc = doc ?? throw new ArgumentNullException(nameof(doc));
+            _selectionDocument = doc;
             _mode = mode;
             _viewScale = Math.Max(1, doc.ActiveView.Scale);
             _applyAction = applyAction ?? throw new ArgumentNullException(nameof(applyAction));
@@ -108,6 +135,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         public void UpdateTagTypes(RevitDB.Document doc)
         {
+            if (!ReferenceEquals(_selectionDocument, doc)) ClearLinkedSelection();
+            _selectionDocument = doc;
+            _doc = doc;
             _viewScale = Math.Max(1, doc.ActiveView.Scale);
             _refreshingSources = true;
             try { UpdateLinks(doc); } finally { _refreshingSources = false; }
@@ -149,7 +179,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         public void SetSelectionCount(int count)
         {
-            if (!IsDisposed) _selectionLabel.Text = $"選取結果：{count} 個";
+            _localSelectionCount = count;
+            if (!IsDisposed) UpdateSummary();
         }
 
         public void SetRequestCompleted(string status = null, bool isError = false)
@@ -170,18 +201,22 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         private void BuildLayout(RevitDB.Document doc)
         {
             BackColor = Color.FromArgb(245, 247, 250);
-            var shell = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Fill, Padding = new Forms.Padding(8), ColumnCount = 1, RowCount = 3 };
+            var shell = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Fill, Padding = new Forms.Padding(8), ColumnCount = 1, RowCount = 4 };
             shell.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 100));
+            shell.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             shell.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             shell.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             Controls.Add(shell);
             var scroll = new Forms.Panel { Dock = Forms.DockStyle.Fill, AutoScroll = true };
-            shell.Controls.Add(scroll, 0, 0);
-            var root = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, Padding = new Forms.Padding(8),
+            var pages = new Forms.TabControl { Dock = Forms.DockStyle.Fill };
+            var sourcePage = new Forms.TabPage("來源與標籤族型"); sourcePage.Controls.Add(scroll); pages.TabPages.Add(sourcePage);
+            var placementPage = new Forms.TabPage("放置與避讓") { AutoScroll = true, Padding = new Forms.Padding(8) }; pages.TabPages.Add(placementPage);
+            shell.Controls.Add(pages, 0, 0);
+            var root = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Fill, AutoSize = false, Padding = new Forms.Padding(8),
                 ColumnCount = 1, RowCount = 4 };
             root.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
-            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
+            root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 100));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             root.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
             scroll.Controls.Add(root);
@@ -193,22 +228,24 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _sourceGrid = source;
             AddLabel(source, "標註範圍", 0, 0); source.Controls.Add(_scopeCombo, 1, 0); source.SetColumnSpan(_scopeCombo, 3);
             AddLabel(source, "連結實例", 0, 1); source.Controls.Add(_linkCombo, 1, 1); source.SetColumnSpan(_linkCombo, 3);
-            var selection = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Fill, AutoSize = true, WrapContents = true };
+            var selection = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Fill, AutoSize = true, AutoSizeMode = Forms.AutoSizeMode.GrowAndShrink, WrapContents = true };
             selection.Controls.Add(_pickButton);
             selection.Controls.Add(_selectionLabel);
             source.Controls.Add(selection, 1, 2); source.SetColumnSpan(selection, 3);
             _pickButton.Enabled = _pickAction != null;
             _pickButton.Click += (_, __) => {
                 if (_pickAction == null) return;
+                if (UsesLink && !(_linkCombo.SelectedItem is LinkChoice link && link.Available))
+                { Forms.MessageBox.Show(this, "請先指定已載入的連結實例。", _windowTitle); return; }
                 SetPending("等待選取構件。");
                 _pickAction();
             };
             root.Controls.Add(Section("來源與範圍", source), 0, 0);
 
-            var rules = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, RowCount = 2, ColumnCount = 1 };
+            var rules = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
             rules.ColumnStyles.Add(new Forms.ColumnStyle(Forms.SizeType.Percent, 100));
             rules.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.AutoSize));
-            rules.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Absolute, 220));
+            rules.RowStyles.Add(new Forms.RowStyle(Forms.SizeType.Percent, 100));
             var toolbar = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, WrapContents = true };
             toolbar.Controls.Add(new Forms.Label { Text = "套用分類預設", AutoSize = true, Margin = new Forms.Padding(0, 7, 8, 0) });
             _templateCombo.Dock = Forms.DockStyle.None; _templateCombo.Width = 110;
@@ -234,7 +271,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             toolbar.Controls.Add(_categoryHint);
             rules.Controls.Add(toolbar, 0, 0);
             rules.Controls.Add(BuildRuleGrid(doc), 0, 1);
-            root.Controls.Add(Section("標籤規則", rules), 0, 1);
+            var rulesSection = (Forms.TableLayoutPanel)Section("標籤規則", rules);
+            rulesSection.Dock = Forms.DockStyle.Fill; rulesSection.AutoSize = false;
+            rulesSection.RowStyles[2].SizeType = Forms.SizeType.Percent; rulesSection.RowStyles[2].Height = 100;
+            root.Controls.Add(rulesSection, 0, 1);
 
             var placement = SettingsGrid();
             AddLabel(placement, "放置位置", 0, 0); placement.Controls.Add(_placementCombo, 1, 0);
@@ -242,7 +282,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             var mainFlags = new Forms.FlowLayoutPanel { Dock = Forms.DockStyle.Fill, AutoSize = true, WrapContents = true };
             foreach (var flag in new[] { _avoidOverlapCheck, _leaderCheck, _skipExistingCheck, _previewCheck }) { flag.AutoSize = true; mainFlags.Controls.Add(flag); }
             placement.Controls.Add(mainFlags, 0, 1); placement.SetColumnSpan(mainFlags, 4);
-            root.Controls.Add(Section("放置設定", placement), 0, 2);
+            placementPage.Controls.Add(Section("放置設定", placement));
 
             var advanced = new Forms.TableLayoutPanel { Dock = Forms.DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 2 };
             var toggle = new Forms.Button { Text = "▸ 進階設定", AutoSize = true, FlatStyle = Forms.FlatStyle.Flat };
@@ -287,11 +327,20 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             detail.Controls.Add(_maxMove);
             _crossSide.Text = "允許跨側"; _crossSide.AutoSize = true;
             detail.Controls.Add(_crossSide);
-            toggle.Click += (_, __) => { detail.Visible = !detail.Visible; toggle.Text = detail.Visible ? "▾ 進階設定" : "▸ 進階設定"; };
-            advanced.Controls.Add(toggle, 0, 0); advanced.Controls.Add(detail, 0, 1);
-            root.Controls.Add(advanced, 0, 3);
-            shell.Controls.Add(_statusLabel, 0, 1);
-            shell.Controls.Add(BuildButtons(), 0, 2);
+            toggle.Text = "進階排版設定…";
+            toggle.Click += (_, __) => { using var dialog = Helpers.UI.ToolSettingsDialog.Create(detail, "標籤進階排版", new Size(720, 480)); dialog.ShowDialog(this); UpdateSummary(); };
+            advanced.Controls.Add(toggle, 0, 0);
+            advanced.Dock = Forms.DockStyle.Bottom;
+            placementPage.Controls.Add(advanced);
+            Disposed += (_, _) => detail.Dispose();
+            // Move the summary before disposing the old flag container.
+            shell.Controls.Add(_summaryLabel, 0, 1);
+            _summaryLabel.Dock = Forms.DockStyle.Fill;
+            shell.Controls.Add(_statusLabel, 0, 2);
+            shell.Controls.Add(BuildButtons(), 0, 3);
+            _offsetText.TextChanged += (_, _) => UpdateSummary();
+            _textDirectionCombo.SelectedIndexChanged += (_, _) => UpdateSummary();
+            _layoutCombo.SelectedIndexChanged += (_, _) => UpdateSummary();
             _statusLabel.Dock = Forms.DockStyle.Fill;
             _statusLabel.AutoSize = true;
             shell.SizeChanged += (_, __) => {
@@ -400,12 +449,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
             AddLabel(top, "標註範圍", 2, 0);
             #if REVIT2024 || REVIT2025 || REVIT2026
-            ConfigureCombo(_scopeCombo, new[] { "目前視圖", "目前選取", "指定連結（目前視圖）" });
+            ConfigureCombo(_scopeCombo, new[] { "目前視圖", "目前選取", "指定連結（目前視圖）", "連結內選取" });
 #else
-            ConfigureCombo(_scopeCombo, new[] { "目前視圖", "目前選取" });
+            ConfigureCombo(_scopeCombo, new[] { "目前視圖", "目前選取", "連結內選取" });
 #endif
             _scopeCombo.SelectedIndex = 0;
-            _scopeCombo.SelectedIndexChanged += (sender, args) => { _presentOnly.Checked = false; _linkCombo.Enabled = _scopeCombo.SelectedIndex == 2; UpdateSummary(); };
+            _scopeCombo.SelectedIndexChanged += (sender, args) => { _presentOnly.Checked = false; _linkCombo.Enabled = UsesLink; UpdateSummary(); };
             top.Controls.Add(_scopeCombo, 3, 0);
 
             AddLabel(top, "標籤位置", 0, 1);
@@ -440,7 +489,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             AddLabel(top, "連結實例", 0, 3);
             ConfigureCombo(_linkCombo, new string[0]);
             _linkCombo.Enabled = false;
-            _linkCombo.SelectedIndexChanged += (_, __) => { if (!_refreshingSources) _presentOnly.Checked = false; };
+            _linkCombo.SelectedIndexChanged += (_, __) => {
+                if (!_refreshingSources) { _presentOnly.Checked = false; ClearLinkedSelection(); }
+                UpdateSummary();
+            };
             top.Controls.Add(_linkCombo, 1, 3);
             top.SetColumnSpan(_linkCombo, 3);
             return top;
@@ -563,8 +615,8 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _applyButton.Click += ApplyClicked;
             buttons.Controls.Add(_applyButton);
 
-            _saveDefaultButton.Text = "儲存預設";
-            _saveDefaultButton.Width = 96;
+            _saveDefaultButton.Text = "儲存專案預設";
+            _saveDefaultButton.Width = 128;
             _saveDefaultButton.Height = 30;
             _saveDefaultButton.Click += SaveDefaultClicked;
 
@@ -606,6 +658,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
         {
             if (!TryReadOptions(out AutoTagOptions options))
                 return;
+            if (options.Scope == AutoTagScope.LinkedSelection && options.LinkedElementUniqueIds.Count == 0)
+            {
+                Forms.MessageBox.Show(this, "請先按「選取連結構件」，再執行標籤。", _windowTitle);
+                return;
+            }
 
             IReadOnlyList<AutoTagRuleSelection> rules = GetSelectedRules();
             if (rules.Count == 0)
@@ -627,11 +684,12 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private void SaveDefaultClicked(object sender, EventArgs e)
         {
-            SaveCurrentSettings("已儲存為此專案預設。");
+            SaveCurrentSettings("已儲存此專案在本機的預設；不寫入模型檔。");
         }
 
         private void ResetClicked(object sender, EventArgs e)
         {
+            ClearLinkedSelection();
             AutoTagSettingsStore.Reset(_doc, _mode);
             ApplyDefaultOptions();
             ApplyTemplate();
@@ -651,7 +709,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
                 return false;
             }
 
-            if (_scopeCombo.SelectedIndex == 2 && !(_linkCombo.SelectedItem is LinkChoice selectedLink && selectedLink.Available))
+            if (UsesLink && !(_linkCombo.SelectedItem is LinkChoice selectedLink && selectedLink.Available))
             {
                 Forms.MessageBox.Show("請重新整理並選擇已載入的連結實例。", _windowTitle);
                 return false;
@@ -659,8 +717,10 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             options = new AutoTagOptions
             {
                 Template = (AutoTagTemplate)_templateCombo.SelectedIndex,
-                Scope = (AutoTagScope)_scopeCombo.SelectedIndex,
+                Scope = SelectedScope,
                 LinkInstanceUniqueId = (_linkCombo.SelectedItem as LinkChoice)?.UniqueId ?? string.Empty,
+                LinkedElementUniqueIds = _pickedLink == (_linkCombo.SelectedItem as LinkChoice)?.UniqueId ? _linkedSelection.ToList() : new List<string>(),
+                LinkedSelectionViewUniqueId = _pickedView,
                 Placement = IndexToPlacement(_placementCombo.SelectedIndex),
                 AddLeader = _leaderCheck.Checked,
                 TextDirection = (AutoTagTextDirection)Math.Max(0, _textDirectionCombo.SelectedIndex),
@@ -767,7 +827,11 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _applyingOptions = true;
             try {
             _templateCombo.SelectedIndex = Math.Max(0, Math.Min(2, (int)options.Template));
+#if REVIT2024 || REVIT2025 || REVIT2026
             _scopeCombo.SelectedIndex = (int)options.Scope < _scopeCombo.Items.Count ? (int)options.Scope : 0;
+#else
+            _scopeCombo.SelectedIndex = options.Scope == AutoTagScope.LinkedSelection ? 2 : options.Scope == AutoTagScope.LinkedView ? 0 : (int)options.Scope;
+#endif
             SelectLink(options.LinkInstanceUniqueId);
             _placementCombo.SelectedIndex = PlacementToIndex(options.Placement);
             _directionCombo.SelectedIndex = options.AllDirections ? 1 : (options.VerticalOnly || _mode == AutoTagMode.Vertical ? 2 : 0);
@@ -828,7 +892,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
 
         private RevitDB.FilteredElementCollector CreateSourceViewCollector(RevitDB.Document doc)
         {
-            if (_scopeCombo.SelectedIndex != 2)
+            if (!UsesLink)
                 return new RevitDB.FilteredElementCollector(doc, doc.ActiveView.Id);
 #if REVIT2024 || REVIT2025 || REVIT2026
             var choice = _linkCombo.SelectedItem as LinkChoice;
@@ -908,16 +972,21 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoTag
             _offsetText.Enabled = !center;
             _offsetLabel.Text = _unitsCombo.SelectedIndex == 1 ? "偏移（紙面 mm）" : "偏移（模型 mm）";
             if (_sourceGrid != null) {
-                bool linked = _scopeCombo.SelectedIndex == 2;
+                bool linked = UsesLink;
                 foreach (Forms.Control control in _sourceGrid.Controls)
                 {
                     if (_sourceGrid.GetRow(control) == 1) control.Visible = linked;
-                    if (_sourceGrid.GetRow(control) == 2) control.Visible = _scopeCombo.SelectedIndex == 1;
+                    if (_sourceGrid.GetRow(control) == 2) control.Visible = SelectedScope == AutoTagScope.Selection || SelectedScope == AutoTagScope.LinkedSelection;
                 }
             }
+            _pickButton.Text = SelectedScope == AutoTagScope.LinkedSelection ? "選取連結構件" : "選取構件";
+            _presentOnly.Enabled = SelectedScope != AutoTagScope.LinkedSelection;
+            if (!_presentOnly.Enabled) _presentOnly.Checked = false;
+            _selectionLabel.Text = SelectedScope == AutoTagScope.LinkedSelection ? $"連結選取：{(_pickedLink == (_linkCombo.SelectedItem as LinkChoice)?.UniqueId ? _linkedSelection.Count : 0)} 個" : $"選取結果：{_localSelectionCount} 個";
             int enabled = _rows.Count(row => row.CheckBox.Checked);
             int missing = _rows.Count(row => row.CheckBox.Checked && row.SelectedTagTypeId == RevitDB.ElementId.InvalidElementId);
-            _summaryLabel.Text = $"已選 {enabled} 類 · 缺少族型 {missing} 類";
+            var distance = center ? "中心放置" : $"偏移 {_offsetText.Text} {(_unitsCombo.SelectedIndex == 1 ? "紙面" : "模型")} mm";
+            _summaryLabel.Text = $"{_scopeCombo.Text}｜已選 {enabled} 類 · 缺少族型 {missing} 類\n{_placementCombo.Text}｜{distance}｜{_layoutCombo.Text}｜文字：{_textDirectionCombo.Text}";
         }
 
         private static int FindTagTypeIndex(Forms.ComboBox comboBox, RevitDB.ElementId id)

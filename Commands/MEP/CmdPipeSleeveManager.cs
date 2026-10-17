@@ -102,6 +102,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
         Update,
         QuantitySchedule,
         Revision,
+        ConstructionPackage,
         Issue
     }
 
@@ -233,6 +234,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     case PipeSleeveManagerAction.Revision:
                         window.ShowRevisionInternal();
                         break;
+                    case PipeSleeveManagerAction.ConstructionPackage:
+                        window.ConstructionPackageInternal(); break;
                     case PipeSleeveManagerAction.Issue:
                         window.IssueInternal();
                         break;
@@ -448,6 +451,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             var moreMenu = new WinForms.ContextMenuStrip();
             moreMenu.Items.Add("套管數量表／放入圖紙", null, (s,e) => Raise(PipeSleeveManagerAction.QuantitySchedule));
             moreMenu.Items.Add("版本基準／差量圖表", null, (s,e) => Raise(PipeSleeveManagerAction.Revision));
+            moreMenu.Items.Add("施工定位與查驗包", null, (s,e) => Raise(PipeSleeveManagerAction.ConstructionPackage));
             var rebaseItem = moreMenu.Items.Add("變更約束樓層", null, (s,e) => Raise(PipeSleeveManagerAction.Rebase));
             moreMenu.Items.Add("補齊編號（保留既有編號）", null, (s, e) => {
                 if (WinForms.MessageBox.Show(this, "補齊目前視圖的套管編號？既有編號保留，新增套管接續模型台帳補號。無法判定原件的重號會取消操作。", "補齊編號",
@@ -813,16 +817,21 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 WinForms.MessageBox.Show(this, "CAD 定位構件不使用管線更新。請先取消選取 CAD 定位列；其位置與高程需人工確認調整。", "套管管理");
                 return;
             }
-            List<long> sourceIds = selected
-                .Select(row => row.SourcePipeIdValue)
-                .Where(id => id > 0)
-                .Distinct()
-                .ToList();
-
-            List<Element> pipes = sourceIds
-                .Select(id => _doc.GetElement(RevitApiCompatibility.CreateElementId(id)))
-                .Where(element => element is Pipe || element is Duct || IsElementOfCategory(element, BuiltInCategory.OST_Conduit) || IsElementOfCategory(element, BuiltInCategory.OST_CableTray))
-                .ToList();
+            var sources = new List<SleevePipeSource>();
+            foreach (var row in selected)
+            {
+                var sleeve = _doc.GetElement(RevitApiCompatibility.CreateElementId(row.ElementIdValue));
+                if (sleeve == null) continue;
+                var source = SleeveSourceRecord.Resolve(_doc, sleeve, out string reason);
+                if (source == null)
+                {
+                    WinForms.MessageBox.Show(this, $"套管 {row.Mark}：{reason}\n本批未更新，原套管保留。", "套管管理");
+                    return;
+                }
+                sources.Add(source);
+            }
+            sources = sources.GroupBy(source => source.Key).Select(g => g.First()).ToList();
+            List<Element> pipes = sources.Select(source => source.Element).ToList();
 
             if (pipes.Count == 0)
             {
@@ -849,6 +858,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             }
 
             PipeSleeveOptions updateOptions = BuildUpdateOptions();
+            updateOptions.PipeSources = sources;
             var previewRows = PipeSleeveService.PreviewSelectedUpdate(_doc, pipes,
                 staleSleeveIds.Select(id => _doc.GetElement(id)).Cast<FamilyInstance>().ToList(), updateOptions);
             foreach (var previewRow in previewRows)
@@ -967,6 +977,12 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                     throw new InvalidOperationException("Revit 未提交編號整理，請重新檢查模型。");
             }
 
+            ReloadRowsInternal();
+        }
+
+        internal void ConstructionPackageInternal()
+        {
+            using (var dialog = new SleeveConstructionForm(_doc)) dialog.ShowDialog(this);
             ReloadRowsInternal();
         }
 
@@ -1102,7 +1118,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             if (!categoryMatches) return false;
 
             string source = ReadString(instance, "來源管線Id", "Pipe Id", "Source Pipe Id");
-            if (!long.TryParse(source, NumberStyles.Integer, CultureInfo.InvariantCulture, out long sourceId) || sourceId <= 0)
+            if (!SleeveSourceRecord.HasRecord(instance) && (!long.TryParse(source, NumberStyles.Integer, CultureInfo.InvariantCulture, out long sourceId) || sourceId <= 0))
             {
                 return false;
             }
@@ -1302,8 +1318,10 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
             {
                 string sourceIdText = ReadString(sleeve, "來源管線Id", "Pipe Id", "Source Pipe Id");
                 long sourceId = ReadLong(sleeve, "來源管線Id", "Pipe Id", "Source Pipe Id");
-                Element source = sourceId > 0 ? doc.GetElement(RevitApiCompatibility.CreateElementId(sourceId)) : null;
-                string status = GetStatus(sleeve, source, out string positionInfo, out string brief);
+                var resolved = SleeveSourceRecord.Resolve(doc, sleeve, out string missingReason);
+                Element source = resolved?.Element;
+                string status = GetStatus(sleeve, source, out string positionInfo, out string brief, resolved?.ToModel);
+                if (resolved?.Link != null) positionInfo = "來源連結：" + resolved.Label + "；" + positionInfo;
                 if (RaftCadRecord.IsManaged(sleeve))
                 {
                     status = RaftCadRecord.Inspect(sleeve, out positionInfo);
@@ -1317,7 +1335,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 }
                 if (status == "來源遺失" && !RaftCadRecord.IsManaged(sleeve))
                 {
-                    checkInfo = GetSourceMissingReason(sourceIdText, sourceId);
+                    checkInfo = missingReason;
                 }
                 if (!string.IsNullOrWhiteSpace(positionInfo))
                     checkInfo = positionInfo + (string.IsNullOrWhiteSpace(checkInfo) ? string.Empty : "；" + checkInfo);
@@ -1381,7 +1399,7 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 if (!string.IsNullOrWhiteSpace(value)) return value;
                 return ReadString(sleeve, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS, "備註", "Comments");
             }
-            private static string GetStatus(FamilyInstance sleeve, Element source, out string positionInfo, out string brief)
+            private static string GetStatus(FamilyInstance sleeve, Element source, out string positionInfo, out string brief, Transform sourceTransform = null)
             {
                 brief = string.Empty;
                 positionInfo = string.Empty;
@@ -1393,8 +1411,8 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 try
                 {
                     if (source is Pipe pipe)
-                        return GetRoundPipeStatus(sleeve, pipe, out positionInfo, out brief);
-                    Curve curve = sourceCurve.Curve;
+                        return GetRoundPipeStatus(sleeve, pipe, out positionInfo, out brief, sourceTransform);
+                    Curve curve = sourceCurve.Curve.CreateTransformed(sourceTransform ?? Transform.Identity);
                     IntersectionResult projected = curve.Project(sleevePoint.Point);
                     if (projected == null) { brief = "無法投影至來源管段"; return "需檢查"; }
                     XYZ nearest = projected.XYZPoint;
@@ -1422,11 +1440,11 @@ public Result Execute(ExternalCommandData commandData, ref string message, Eleme
                 }
             }
 
-            private static string GetRoundPipeStatus(FamilyInstance sleeve, Pipe pipe, out string info, out string brief)
+            private static string GetRoundPipeStatus(FamilyInstance sleeve, Pipe pipe, out string info, out string brief, Transform sourceTransform = null)
             {
                 brief = "來源不是直線管段";
                 info = "來源管線不是直線，尚無法完成圓管淨空檢查。";
-                var line = (pipe.Location as LocationCurve)?.Curve as Line;
+                var line = (pipe.Location as LocationCurve)?.Curve?.CreateTransformed(sourceTransform ?? Transform.Identity) as Line;
                 if (line == null) return "待確認";
                 var ports = sleeve.MEPModel?.ConnectorManager?.Connectors.Cast<Connector>()
                     .Where(c => c.ConnectorType == ConnectorType.End).ToList();

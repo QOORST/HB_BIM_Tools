@@ -23,6 +23,9 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             AllowUserToDeleteRows = false, AutoGenerateColumns = true, AutoSizeColumnsMode = F.DataGridViewAutoSizeColumnsMode.DisplayedCells,
             RowHeadersVisible = false, BackgroundColor = System.Drawing.Color.White };
         private readonly F.Button _ok = new F.Button { Text = "建立／更新", AutoSize = true };
+        private readonly F.DataGridView _pending = new F.DataGridView { Dock = F.DockStyle.Fill, ReadOnly = true,
+            AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false,
+            AutoSizeColumnsMode = F.DataGridViewAutoSizeColumnsMode.DisplayedCells, BackgroundColor = System.Drawing.Color.White };
         private readonly bool _issue;
         private readonly Action<SleeveIssueRequest> _execute;
         private readonly F.TextBox _baseline = new F.TextBox { Width = 290, MaxLength = 80 };
@@ -68,12 +71,13 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             _manual.Text = "將目前 Revit 選取的 " + _selected.Count + " 個構件明確納入套管統計（含手動套管）";
             _manual.Enabled = _selected.Count > 0;
             root.Controls.Add(_manual, 0, 2); root.Controls.Add(_summary, 0, 3);
+            var tabs = new F.TabControl { Dock = F.DockStyle.Fill };
+            root.Controls.Add(tabs, 0, 4);
             if (_issue)
             {
-                var tabs = new F.TabControl { Dock = F.DockStyle.Fill };
                 var reviewTab = new F.TabPage("1 檢查／統計設定"); reviewTab.Controls.Add(_review);
                 var previewTab = new F.TabPage("2 數量表預覽"); previewTab.Controls.Add(_grid);
-                tabs.TabPages.Add(reviewTab); tabs.TabPages.Add(previewTab); root.Controls.Add(tabs, 0, 4);
+                tabs.TabPages.Add(reviewTab); tabs.TabPages.Add(previewTab);
                 var baselineRow = new F.FlowLayoutPanel { AutoSize = true, Dock = F.DockStyle.Fill, WrapContents = true };
                 baselineRow.Controls.Add(new F.Label { Text = "3 發圖基準名稱", AutoSize = true, Margin = new F.Padding(3, 7, 6, 3) });
                 baselineRow.Controls.Add(_baseline);
@@ -81,7 +85,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 root.Controls.Add(baselineRow, 0, 5);
                 ConfigureReview();
             }
-            else root.Controls.Add(_grid, 0, 4);
+            else { var previewTab = new F.TabPage("數量表預覽"); previewTab.Controls.Add(_grid); tabs.TabPages.Add(previewTab); }
+            var pendingTab = new F.TabPage("待確認項目"); pendingTab.Controls.Add(_pending); tabs.TabPages.Add(pendingTab);
             var buttons = new F.FlowLayoutPanel { Dock = F.DockStyle.Fill, AutoSize = true, FlowDirection = F.FlowDirection.RightToLeft };
             var cancel = new F.Button { Text = "取消", DialogResult = F.DialogResult.Cancel, AutoSize = true };
             buttons.Controls.Add(cancel); buttons.Controls.Add(_ok); root.Controls.Add(buttons, 0, rowCount - 1);
@@ -99,7 +104,8 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             _manual.CheckedChanged += (s,e) => { ReadRows(); Preview(); };
             _baseline.TextChanged += (s,e) => { if (_issue) Preview(false); };
             _sheet.SelectedIndexChanged += (s,e) => { _left.Enabled = _top.Enabled = _sheet.SelectedIndex > 0;
-                if (_issue) _ok.Text = _sheet.SelectedIndex > 0 ? "補號、上圖並存基準" : "建立表格並存基準"; };
+                if (_issue) _ok.Text = _sheet.SelectedIndex > 0 ? "補號、上圖並存基準" : "建立表格並存基準";
+                Preview(false); };
             _left.Enabled = _top.Enabled = false;
             _ok.Click += (s,e) => Submit();
             ReadRows(); Preview();
@@ -127,7 +133,10 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
             var included = effective.Where(options.Matches).ToList();
             if (_issue) _ok.Enabled = !string.IsNullOrWhiteSpace(_baseline.Text) && included.Count > 0;
             int pending = included.Count(r => r.Status != "正常" && r.Status != "偏心可容納");
+            _pending.DataSource = included.Where(r => r.Status != "正常" && r.Status != "偏心可容納")
+                .Select(r => new { 編號 = r.Mark, 樓層 = r.Level, 區域 = r.Zone, 系統 = r.System, 規格 = r.Specification, 狀態 = r.Status }).ToList();
             _summary.Text = $"本表 {included.Count} 支，其中待確認／待處理 {pending} 支。彙總 {included.Select(r => r.GroupKey).Distinct().Count()} 列。\n" +
+                $"輸出：{_sheet.Text}｜發圖基準：{(_issue ? (string.IsNullOrWhiteSpace(_baseline.Text) ? "尚未命名" : _baseline.Text) : "不保存")}\n" +
                 $"全案已識別但未納入 {effective.Count(r => !r.Included)} 個（含排除、作廢或無效設定）。\n" +
                 (_issue ? $"統計設定待寫入 {_controls.Count(p => _rows.Any(r => Id(r) == p.Key))} 筆。模型量含待確認項目，不代表施工核准。" :
                 "模型支數含待確認項目；重複執行會更新同範圍表格，保留欄寬及既有圖紙位置。");

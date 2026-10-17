@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 
@@ -7,6 +8,9 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
     internal static class ElementCollectorService
 {
     public static IList<ClassifiedElement> Collect(UIDocument uiDoc, AutoJoinSettings settings)
+        => Collect(uiDoc, settings, out _);
+
+    public static IList<ClassifiedElement> Collect(UIDocument uiDoc, AutoJoinSettings settings, out int rawCount)
     {
         var doc = uiDoc.Document;
         var raw = settings.Scope switch
@@ -21,6 +25,7 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
             _ => new List<Element>()
         };
 
+        rawCount = raw.Count;
         var enabled = new HashSet<string>(settings.EnabledCategoryKeys);
         var result = new List<ClassifiedElement>(raw.Count);
 
@@ -63,6 +68,33 @@ namespace YD_RevitTools.LicenseManager.Commands.AR.AutoJoin
         }
 
         return result;
+    }
+
+    public static void UpdateScopeSummary(UIDocument uiDoc, AutoJoinForm form, bool alignOnly = false)
+    {
+        try { ReadScopeSummary(uiDoc, form, alignOnly); }
+        catch (System.Exception ex)
+        {
+            form.SetScopeSummary("無法檢查範圍；請切換至模型視圖或重新選取後再檢查。\n" + ex.Message, false);
+        }
+    }
+
+    private static void ReadScopeSummary(UIDocument uiDoc, AutoJoinForm form, bool alignOnly)
+    {
+        var settings = form.BuildSettings();
+        var elements = Collect(uiDoc, settings, out int rawCount);
+        var prefix = settings.Scope == AutoJoinScope.SelectedElements
+            ? $"已選取 {uiDoc.Selection.GetElementIds().Count} 項；展開群組後 {rawCount} 個"
+            : $"範圍內 {rawCount} 個";
+        if (alignOnly)
+        {
+            int walls = elements.Count(x => x.Element is Wall w && w.WallType.Kind == WallKind.Basic);
+            int targets = elements.Count(x => x.CategorySpec.Key == "Floor" || x.CategorySpec.Key == "StructuralFloor" || x.CategorySpec.Key == "StructuralFraming");
+            form.SetScopeSummary($"{prefix}；基本牆 {walls}、參考梁板 {targets}、略過 {rawCount - walls - targets}\n" +
+                (walls == 0 ? "請納入基本牆。" : targets == 0 ? "請納入參考梁或樓板。" : "符合篩選條件；實際能否對齊仍需檢查幾何。"), walls > 0 && targets > 0);
+        }
+        else form.SetScopeSummary($"{prefix}；符合條件 {elements.Count}、略過 {rawCount - elements.Count}\n" +
+            (elements.Count < 2 ? "至少需要 2 個符合條件的構件；請檢查範圍與類別。" : "數量依類別與外框篩選；不代表一定能接合。"), elements.Count >= 2);
     }
 
     private static IList<Element> CollectFromSelection(UIDocument uiDoc)

@@ -23,6 +23,9 @@
     <Compile Include="../../Commands/AR/AutoTag/TagAlignOptions.cs" Link="TagAlignOptions.cs" />
     <Compile Include="../../Commands/AutoJoin/AutoJoinForm.cs" Link="AutoJoinForm.cs" />
     <Compile Include="../../Commands/AutoJoin/AutoJoinSettings.cs" Link="AutoJoinSettings.cs" />
+    <Compile Include="../../Commands/AutoJoin/TypeJoinRule.cs" Link="TypeJoinRule.cs" />
+    <Compile Include="../../Commands/AutoJoin/TypeJoinChoice.cs" Link="TypeJoinChoice.cs" />
+    <Compile Include="../../Commands/AutoJoin/TypeJoinRuleEditor.cs" Link="TypeJoinRuleEditor.cs" />
     <Compile Include="../../Commands/AutoJoin/CategoryCatalog.cs" Link="CategoryCatalog.cs" />
     <Compile Include="../../Commands/AutoJoin/AutoJoinScope.cs" Link="AutoJoinScope.cs" />
     <Compile Include="../../Commands/AutoJoin/ExecutionAction.cs" Link="ExecutionAction.cs" />

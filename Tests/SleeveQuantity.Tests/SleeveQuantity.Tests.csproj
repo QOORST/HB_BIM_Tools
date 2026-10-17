@@ -6,6 +6,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Commands/MEP/SleeveConstructionPolicy.cs" Link="SleeveConstructionPolicy.cs" />
     <Compile Include="../../Commands/MEP/SleeveRoundClearancePolicy.cs" Link="SleeveRoundClearancePolicy.cs" />
     <Compile Include="../../Commands/MEP/SleeveIssueRequest.cs" Link="SleeveIssueRequest.cs" />
     <Compile Include="../../Commands/MEP/SleeveNumberPolicy.cs" Link="SleeveNumberPolicy.cs" />

@@ -8,7 +8,7 @@ namespace YD_RevitTools.LicenseManager.Helpers { public static class IdExtension
 namespace Autodesk.Revit.DB
 {
     public enum BuiltInCategory { OST_Floors, OST_StructuralFraming, OST_Walls, OST_StructuralColumns }
-    public enum BuiltInParameter { WALL_HEIGHT_TYPE = -1, WALL_TOP_IS_ATTACHED = -2, WALL_BOTTOM_IS_ATTACHED = -3, WALL_BASE_OFFSET = -4, WALL_USER_HEIGHT_PARAM = -5, WALL_STRUCTURAL_USAGE_PARAM = -6 }
+    public enum BuiltInParameter { WALL_HEIGHT_TYPE = -1, WALL_TOP_IS_ATTACHED = -2, WALL_BOTTOM_IS_ATTACHED = -3, WALL_BASE_OFFSET = -4, WALL_USER_HEIGHT_PARAM = -5, WALL_STRUCTURAL_USAGE_PARAM = -6, ALL_MODEL_MARK = -7, ALL_MODEL_INSTANCE_COMMENTS = -8 }
     public enum StorageType { None, Double, Integer, String, ElementId }
     public enum WallKind { Basic }
     public enum ShellLayerType { Exterior }
@@ -35,7 +35,8 @@ namespace Autodesk.Revit.DB
     public class Floor : Element
     {
         public List<Reference> Faces=new List<Reference>();
-        public static Floor Create(Document d,List<CurveLoop> l,ElementId t,ElementId level) { d.CreateCount++; if(d.FailCreate==d.CreateCount) throw new InvalidOperationException("Injected creation failure"); var f=new Floor{Document=d,Id=new ElementId(100+d.CreateCount)}; f.Geometry.Add(new Solid(l[0].Cell)); d.Elements.Add(f); return f; }
+        public List<CurveLoop> Profiles;
+        public static Floor Create(Document d,List<CurveLoop> l,ElementId t,ElementId level) { d.CreateCount++; if(d.FailCreate==d.CreateCount) throw new InvalidOperationException("Injected creation failure"); var f=new Floor{Document=d,Id=new ElementId(100+d.CreateCount), Profiles=l}; f.Geometry.Add(new Solid(l[0].Cell)); foreach(var make in d.NewParameters) f.Parameters.Add(make()); d.Elements.Add(f); return f; }
     }
     public class Wall : Element { public object Location; public bool Flipped; public List<Reference> Faces=new List<Reference>(); public static Wall Create(Document d,Line l,ElementId t,ElementId level,double h,double b,bool flipped,bool structural)=>throw new NotImplementedException(); }
     public class WallType : Element { public WallKind Kind=WallKind.Basic; }
@@ -46,11 +47,15 @@ namespace Autodesk.Revit.DB
     public class LocationCurve { public Curve Curve; }
     public class Document
     {
+        public Application Application = new Application();
+        public List<Func<Parameter>> NewParameters = new List<Func<Parameter>>();
+        public Action AfterRegenerate;
         public List<Element> Elements=new List<Element>(); public int CreateCount, FailCreate, Joins; public bool DeleteExtra, RejectCommit; public int Commits;
         public Element GetElement(ElementId id)=>Elements.FirstOrDefault(e=>e.Id==id);
         public ICollection<ElementId> Delete(ElementId id) { Elements.RemoveAll(e=>e.Id==id); return DeleteExtra?new[]{id,new ElementId(999)}:new[]{id}; }
-        public void Regenerate() { }
+        public void Regenerate() { AfterRegenerate?.Invoke(); }
     }
+    public class Application { public double ShortCurveTolerance = .0026; }
     public class Transaction : IDisposable
     {
         Document d; List<Element> saved; int savedJoins; TransactionStatus status;
@@ -61,7 +66,10 @@ namespace Autodesk.Revit.DB
     }
     public class FailureHandlingOptions { public FailureHandlingOptions SetFailuresPreprocessor(IFailuresPreprocessor p)=>this; public FailureHandlingOptions SetClearAfterRollback(bool v)=>this; public FailureHandlingOptions SetForcedModalHandling(bool v)=>this; }
     public interface IFailuresPreprocessor { FailureProcessingResult PreprocessFailures(FailuresAccessor a); }
-    public class FailuresAccessor { public IList<object> GetFailureMessages()=>new List<object>(); }
+    public enum FailureSeverity { Warning, Error }
+    public static class BuiltInFailures { public static class GeneralFailures { public static readonly object DuplicateValue = new object(); } }
+    public class FailureMessageAccessor { public object Definition; public FailureSeverity Severity; public List<ElementId> Ids = new List<ElementId>(); public object GetFailureDefinitionId()=>Definition; public FailureSeverity GetSeverity()=>Severity; public ICollection<ElementId> GetFailingElementIds()=>Ids; }
+    public class FailuresAccessor { public List<FailureMessageAccessor> Messages=new List<FailureMessageAccessor>(); public IList<FailureMessageAccessor> GetFailureMessages()=>Messages.ToList(); public void DeleteWarning(FailureMessageAccessor message)=>Messages.Remove(message); }
     public static class JoinGeometryUtils { public static IList<ElementId> GetJoinedElements(Document d,Element e)=>new List<ElementId>(); public static bool AreElementsJoined(Document d,Element a,Element b)=>false; public static void JoinGeometry(Document d,Element a,Element b){d.Joins++;} public static bool IsCuttingElementInJoin(Document d,Element a,Element b)=>true; public static void SwitchJoinOrder(Document d,Element a,Element b){} }
     public static class WallUtils { public static void DisallowWallJoinAtEnd(Wall w,int e){} }
     public static class HostObjectUtils { public static IList<Reference> GetTopFaces(Floor f)=>f.Faces; public static IList<Reference> GetSideFaces(Wall w,ShellLayerType t)=>w.Faces; }

@@ -1,4 +1,4 @@
-﻿// Application.cs (每個工具專案中)
+// Application.cs (每個工具專案中)
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using System;
@@ -342,7 +342,7 @@ namespace YD_RevitTools.LicenseManager
                 assemblyPath,
                 "YD_RevitTools.LicenseManager.Commands.AR.AutoJoin.CmdAutoJoin");
             autoJoinData.ToolTip = "自動接合 / 解除接合";
-            autoJoinData.LongDescription = "依範圍、類別與優先序，自動接合或解除接合牆、樓板、柱、梁等模型元素，也可執行牆輪廓對齊。";
+            autoJoinData.LongDescription = "依範圍、類別與優先序，自動接合或解除接合牆、樓板、柱、梁等模型元素。牆頂／牆底調整請使用接合工具選單中的「對齊牆輪廓」。";
             SetButtonIcon(autoJoinData, "auto_join");
             joinPulldown.AddPushButton(autoJoinData);
 
@@ -375,9 +375,10 @@ namespace YD_RevitTools.LicenseManager
                 "YD_RevitTools.LicenseManager.Commands.AR.AutoJoin.CmdSplitFloor");
             splitFloorData.ToolTip = "分割樓板工具";
             splitFloorData.LongDescription =
-                "依選取的結構構架（梁）將樓板分割為多塊。\n\n" +
+                "依選取的梁、結構柱將水平樓板分割為多塊，保留直線缺角與孔洞。\n" +
+                "分割後沿用原編號、備註及可轉移參數；未形成多塊時保留原樓板。\n\n" +
                 "操作步驟：\n" +
-                "  同時選取要分割的樓板及穿越其中的梁，完成後按 Finish。";
+                "  同時選取要分割的樓板及與其相交的梁、結構柱，完成後按 Finish。";
             SetButtonIcon(splitFloorData, "split_floor");
             joinPulldown.AddPushButton(splitFloorData);
 
@@ -525,6 +526,7 @@ namespace YD_RevitTools.LicenseManager
                     "整理已建立的 Revit 標籤，可針對目前選取或目前視圖的標籤進行水平對齊、垂直對齊、等距水平與等距垂直排列，並可避免標籤互相重疊。";
                 SetButtonIcon(tagAlignData, "tag_align");
                 autoDimensionPulldown.AddPushButton(tagAlignData);
+                autoDimensionPulldown.AddSeparator();
                 var cleanupData = new PushButtonData("DimensionTextCleanup", "尺寸文字\n整理", assemblyPath,
                     "YDBIM.AutoDimension.App.DimensionTextCleanupCommand");
                 cleanupData.ToolTip = "整理選取的連續尺寸文字，預覽後保留或還原。";
@@ -909,7 +911,7 @@ namespace YD_RevitTools.LicenseManager
 
                 pipeBatchCenterAlignData.ToolTip = "批次支管中心對齊";
                 pipeBatchCenterAlignData.LongDescription = "先選取幹管，再框選或複選多支支管，批次延伸/修剪支管端點到幹管中心線，並可依設定建立 Tee / Takeoff。";
-                SetButtonIcon(pipeBatchCenterAlignData, "pipe_center_align_settings");
+                SetButtonIcon(pipeBatchCenterAlignData, "pipe_batch_align");
                 alignMenu?.AddPushButton(pipeBatchCenterAlignData);
             }
 
@@ -976,7 +978,8 @@ namespace YD_RevitTools.LicenseManager
                         "YD_RevitTools.LicenseManager.Commands.MEP." + entry[2]);
                     quickData.ToolTip = "管、電管、風管、電纜線架：水平直線段的未連接端上下行。";
                     quickData.LongDescription = "選取未連接端附近，沿用類型與尺寸延伸新管段並建立彎頭。首次預設 90°、末端水平段 0 mm；不切改原管中段。";
-                    SetButtonIcon(quickData, "auto_pipe_routing");
+                    SetButtonIcon(quickData, entry[0] == "MepQuickUp" ? "mep_quick_up" :
+                        entry[0] == "MepQuickDown" ? "mep_quick_down" : "mep_position_settings");
                     if (entry[0] == "MepQuickSettings")
                     {
                         quickMenu?.AddSeparator();
@@ -1068,7 +1071,7 @@ namespace YD_RevitTools.LicenseManager
                     var settings = new PushButtonData("MepFromConnectorSettings", "生成管設定", assemblyPath,
                         "YD_RevitTools.LicenseManager.Commands.MEP.CmdMepFromConnectorSettings");
                     settings.ToolTip = "選取配件或設備，修改該類接點的管長與類型；只儲存設定，不生成。";
-                    SetButtonIcon(settings, "mep_from_connector");
+                    SetButtonIcon(settings, "mep_position_settings");
                     menu?.AddSeparator();
                     menu?.AddPushButton(settings);
                     if (menu != null) menu.IsSynchronizedWithCurrentItem = false;
@@ -1186,10 +1189,17 @@ namespace YD_RevitTools.LicenseManager
         {
             string assemblyPath = Assembly.GetExecutingAssembly().Location;
 
+            var drawingStandards = new PushButtonData("DrawingStandards", "施工圖\n樣板管理", assemblyPath,
+                "YD_RevitTools.LicenseManager.Commands.Drawing.Standards.CmdDrawingStandards");
+            drawingStandards.ToolTip = "施工圖設定組合、差異預覽與出圖檢查";
+            drawingStandards.LongDescription = "讀取既有視圖樣板與使用範圍，可複製或從目前視圖新增樣板。自訂各系統的設定組合，預覽後只套用勾選視圖；支援組合停用、專案例外、版本紀錄及檢查報告。";
+            SetButtonIcon(drawingStandards, "bim_standard");
+            panel.AddItem(drawingStandards);
+
             // === COBie 設定 ===
             PulldownButtonData cobieSettingsPulldownData = new PulldownButtonData("CobieSettingsTools", "COBie\n設定");
             cobieSettingsPulldownData.ToolTip = "COBie 設定工具組";
-            cobieSettingsPulldownData.LongDescription = "整理 COBie 欄位、樣板與 BIM 標準檢查等前置設定工具。";
+            cobieSettingsPulldownData.LongDescription = "整理 COBie 欄位與樣板等前置設定工具。";
             SetButtonIcon(cobieSettingsPulldownData, "cobie_field");
             PulldownButton cobieSettingsPulldown = panel.AddItem(cobieSettingsPulldownData) as PulldownButton;
 
@@ -1215,21 +1225,20 @@ namespace YD_RevitTools.LicenseManager
 
             PushButtonData bimStandardAuditData = new PushButtonData(
                 "BimStandardAudit",
-                "BIM 標準檢查",
+                "模型管理\n檢查",
                 assemblyPath,
                 "YD_RevitTools.LicenseManager.Commands.Data.BimStandard.CmdBimStandardAudit");
-            bimStandardAuditData.ToolTip = "BIM 標準檢查";
+            bimStandardAuditData.ToolTip = "模型管理檢查";
             bimStandardAuditData.LongDescription =
-                "檢查目前 Revit 文件的樣板健康度與族群品質。\n\n" +
-                "功能特色：\n" +
-                "• 檢查 Project Information 必填欄位\n" +
-                "• 檢查視圖樣板、視圖、圖紙、明細表命名\n" +
-                "• 檢查材質、篩選器與文字樣式命名\n" +
-                "• 檢查模型內族群與 Type 命名品質\n" +
-                "• 匯出 Excel 檢查報告\n\n" +
+                "依需要選擇專案資料、命名規則或族群與類型檢查。\n\n" +
+                "命名前綴選用、不評分；可查看處理建議、定位項目，並將本次略過原因匯出報告。\n\n" +
                 "授權要求：檢查 Trial+，匯出 Standard+";
             SetButtonIcon(bimStandardAuditData, "bim_standard");
-            cobieSettingsPulldown.AddPushButton(bimStandardAuditData);
+            var modelManagementData = new PulldownButtonData("ModelManagementTools", "模型\n管理");
+            modelManagementData.ToolTip = "模型管理檢查與名稱整理";
+            SetButtonIcon(modelManagementData, "model_data_manager");
+            var modelManagementPulldown = panel.AddItem(modelManagementData) as PulldownButton;
+            modelManagementPulldown.AddPushButton(bimStandardAuditData);
 
             // === COBie 匯入匯出 ===
             PulldownButtonData cobieExchangePulldownData = new PulldownButtonData("CobieExchangeTools", "COBie\n匯入匯出");
@@ -1292,26 +1301,21 @@ namespace YD_RevitTools.LicenseManager
             // === 資料管理 ===
             PulldownButtonData dataManagementPulldownData = new PulldownButtonData("DataManagementTools", "資料\n管理");
             dataManagementPulldownData.ToolTip = "資料管理工具組";
-            dataManagementPulldownData.LongDescription = "集中模型命名整理與交付資料整理工具。";
+            dataManagementPulldownData.LongDescription = "集中交付資料與釋疑簡報整理工具。";
             SetButtonIcon(dataManagementPulldownData, "data_management");
             PulldownButton dataManagementPulldown = panel.AddItem(dataManagementPulldownData) as PulldownButton;
 
             PushButtonData modelDataManagerData = new PushButtonData(
                 "ModelDataManager",
-                "模型資料管理",
+                "模型名稱整理",
                 assemblyPath,
                 "YD_RevitTools.LicenseManager.Commands.Data.CmdModelDataManager");
-            modelDataManagerData.ToolTip = "模型資料管理";
+            modelDataManagerData.ToolTip = "模型名稱整理";
             modelDataManagerData.LongDescription =
-                "批次檢視與調整 Revit 管理介面常用名稱資料。\n\n" +
-                "目前支援：\n" +
-                "• 族群名稱\n" +
-                "• 類型名稱\n" +
-                "• 視圖名稱\n" +
-                "• 材料名稱\n\n" +
-                "可搜尋、篩選、選取後批次套用，適合整理模型命名與交付資料。";
+                "選分類、勾選項目，預覽名稱後再套用。支援族群、類型／系統類型、視圖、材質、視圖樣板、篩選器與圖紙名稱。\n\n" +
+                "圖紙只改名稱、不改圖號。顯示使用情況；進階刪除先預演並列出連帶項目。";
             SetButtonIcon(modelDataManagerData, "model_data_manager");
-            dataManagementPulldown.AddPushButton(modelDataManagerData);
+            modelManagementPulldown.AddPushButton(modelDataManagerData);
 
             PushButtonData clarificationDeckData = new PushButtonData(
                 "ClarificationDeckExport",

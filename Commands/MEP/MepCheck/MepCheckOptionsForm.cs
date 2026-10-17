@@ -8,7 +8,14 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
 {
     internal sealed class MepCheckOptionsForm : WinForms.Form
     {
-        private readonly ElementId _preselectedOutletId;
+        private ElementId _preselectedOutletId;
+        private readonly WinForms.Label _outletLabel = new WinForms.Label { AutoSize = true, MaximumSize = new Size(510, 0) };
+        public void SetOutlet(ElementId id, bool cancelled = false)
+        {
+            if (!cancelled) _preselectedOutletId = id ?? ElementId.InvalidElementId;
+            _outletLabel.Text = (cancelled ? "已取消選取，保留原設定。\n" : "") +
+                (_preselectedOutletId == ElementId.InvalidElementId ? "尚未指定排出口。" : $"排出口元素 ID：{_preselectedOutletId.GetIdValue()}");
+        }
         private readonly WinForms.RadioButton _rbCurrentView;
         private readonly WinForms.RadioButton _rbEntireModel;
         private readonly WinForms.CheckBox _chkPipeDrain;
@@ -33,10 +40,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
             StartPosition = WinForms.FormStartPosition.CenterScreen;
             Width = 760;
             Height = 680;
-            MinimumSize = new Size(720, 640);
+            MinimumSize = new Size(620, 500);
             MinimizeBox = false;
-            MaximizeBox = false;
-            FormBorderStyle = WinForms.FormBorderStyle.FixedDialog;
+            MaximizeBox = true;
+            FormBorderStyle = WinForms.FormBorderStyle.Sizable;
+            AutoScaleMode = WinForms.AutoScaleMode.Dpi;
             Font = new Font("Microsoft JhengHei UI", 10f);
 
             var root = new WinForms.TableLayoutPanel
@@ -79,13 +87,12 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
             scopeGroup.Controls.Add(scopePanel);
             root.Controls.Add(scopeGroup, 0, 2);
 
-            var content = new WinForms.TableLayoutPanel { Dock = WinForms.DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-            content.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 62));
-            content.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 38));
+            var content = new WinForms.TabControl { Dock = WinForms.DockStyle.Fill };
             root.Controls.Add(content, 0, 3);
 
             var pipeGroup = BuildGroup("管線洩水方向");
             var pipeLayout = new WinForms.TableLayoutPanel { Dock = WinForms.DockStyle.Fill, ColumnCount = 2, RowCount = 9, AutoSize = true };
+            for (int i = 0; i < 9; i++) pipeLayout.RowStyles.Add(new WinForms.RowStyle(WinForms.SizeType.AutoSize));
             pipeLayout.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Percent, 100));
             pipeLayout.ColumnStyles.Add(new WinForms.ColumnStyle(WinForms.SizeType.Absolute, 155));
 
@@ -109,22 +116,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
             _cmbDrainRule.SelectedIndex = 0;
             pipeLayout.Controls.Add(_cmbDrainRule, 1, 4);
 
-            pipeLayout.Controls.Add(CreateLabel("下游方向"), 0, 5);
+            var directionLabel = CreateLabel("下游方向（模型座標）");
+            pipeLayout.Controls.Add(directionLabel, 0, 5);
             _cmbDirection = new WinForms.ComboBox { DropDownStyle = WinForms.ComboBoxStyle.DropDownList, Dock = WinForms.DockStyle.Fill, Margin = new WinForms.Padding(0, 6, 8, 6) };
             _cmbDirection.Items.AddRange(new object[] { "+X", "-X", "+Y", "-Y" });
             _cmbDirection.SelectedIndex = 0;
             pipeLayout.Controls.Add(_cmbDirection, 1, 5);
 
-            string outletText = _preselectedOutletId != ElementId.InvalidElementId
-                ? $"指定排出口：目前預選 ID {_preselectedOutletId.GetIdValue()}"
-                : "指定排出口：未預選元素。可先選取管端、設備或排出口元素再啟動工具。";
-            pipeLayout.Controls.Add(new WinForms.Label
-            {
-                Text = outletText,
-                AutoSize = true,
-                ForeColor = System.Drawing.Color.FromArgb(60, 90, 120),
-                Margin = new WinForms.Padding(8, 4, 8, 4)
-            }, 0, 6);
+            var outletPanel = new WinForms.FlowLayoutPanel { AutoSize = true, Dock = WinForms.DockStyle.Fill, FlowDirection = WinForms.FlowDirection.TopDown, WrapContents = false };
+            var pickOutlet = new WinForms.Button { Text = "選取排出口…", AutoSize = true };
+            // Return to the command's Revit API context before invoking PickObject.
+            pickOutlet.Click += (_, _) => { DialogResult = WinForms.DialogResult.Retry; };
+            outletPanel.Controls.Add(pickOutlet); outletPanel.Controls.Add(_outletLabel);
+            SetOutlet(_preselectedOutletId);
+            pipeLayout.Controls.Add(outletPanel, 0, 6);
             pipeLayout.SetColumnSpan(pipeLayout.GetControlFromPosition(0, 6), 2);
 
             pipeLayout.Controls.Add(new WinForms.Label
@@ -135,9 +140,25 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
                 Margin = new WinForms.Padding(8, 4, 8, 8)
             }, 0, 7);
             pipeLayout.SetColumnSpan(pipeLayout.GetControlFromPosition(0, 7), 2);
+            void RefreshRule()
+            {
+                bool enabled = _chkPipeDrain.Checked;
+                directionLabel.Visible = _cmbDirection.Visible = enabled && _cmbDrainRule.SelectedIndex == 2;
+                outletPanel.Visible = enabled && _cmbDrainRule.SelectedIndex == 1;
+                _cmbDrainRule.Enabled = _numSlope.Enabled = _chkDrainageOnly.Enabled = _chkIgnoreFlatPipes.Enabled = enabled;
+            }
+            _cmbDrainRule.SelectedIndexChanged += (_, _) => RefreshRule();
+            _chkPipeDrain.CheckedChanged += (_, _) => RefreshRule();
+            RefreshRule();
 
             pipeGroup.Controls.Add(pipeLayout);
-            content.Controls.Add(pipeGroup, 0, 0);
+            void AddTab(string title, WinForms.Control group)
+            {
+                var page = new WinForms.TabPage(title) { AutoScroll = true, Padding = new WinForms.Padding(8) };
+                group.Dock = WinForms.DockStyle.Top;
+                page.Controls.Add(group); content.TabPages.Add(page);
+            }
+            AddTab("管線洩水", pipeGroup);
 
             var equipmentGroup = BuildGroup("設備樓層分布");
             var equipmentLayout = new WinForms.TableLayoutPanel { Dock = WinForms.DockStyle.Fill, ColumnCount = 2, RowCount = 7, AutoSize = true };
@@ -175,7 +196,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
             }, 0, 6);
             equipmentLayout.SetColumnSpan(equipmentLayout.GetControlFromPosition(0, 6), 2);
             equipmentGroup.Controls.Add(equipmentLayout);
-            content.Controls.Add(equipmentGroup, 1, 0);
+            AddTab("設備／連接", equipmentGroup);
 
             var buttons = new WinForms.FlowLayoutPanel
             {
@@ -193,6 +214,11 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
 
             AcceptButton = btnRun;
             CancelButton = btnCancel;
+            Shown += (_, _) => {
+                var area = WinForms.Screen.FromHandle(Handle).WorkingArea;
+                MinimumSize = new Size(Math.Min(620, area.Width - 24), Math.Min(500, area.Height - 24));
+                Size = new Size(Math.Min(Width, area.Width - 24), Math.Min(Height, area.Height - 24));
+            };
         }
 
         private static WinForms.GroupBox BuildGroup(string title)
@@ -225,7 +251,7 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP.MepCheck
 
             if (_chkPipeDrain.Checked && GetDrainFlowRule() == MepDrainFlowRule.OutletElement && _preselectedOutletId == ElementId.InvalidElementId)
             {
-                WinForms.MessageBox.Show("使用「指定排出口」規則時，請先在模型中選取排出口或下游設備後再啟動工具。", "MEP 檢查", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
+                WinForms.MessageBox.Show("請按「選取排出口」，指定排出口或下游設備。", "MEP 檢查", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information);
                 return;
             }
 

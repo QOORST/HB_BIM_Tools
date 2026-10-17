@@ -23,6 +23,7 @@ namespace HB.SleeveQuantity.Native
                     if(vertical!=null&&!vertical.IsReadOnly)vertical.Set(0);
                     var fm=family.FamilyManager; fm.NewType("150A");
                     fm.Set(fm.AddParameter("有效內徑",GroupTypeId.Geometry,SpecTypeId.Length,true),150/304.8);
+                    fm.Set(fm.AddParameter("套管長度",GroupTypeId.Geometry,SpecTypeId.Length,true),200/304.8);
                     fm.AddParameter("來源管線Id",GroupTypeId.Data,SpecTypeId.String.Text,true);
                     fm.AddParameter("穿越構件",GroupTypeId.Data,SpecTypeId.String.Text,true);
                     var profile=new CurveArray();
@@ -87,6 +88,7 @@ namespace HB.SleeveQuantity.Native
                 var row=Inspect();
                 Check(new[]{"正常","偏心可容納"}.Contains((string)Property(row,"Status"))&&((string)Property(row,"CheckDetails")).Contains("0.573"),
                     "One percent sloped pipe in horizontal sleeve reports measured angle and conservative clearance");
+                RunConstructionChecks(sleeve,level);
                 Tx("QA excessive angle",()=>
                 {
                     var slope=Pipe.Create(_doc,system.Id,pipeType.Id,level.Id,new XYZ(0,-5,-2),new XYZ(0,5,8));

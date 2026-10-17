@@ -1,10 +1,10 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
 
-var names=new[]{"sleeve_create","sleeve_manage","sleeve_cad_create","sleeve_opening","parameter_copy"};
-var labels=new[]{"自動套管","套管管理","CAD 建立套管","建築開孔","參數複製"};
+var names=new[]{"sleeve_create","sleeve_manage","sleeve_cad_create","sleeve_opening","parameter_copy","mep_quick_up","mep_quick_down","pipe_batch_align"};
+var labels=new[]{"自動套管","套管管理","CAD 建立套管","建築開孔","參數複製","快速上行","快速下行","批次支管對齊"};
 Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory,"icons"));
 foreach(var name in names)foreach(int size in new[]{16,32}){
     using var bitmap=new Bitmap(size,size,PixelFormat.Format32bppArgb);
@@ -13,10 +13,10 @@ foreach(var name in names)foreach(int size in new[]{16,32}){
     if(opaque<20||clear<20)throw new Exception("Invalid icon "+name);
     bitmap.Save(Path.Combine(AppContext.BaseDirectory,"icons",$"{name}_{size}.png"),ImageFormat.Png);
 }
-using(var sheet=new Bitmap(1060,350)){
+using(var sheet=new Bitmap(names.Length*208+20,350)){
 using(var g=Graphics.FromImage(sheet)){
 g.Clear(Color.White);g.TextRenderingHint=TextRenderingHint.ClearTypeGridFit;
-using var dark=new SolidBrush(Color.FromArgb(49,56,64));g.FillRectangle(dark,0,175,1060,175);
+using var dark=new SolidBrush(Color.FromArgb(49,56,64));g.FillRectangle(dark,0,175,sheet.Width,175);
 using var font=new Font("Microsoft JhengHei UI",12);using var small=new Font("Microsoft JhengHei UI",9);
 for(int row=0;row<2;row++)for(int i=0;i<names.Length;i++){
 int x=20+i*208,y=row*175;using var text=new SolidBrush(row==0?Color.FromArgb(40,48,54):Color.White);
@@ -30,7 +30,7 @@ g.DrawString("放大檢視",small,text,x+107,y+136);
 }}
 sheet.Save(Path.Combine(AppContext.BaseDirectory,"icon-preview.png"),ImageFormat.Png);
 }
-Console.WriteLine("PASS 10 icons: correct dimensions, nonblank alpha content, transparent backgrounds. Light/dark preview generated.");
+Console.WriteLine($"PASS {names.Length*2} icons: correct dimensions, nonblank alpha content, transparent backgrounds. Light/dark preview generated.");
 
 static void Draw(Graphics g,string name){
 using var outline=new Pen(Color.FromArgb(100,122,136),2){LineJoin=LineJoin.Round};
@@ -38,7 +38,16 @@ using var blue=new Pen(Color.FromArgb(0,156,187),2.5f){StartCap=LineCap.Round,En
 using var orange=new Pen(Color.FromArgb(232,148,34),2.5f){StartCap=LineCap.Round,EndCap=LineCap.Round,LineJoin=LineJoin.Round};
 using var paper=new SolidBrush(Color.FromArgb(241,245,247));
 using var wall=new SolidBrush(Color.FromArgb(168,184,194));
-if(name=="sleeve_create"){
+if(name=="mep_quick_up" || name=="mep_quick_down"){
+float startY=name=="mep_quick_up"?25:7, endY=name=="mep_quick_up"?7:25;
+g.DrawLines(blue,new[]{new PointF(3,startY),new PointF(16,startY),new PointF(16,endY)});
+g.DrawLine(orange,25,startY,25,endY);
+float back=name=="mep_quick_up"?5:-5;
+g.DrawLines(orange,new[]{new PointF(21,endY+back),new PointF(25,endY),new PointF(29,endY+back)});
+}else if(name=="pipe_batch_align"){
+g.DrawLine(orange,24,3,24,29);
+foreach(int y in new[]{7,16,25}){g.DrawLine(blue,3,y,24,y);g.DrawLines(blue,new[]{new PointF(19,y-3),new PointF(24,y),new PointF(19,y+3)});}
+}else if(name=="sleeve_create"){
 g.FillRectangle(wall,11,3,9,25);g.DrawRectangle(outline,11,3,9,25);
 g.DrawLine(blue,2,15,28,15);g.FillEllipse(paper,8,8,14,14);g.DrawEllipse(orange,8,8,14,14);g.DrawEllipse(blue,12,12,6,6);
 g.FillRectangle(paper,21,21,10,10);g.DrawLine(blue,26,22,26,30);g.DrawLine(blue,22,26,30,26);

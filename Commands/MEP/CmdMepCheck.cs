@@ -25,7 +25,20 @@ namespace YD_RevitTools.LicenseManager.Commands.MEP
                 ElementId preselectedOutletId = uiDoc.Selection.GetElementIds().FirstOrDefault() ?? ElementId.InvalidElementId;
                 using (var optionsForm = new MepCheckOptionsForm(doc, preselectedOutletId))
                 {
-                    if (optionsForm.ShowDialog() != WinForms.DialogResult.OK)
+                    WinForms.DialogResult choice;
+                    while ((choice = optionsForm.ShowDialog()) == WinForms.DialogResult.Retry)
+                    {
+                        try
+                        {
+                            var reference = uiDoc.Selection.PickObject(Autodesk.Revit.UI.Selection.ObjectType.Element, "選取排出口或下游設備；Esc 保留原設定。");
+                            optionsForm.SetOutlet(reference.ElementId);
+                        }
+                        catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                        {
+                            optionsForm.SetOutlet(null, true);
+                        }
+                    }
+                    if (choice != WinForms.DialogResult.OK)
                     {
                         return Result.Cancelled;
                     }
