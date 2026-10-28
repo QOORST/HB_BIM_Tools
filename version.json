@@ -1,7 +1,7 @@
 {
-  "version": "2.5.19",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.19/HB_BIM_Tools_v2.5.19_Setup.exe",
-  "releaseNotes": "2.5.19：套管重新指定來源與安全清理、ISO 與連結定位改善、裝修數量稽核及滑桿修正。支援 Revit 2022/2024/2025/2026 x64。請儲存並退出所有 Revit 後安裝；完整安裝與原生幾何仍待實機驗收，詳見 README.txt。",
+  "version": "2.5.20",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.20/HB_BIM_Tools_v2.5.20_Setup.exe",
+  "releaseNotes": "2.5.20：正式混淆版，修正設備／套管梁端定位與同平面接續梁去重，改善 .NET 8 相容性。支援 Revit 2024／2025／2026 x64；不更新 2022。請儲存並退出所有 Revit 後安裝。原工程模型定位情境仍需驗收，詳見安裝說明。",
   "releaseDate": "2026-10-28T00:00:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0"
