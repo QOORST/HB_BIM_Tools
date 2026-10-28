@@ -1,8 +1,9 @@
 {
-  "version": "2.5.20",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.20/HB_BIM_Tools_v2.5.20_Setup.exe",
-  "releaseNotes": "2.5.20：正式混淆版，修正設備／套管梁端定位與同平面接續梁去重，改善 .NET 8 相容性。支援 Revit 2024／2025／2026 x64；不更新 2022。請儲存並退出所有 Revit 後安裝。原工程模型定位情境仍需驗收，詳見安裝說明。",
+  "version": "2.5.21",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.21/HB_BIM_Tools_v2.5.21_Setup.exe",
+  "releaseNotes": "2.5.21 正式混淆版：新增 CAD 圖紙集合、A1／A3 出圖與逐張覆寫，修正圖層蒐集造成的 Core Console 崩潰及視埠重開位置。支援 Revit 2024／2025／2026；CAD 合併需 AutoCAD 2026。下載後請儲存並退出所有 Revit，再依安裝精靈更新。工程圖交付前仍須核對配置、比例與附件。",
   "releaseDate": "2026-10-28T00:00:00+08:00",
   "isCritical": false,
-  "minimumVersion": "2.0.0"
+  "minimumVersion": "2.0.0",
+  "sha256": "5AED65341B61C82C46DA46D93A7BD4157D649597C9491FC7EB223A54D98D9122"
 }
