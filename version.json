@@ -1,9 +1,9 @@
 {
-  "version": "2.5.23",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.23/HB_BIM_Tools_v2.5.23_CAD2024_2026_RC1_Setup.exe",
-  "releaseNotes": "2.5.23：修正尺寸文字整理滑桿遮住說明文字。保留混淆、非模態預覽與取消還原。Revit 2024／2025／2026 混淆實機驗證通過，不更新2022。正式通道交付CAD2024_2026_RC1組建；AutoCAD 2024／2025仍未實機驗證。安裝前儲存並退出Revit，既有族庫保留。",
-  "releaseDate": "2026-11-10T11:05:28.9869742+08:00",
+  "version": "2.5.24",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.24/HB_BIM_Tools_v2.5.24_CAD2024_2026_RC4_Setup.exe",
+  "releaseNotes": "2.5.24 RC4：自動套管改為非模態，生成後可選取下一批，保留預覽、管徑預設與可放大穿梁說明；修正定位尺寸介面吃字。保留混淆及簽章，Revit 2024／2025／2026 原生驗證通過，2022不更新。正式更新通道交付既有RC4安裝檔；AutoCAD 2024／2025未實機驗證，尚未完成乾淨電腦安裝及全部工程情境驗收。安裝前儲存並退出Revit，既有族庫保留。安裝內文記載的正式更新維持不變為封裝當時狀態，本次發布已啟用。",
+  "releaseDate": "2026-11-11T17:07:17.7126607+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "4A6410A911293F3F5E5BD625BA2F891DE90462CE4A22E47B6AE76EE22E3954FA"
+  "sha256": "99EF9E64E8839EBB094D358DFA3439DCE3F2C701E898852D32EC28E7CD7AD14A"
 }
