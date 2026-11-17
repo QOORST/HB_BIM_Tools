@@ -1,9 +1,9 @@
 {
-  "version": "2.5.26",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.26/HB_BIM_Tools_v2.5.26_CAD2024_2026_RC1_20261116_Setup.exe",
-  "releaseNotes": "2.5.26 RC1：自動套管在性質面板切換類型時，自動帶入該類型標準管內直徑、厚度、止水版直徑與止水板厚度（仍可單支調整，長度、高程、編號不變）；止水套管-40A 止水版直徑 160、止水板厚度 4。含 2.5.25 跨版本搬移視圖樣板、篩選器、線性尺寸標註與箭頭等內容。Revit 2024／2025／2026 原生驗證通過（237／217／238 項），2022不更新；AutoCAD 2024／2025未實機驗證，尚未完成乾淨電腦安裝及全部工程情境驗收。安裝前儲存並退出Revit，既有族庫保留。",
-  "releaseDate": "2026-11-16T18:55:00+08:00",
+  "version": "2.5.27",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.5.27/HB_BIM_Tools_v2.5.27_CAD2024_2026_RC1_20261117_Setup.exe",
+  "releaseNotes": "2.5.27：HB 視窗規則統一（標題、置中、字型、高 DPI）；施工圖繪製原則說明（工具內附，可由「繪製原則」連結開啟）；施工圖樣板管理新增「建立預設組合」21 組（軀體見上／見下、機電依圖面內容與系統，含接地系統圖），樣板依名稱自動帶入、視圖範圍建議值可改，有樣板直接存 v1；文字／尺寸／標籤允許清單改為選填。Revit 2024／2025／2026 原生驗證通過（237／217／238 項），2022不更新；AutoCAD 2024／2025未實機驗證，尚未完成乾淨電腦安裝及全部工程情境驗收。安裝前儲存並退出Revit，既有族庫保留。",
+  "releaseDate": "2026-11-17T11:16:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "154880F2082CBF4562D64D02BEEFF82774E58BC083FA8E526C728FC6C2511AB8"
+  "sha256": "986890B309F342C7EB5BA26A3BD5D76AF18AF8CCC652954A616E5594638BFCF3"
 }
