@@ -1,9 +1,26 @@
 {
-  "version": "2.6.0",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.6.0/HB_BIM_Tools_v2.6.0_CAD2024_2026_RC1_20261118_Setup.exe",
-  "releaseNotes": "2.6.0：授權管理視窗新增「複製授權申請碼」（一次複製機器碼、電腦與使用者資訊，貼給 HB 即可申請或續約）；支援授權撤銷（啟動 Revit 時背景檢查，連網時生效）。含 2.5.28 車道工具（車道斜坡、車道放樣圖）、剖面／立面軸線標頭、依樓層出圖原則。Revit 2024／2025／2026 原生驗證通過（239／219／240 項），2022不更新；AutoCAD 2024／2025未實機驗證，尚未完成乾淨電腦安裝及全部工程情境驗收。安裝前儲存並退出Revit，既有族庫保留。",
-  "releaseDate": "2026-11-18T18:42:00+08:00",
+  "version": "2.7.0",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.0/HB_BIM_Tools_v2.7.0_CAD2024_2026_RC1_20261118_Setup.exe",
+  "releaseNotes": "2.7.0：自動更新——開啟 Revit 時背景下載新版，下次開啟自動套用，免手動安裝、免系統管理員權限；新版啟動失敗自動退回上一版；更新包皆經 HB 簽章驗證。「檢查更新」改為立即檢查。本版需執行一次完整安裝檔，之後自動更新。Revit 2024／2025／2026 原生驗證通過（239／219／240 項），2022不更新。",
+  "releaseDate": "2026-11-19T00:34:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "130F6FD838B3A7A760D225904BEDF98D6385E0AF9B988B0270C7871C2493D94B"
+  "sha256": "4A6730AB11056FFDCBCD993F44456FC35B49C07D239D5E5854867D45A75DC546",
+  "packages": {
+    "2024": {
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.0/HB_BIM_Tools_v2.7.0_Revit2024_update.zip",
+      "sha256": "FDD6AFEABA49E0E3FE235DCE95979241A73D4C37D3EA4AE032C188927A24486E",
+      "minLoader": 1
+    },
+    "2025": {
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.0/HB_BIM_Tools_v2.7.0_Revit2025_update.zip",
+      "sha256": "C560112F4EDC40E99B1921A668E8C94EF63D4BCDAF68FDBBDF2643ACCEB6B3A0",
+      "minLoader": 1
+    },
+    "2026": {
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.0/HB_BIM_Tools_v2.7.0_Revit2026_update.zip",
+      "sha256": "E585DE253389B127D7546A148DC3F0B1231BC3164F89B6C61383DC6837B6BE4F",
+      "minLoader": 1
+    }
+  }
 }
