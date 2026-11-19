@@ -1,25 +1,25 @@
 {
-  "version": "2.7.5",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.5/HB_BIM_Tools_v2.7.5_CAD2024_2026_RC1_20261119_Setup.exe",
-  "releaseNotes": "2.7.5：自動標註——軸線未穿過柱時標「柱寬＋柱面到最近軸線」、梁頁新增「梁到軸線」、外側軸線搜尋範圍（預設 3000 mm）、設定視窗「儲存設定」、建不出來的項目列在可定位的結果視窗；結構放樣遇連結梁時提示改用連結模型標註；自動標籤「跟隨構件方向」時放置位置相對構件（垂直梁不再壓梁）。含 2.7.4 連結柱定位與連結軸線尺寸修正。已安裝 2.7.x 者自動更新，下次開啟 Revit 套用；2.6.0 以前請執行完整安裝檔。Revit 2024／2025／2026 原生驗證通過（239／219／240 項）。",
-  "releaseDate": "2026-11-19T18:50:00+08:00",
+  "version": "2.7.6",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.6/HB_BIM_Tools_v2.7.6_CAD2024_2026_RC1_20261119_Setup.exe",
+  "releaseNotes": "2.7.6：CAD 圖紙集合——輸出順序依 Revit 圖紙集合設定；修正圖紙較多時重開驗證因浮點誤差誤判失敗、未產出檔案。含 2.7.5 自動標註／自動標籤改善。已安裝 2.7.x 者自動更新，下次開啟 Revit 套用；2.6.0 以前請執行完整安裝檔。Revit 2024／2025／2026 原生驗證通過（239／219／240 項），AutoCAD 2026 原生 103 項通過。",
+  "releaseDate": "2026-11-19T19:40:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "03474E735BD450485F4F9110E640A949B162FE077B66D9BE1AE77D0D2FB70706",
+  "sha256": "F5F141840CE70118A162209AF752DF334D044EE495FAD950CE5198BCBF687086",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.5/HB_BIM_Tools_v2.7.5_Revit2024_update.zip",
-      "sha256": "F3289F5C5D5D15F60B9A31E3546A3473364CA583C3FC030FEC34190DA1E8A350",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.6/HB_BIM_Tools_v2.7.6_Revit2024_update.zip",
+      "sha256": "B36AB11E6FACCC24AAC53F995B88C8BF3CFC22AE24B273F7891945FC0FE9164F",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.5/HB_BIM_Tools_v2.7.5_Revit2025_update.zip",
-      "sha256": "E3D591E34F50E4EAB18EBFEC14A1ADBD11493BBF93BF4860820581F6EB7DA4F3",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.6/HB_BIM_Tools_v2.7.6_Revit2025_update.zip",
+      "sha256": "03F81B736343A18312F545045D2DCC8EC7B3AD253B184112830424A44FC9DAF5",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.5/HB_BIM_Tools_v2.7.5_Revit2026_update.zip",
-      "sha256": "4F050F469CA935901B47D5BB90034944A94A59806417CF91B0501E2BB15BA9C8",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.6/HB_BIM_Tools_v2.7.6_Revit2026_update.zip",
+      "sha256": "4251DF60BD20FCD4BB576DB31DA54377145D3AF63096ABA8A0F47C9826BE3735",
       "minLoader": 1
     }
   }
