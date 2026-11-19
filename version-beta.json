@@ -1,25 +1,25 @@
 {
-  "version": "2.7.1",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.1/HB_BIM_Tools_v2.7.1_CAD2024_2026_RC1_20261119_Setup.exe",
-  "releaseNotes": "2.7.1：自動套管——電管依實際外徑換算同級 DN 套用套管對應表（EMT／PVC／RSG），不再一律視為 150 mm；接地線（B.C.W／PVC接地）不產生套管。已安裝 2.7.0 者自動更新，下次開啟 Revit 套用；2.6.0 以前請執行完整安裝檔。Revit 2024／2025／2026 原生驗證通過（239／219／240 項）。",
-  "releaseDate": "2026-11-19T12:20:00+08:00",
+  "version": "2.7.2",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.2/HB_BIM_Tools_v2.7.2_CAD2024_2026_RC1_20261119_Setup.exe",
+  "releaseNotes": "2.7.2：套管族群「止水套管-40A」補勾「止水板」，專案中的舊族群會自動更新。含 2.7.1 電管套管修正（電管依外徑換算 DN、接地線不產生套管）。已安裝 2.7.x 者自動更新，下次開啟 Revit 套用；2.6.0 以前請執行完整安裝檔。Revit 2024／2025／2026 原生驗證通過（239／219／240 項）。",
+  "releaseDate": "2026-11-19T13:09:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "ED1825C64A7C22C0B815250C4DBD6C4E46CBA5FFD7C7B36889D273AB8C150C2D",
+  "sha256": "48E4CA28D2D07595D449B1B98C622137EE4E547218267F804D131A47EEC70D80",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.1/HB_BIM_Tools_v2.7.1_Revit2024_update.zip",
-      "sha256": "F8D60B22E4AC6180F0E41CFE5A29EB430E63079A4F205DB06F2CDE89CCC7F451",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.2/HB_BIM_Tools_v2.7.2_Revit2024_update.zip",
+      "sha256": "69FAB2753BE5C99F6CCC9310D91A4B07B11B7E907BF51C8D592C82A3E4E9BAB5",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.1/HB_BIM_Tools_v2.7.1_Revit2025_update.zip",
-      "sha256": "C831E01428E98B41DBB89F03C609EE4573B37D25E66C593BBBDB3F3DF24155E4",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.2/HB_BIM_Tools_v2.7.2_Revit2025_update.zip",
+      "sha256": "AE94AD2DC2A21819CA65533D210510DFEA2B695065883D2D0069F4990F9D5301",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.1/HB_BIM_Tools_v2.7.1_Revit2026_update.zip",
-      "sha256": "5DFCA44F3B2B480BB8F081CCC7CFAEA585E90EFCDE19C1AC80A59413C1A0BC56",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.7.2/HB_BIM_Tools_v2.7.2_Revit2026_update.zip",
+      "sha256": "61BC1C627A65140C4CE546DC5820A601BE755B2E7461DB77B7DF316A2AC72A72",
       "minLoader": 1
     }
   },
