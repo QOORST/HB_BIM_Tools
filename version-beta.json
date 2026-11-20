@@ -1,25 +1,25 @@
 {
-  "version": "2.8.4",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.4/HB_BIM_Tools_v2.8.4_CAD2024_2026_RC1_20261120_Setup.exe",
-  "releaseNotes": "2.8.4（測試版）：自動標籤新增成列排列（套管標籤依樑／牆排成一列、引線不交叉）、預設組合（結構／建築／設備／管線／套管）、排法圖卡、距離改輸入實際 mm 並顯示出圖大小、管附件可只標套管。修正 2.8.2 結果視窗無法開啟。圖模自檢結果視窗改為白話——依相撞／淨距不足／需人工確認分類，顯示軸線位置、構件與重疊／間距 mm 及處理建議；新增 3D 查看（共用一個 3D 視圖）、標記已處理／設為例外；修正定位誤報「請切回原檢查模型」；布林運算失敗改以乾淨幾何重算。含 2.8.0 機電對機電、機電對建築與淨距檢查，及 CAD 圖紙集合不再卡 30 分鐘。Revit 2024／2025／2026 原生驗證與 AutoCAD 驗證通過。",
-  "releaseDate": "2026-11-20T16:45:00+08:00",
+  "version": "2.8.6",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.6/HB_BIM_Tools_v2.8.6_CAD2024_2026_RC1_20261120_Setup.exe",
+  "releaseNotes": "2.8.6（測試版）：成列排列可將相近且內容相同的套管合用一個標籤（多條引線）；自動標籤結果視窗不再鎖住畫面，可邊看邊定位。自動標籤新增成列排列（套管標籤依樑／牆排成一列、引線不交叉）、預設組合（結構／建築／設備／管線／套管）、排法圖卡、距離改輸入實際 mm 並顯示出圖大小、管附件可只標套管。修正 2.8.2 結果視窗無法開啟。圖模自檢結果視窗改為白話——依相撞／淨距不足／需人工確認分類，顯示軸線位置、構件與重疊／間距 mm 及處理建議；新增 3D 查看（共用一個 3D 視圖）、標記已處理／設為例外；修正定位誤報「請切回原檢查模型」；布林運算失敗改以乾淨幾何重算。含 2.8.0 機電對機電、機電對建築與淨距檢查，及 CAD 圖紙集合不再卡 30 分鐘。Revit 2024／2025／2026 原生驗證與 AutoCAD 驗證通過。",
+  "releaseDate": "2026-11-20T17:53:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "EB231C3999B99E1027AB1530A534D53EE20929D7CCFF6291759838587489566A",
+  "sha256": "1B29B78648E9780AEBE6CCD519C42EAAA74C09F2D61EEC4885F4761FE1D53043",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.4/HB_BIM_Tools_v2.8.4_Revit2024_update.zip",
-      "sha256": "F360DEABD6A8EC0CC154ACB2CF0185D72352A53FBFB1E685F01AA2F158706451",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.6/HB_BIM_Tools_v2.8.6_Revit2024_update.zip",
+      "sha256": "B29249D1922E3D2429362AA7DB52547CD3FF4FD794E21B279DEB4838E558E201",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.4/HB_BIM_Tools_v2.8.4_Revit2025_update.zip",
-      "sha256": "62E30F90BBA0D1251558CD87DD45946C5E8BBE9E811210EF87B5769AF6A1FCE6",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.6/HB_BIM_Tools_v2.8.6_Revit2025_update.zip",
+      "sha256": "90175A3271B3F8C35E43C0D5919DA6A1E5F24223F61451F5DB66AA6FF2DBF584",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.4/HB_BIM_Tools_v2.8.4_Revit2026_update.zip",
-      "sha256": "DC8F48FF75B3CC8753C721F4F59430FF07AA95A12611E7E4A1B7282AD367D838",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.6/HB_BIM_Tools_v2.8.6_Revit2026_update.zip",
+      "sha256": "B0866A12C9ADB1C4FA56BF0EEE14D6427DC972D1C36DD44862E172BB8BD94904",
       "minLoader": 1
     }
   },
