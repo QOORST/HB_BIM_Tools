@@ -1,25 +1,25 @@
 {
-  "version": "2.8.8",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.8/HB_BIM_Tools_v2.8.8_CAD2024_2026_RC1_20261120_Setup.exe",
-  "releaseNotes": "2.8.8（測試版）：建築／結構標註——原本 8 個按鈕整合成「建築／結構標註…」與「依上次設定直接標註」，一個視窗選補齊尺寸（軸線、柱、梁）、牆位放樣或結構放樣，可只標選取的，連結模型構件自動納入（Revit 2024 以上）；結構放樣新增樓板開口尺寸。機電定位尺寸——按鈕整理成 3 個，一個視窗設定，梁自動在本機與已載入連結中尋找，找不到梁改用最近軸線並標示，梁連結未載入時事先提醒。兩者結果都改為不鎖畫面的清單，可定位與全部復原。含 2.8.7 迴路配線。",
-  "releaseDate": "2026-11-21T14:00:00+08:00",
+  "version": "2.8.12",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.12/HB_BIM_Tools_v2.8.12_CAD2024_2026_RC1_20261120_Setup.exe",
+  "releaseNotes": "2.8.12（測試版）：建築／結構標註——梁標法可選「每個方向一串」（軸線＋梁兩側面拉成一串放第一跨，相同的跨不重標，錯位、尺寸不同或另一翼才再拉一串）或「逐支標」；只標選取的可按鈕選本機或連結構件，先選後選都可以；軸線、柱、梁可各自指定尺寸樣式；連結改為勾選清單，預設只勾結構連結；位置重合的軸線只標一條。機電定位尺寸——名稱含接地、銅棒、避雷的電管配件與管附件也可當設備標註。含 2.8.8 全部內容。",
+  "releaseDate": "2026-11-21T18:00:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "42D51C9488B84E255FEBD2CF5C677C072DA19149E522145D80002185B737269F",
+  "sha256": "D134BF260F93F441B3A5D2C46F0144CF29125F8C980F6C36C25F959F3C6C94FF",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.8/HB_BIM_Tools_v2.8.8_Revit2024_update.zip",
-      "sha256": "6B267457C6A4638CB14901F8A14186DED164306209520144366598A071917CFC",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.12/HB_BIM_Tools_v2.8.12_Revit2024_update.zip",
+      "sha256": "81C7519E9A4ADC0CA0FE68754736BCD04C683D1D9C5A921853915F70912EB414",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.8/HB_BIM_Tools_v2.8.8_Revit2025_update.zip",
-      "sha256": "4C695F00FC99CDEEF8C79F0191E797DCAECB118DDEC6C18AEF29FA354BA76676",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.12/HB_BIM_Tools_v2.8.12_Revit2025_update.zip",
+      "sha256": "C23CF6A447EB144E40AAE640564367202CCAAB805686CB7CC763C02C159632B4",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.8/HB_BIM_Tools_v2.8.8_Revit2026_update.zip",
-      "sha256": "2E4190F35B1FBB5C74050A4E6E94F8C30180998D9EF95CF8A30850D1C79C7D9E",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.12/HB_BIM_Tools_v2.8.12_Revit2026_update.zip",
+      "sha256": "1D33382427F6F57C491026FAE44397496A688EBA74AACD13DF30187E0D06D2C7",
       "minLoader": 1
     }
   },
