@@ -1,25 +1,25 @@
 {
-  "version": "2.8.18",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.18/HB_BIM_Tools_v2.8.18_CAD2024_2026_RC1_20261120_Setup.exe",
-  "releaseNotes": "2.8.18：新增「自動吊架」——沿配管、電管、電纜架、風管放吊架，間距依管材管徑分級（預設 1～3 m，可改），平行管自動共架，吊桿接梁底或樓板底（含連結），可選連結模型的管線；新增「迴路配線」——選燈具插座依遠近分組建電路、畫迴路線與標記；建築／結構標註整合成一個視窗（軸線、柱、梁、牆位與結構放樣、樓板開口，可只標選取、連結自動納入）；機電定位尺寸簡化，找不到梁改用軸線並標示，新增「管線之間（整排一串）」給接地網；圖模自檢第二階段：穿梁依穿梁原則分級、穿板／牆判讀套管與開口邊；功能區重新整理（管線建模／預埋與支架／電氣分面板、同流程小按鈕疊放、用不了的按鈕變灰）；修正族參數滑桿閃退與無法調整。已安裝 2.7.x 以後版本者自動更新，下次開啟 Revit 套用；2.6.0 以前請執行完整安裝檔。Revit 2024／2025／2026 原生驗證與 AutoCAD 驗證通過。",
-  "releaseDate": "2026-11-23T14:05:00+08:00",
+  "version": "2.8.19",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.19/HB_BIM_Tools_v2.8.19_CAD2024_2026_RC1_20261120_Setup.exe",
+  "releaseNotes": "2.8.19：自動套管的管徑對應會自動帶入預設套管類型（例如 DN15～40 用「套管-50A」），之前存成「待指定」的也會重新帶入，並新增「待指定的帶入預設」按鈕。含 2.8.18 全部內容：自動吊架、迴路配線、建築／結構標註整合、機電定位尺寸簡化、圖模自檢第二階段、功能區整理、族參數滑桿修正。已安裝 2.7.x 以後版本者自動更新，下次開啟 Revit 套用；2.6.0 以前請執行完整安裝檔。Revit 2024／2025／2026 原生驗證與 AutoCAD 驗證通過。",
+  "releaseDate": "2026-11-23T15:58:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "F2114618DED051492AEB89D20D5D672070230C1F2A17B0594EE26CE6AFFA1A3D",
+  "sha256": "33DE02E118FBDB7C7EFDBDDB4235D7C4035273B9CB6D95682E04D1811B87A334",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.18/HB_BIM_Tools_v2.8.18_Revit2024_update.zip",
-      "sha256": "7005680D4A050CAA07B7A6354AAEC153E2A7587ADB869ED96CADAF73574D52B7",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.19/HB_BIM_Tools_v2.8.19_Revit2024_update.zip",
+      "sha256": "1CA776FCCB3FD3A34A1D37460C58A251880CDAA6A06709E6E5CA249A82FCA9CC",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.18/HB_BIM_Tools_v2.8.18_Revit2025_update.zip",
-      "sha256": "44E32194066CCCB96C4643C08EB7CD6A4B1F554078831A8C8ECEF79921ADB024",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.19/HB_BIM_Tools_v2.8.19_Revit2025_update.zip",
+      "sha256": "80724B45F0F1FCD1627CF2BAEEE69DB23CB79307D704948D2927C4280BD37509",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.18/HB_BIM_Tools_v2.8.18_Revit2026_update.zip",
-      "sha256": "36ABA2FD3E90458C21BD6C614B3116F336D6784AC4D20CC409EE9581A1D73769",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.19/HB_BIM_Tools_v2.8.19_Revit2026_update.zip",
+      "sha256": "93DAC979A0D9649282C372C67D57330F9B9B455D464429D4DB0FDC6A8264C70A",
       "minLoader": 1
     }
   }
