@@ -1,25 +1,25 @@
 {
-  "version": "2.8.15",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.15/HB_BIM_Tools_v2.8.15_CAD2024_2026_RC1_20261120_Setup.exe",
-  "releaseNotes": "2.8.15（測試版）：自動吊架可選連結模型裡的管線——視窗內勾選要找的模型（顯示各連結的配管、電管、電纜架、風管數量），或按「選取連結管線…」點選；吊架放在目前開啟的模型，結果標示〔連結〕；避讓檢查含連結管線。含 2.8.14 自動吊架。",
-  "releaseDate": "2026-11-22T19:38:00+08:00",
+  "version": "2.8.16",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.16/HB_BIM_Tools_v2.8.16_CAD2024_2026_RC1_20261120_Setup.exe",
+  "releaseNotes": "2.8.16（測試版）：功能區精簡——同一流程的按鈕改成上下疊放的小按鈕，MEP 樓層歸位移到「避讓翻彎」，樓板跨度方向移到「更多標註」，暫時拿掉族參數名稱修改；修正族參數滑桿開啟後立刻關閉；自動吊架改依管段與「明細表/類型」辨識塑膠管（例如 PVC管），辨識字可修改，結果列出每個吊架採用的間距。",
+  "releaseDate": "2026-11-23T10:46:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "CF49E8CE3F685E01EB225C2CFA66009DD5893B2EA6EC6D478503200D6F41AFEC",
+  "sha256": "43B77FE2CB47749F3D7ACD197A75CF2D4892707B50A1CA8B88DD0C4460A9D2AD",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.15/HB_BIM_Tools_v2.8.15_Revit2024_update.zip",
-      "sha256": "B3A4FA05C3A6D5C1801C0C700BC99CA0624AE708A8D789CCDA28C30F85DC9456",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.16/HB_BIM_Tools_v2.8.16_Revit2024_update.zip",
+      "sha256": "2FDF7DDAC115D82556E8231B53D521783C03F3A4294E27464021758C8525BAD3",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.15/HB_BIM_Tools_v2.8.15_Revit2025_update.zip",
-      "sha256": "E5DDDD1FB9FEA0627CBD31FC50D9E2B8C9A87F0125FC336EF309146024CD59C5",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.16/HB_BIM_Tools_v2.8.16_Revit2025_update.zip",
+      "sha256": "6D6C582325096E12DD8D39AC751C09B1DB7C4EE7366D8756E30610C9260FC6BB",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.15/HB_BIM_Tools_v2.8.15_Revit2026_update.zip",
-      "sha256": "99FD62EFAD3365AEB14385D97764E8ACC912E3946654E0F26F349D94DC737B2C",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.16/HB_BIM_Tools_v2.8.16_Revit2026_update.zip",
+      "sha256": "690EBF36E2EFB448CF1E22F51B123973F7E0689C337941851E362C81691D42F6",
       "minLoader": 1
     }
   },
