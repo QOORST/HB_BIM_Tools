@@ -1,25 +1,25 @@
 {
-  "version": "2.8.17",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.17/HB_BIM_Tools_v2.8.17_CAD2024_2026_RC1_20261120_Setup.exe",
-  "releaseNotes": "2.8.17（測試版）：圖模自檢第二階段——機電對結構穿梁依穿梁原則分成符合／需補強／需結構確認／不符，已有套管改用套管尺寸檢核，穿樓板、牆沒有套管標「需預留套管」、靠近開口邊標「貼近開口邊」，穿柱一律不可。功能區：MEP 工具拆成「管線建模」「預埋與支架」「電氣」三個面板，用不了的按鈕會變灰，小按鈕文字不再多空格。",
-  "releaseDate": "2026-11-23T12:17:00+08:00",
+  "version": "2.8.18",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.18/HB_BIM_Tools_v2.8.18_CAD2024_2026_RC1_20261120_Setup.exe",
+  "releaseNotes": "2.8.18（測試版）：修正族參數滑桿拖動或輸入數值時出現「文件或族型已變更」，以及關閉滑桿視窗或切換檔案時 Revit 跳錯誤關閉；牆面器具定位尺寸會記住上次的尺寸樣式。含 2.8.17 圖模自檢第二階段與功能區分面板。",
+  "releaseDate": "2026-11-23T12:57:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "CDC31AD959B517AA7B04EE91A6F480E3DC62F470D91EBE24EDC24BEA81EA357B",
+  "sha256": "F2114618DED051492AEB89D20D5D672070230C1F2A17B0594EE26CE6AFFA1A3D",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.17/HB_BIM_Tools_v2.8.17_Revit2024_update.zip",
-      "sha256": "D60EC4A8FBC9C815256E90345BD58F83269EA6BA3DCC15EB14488EB995D06B15",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.18/HB_BIM_Tools_v2.8.18_Revit2024_update.zip",
+      "sha256": "7005680D4A050CAA07B7A6354AAEC153E2A7587ADB869ED96CADAF73574D52B7",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.17/HB_BIM_Tools_v2.8.17_Revit2025_update.zip",
-      "sha256": "FD6677F504062BCCB78C85072F8855739685EA38C89FC502ABB2125F9B6AD0C5",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.18/HB_BIM_Tools_v2.8.18_Revit2025_update.zip",
+      "sha256": "44E32194066CCCB96C4643C08EB7CD6A4B1F554078831A8C8ECEF79921ADB024",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.17/HB_BIM_Tools_v2.8.17_Revit2026_update.zip",
-      "sha256": "11B773A99FB9F932FF71597EBB1083AD99DE91D4AC0EDA87B516F2B58D5E5A44",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.18/HB_BIM_Tools_v2.8.18_Revit2026_update.zip",
+      "sha256": "36ABA2FD3E90458C21BD6C614B3116F336D6784AC4D20CC409EE9581A1D73769",
       "minLoader": 1
     }
   },
