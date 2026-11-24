@@ -1,25 +1,25 @@
 {
-  "version": "2.8.22",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.22/HB_BIM_Tools_v2.8.22_CAD2024_2026_RC1_20261120_Setup.exe",
-  "releaseNotes": "2.8.22：電氣面板新增「管徑線型對照表」「管線說明」「管排清單標註」（2.8.20～2.8.21）；機電定位尺寸新增「設備之間（每個方向一串）」，「管線之間」可沿管線串吊架間距；自動標籤成列排列會避開尺寸，密集的分到兩側。",
-  "releaseDate": "2026-11-24T00:20:00+08:00",
+  "version": "2.8.23",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.23/HB_BIM_Tools_v2.8.23_CAD2024_2026_RC1_20261120_Setup.exe",
+  "releaseNotes": "2.8.23：立管上下行改依樓板判斷，可指定上一樓層；管排清單標註會讀電線參數（盤體、電纜類型、線徑）。",
+  "releaseDate": "2026-11-24T20:45:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "A23C810127FB435BCFB6B744235A4657B9A89D990045EF04E1D56F15CCC5E953",
+  "sha256": "A273D505950E21B96643C11F6CC9930B8878A85DF0AF855975D6F19AEFED1EB9",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.22/HB_BIM_Tools_v2.8.22_Revit2024_update.zip",
-      "sha256": "04763F7EF8711B373DDBD560E5F6B3D18F5A28ABAD99BF4F3BCA67CF49ED1DF2",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.23/HB_BIM_Tools_v2.8.23_Revit2024_update.zip",
+      "sha256": "46C85CBA838A87BE4B8826FF1AF61DA4B73804EB021BD146AE4272CBC69EBB72",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.22/HB_BIM_Tools_v2.8.22_Revit2025_update.zip",
-      "sha256": "15B4EFF9B1042F7FEE9C140B0E97847B9DBB1BC0EF701C7FB0D08CC36FFD7209",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.23/HB_BIM_Tools_v2.8.23_Revit2025_update.zip",
+      "sha256": "6C286FD9ABE2F6623BE304739C63A2FE5F16584117ED00C4D58EA735CACEAB0A",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.22/HB_BIM_Tools_v2.8.22_Revit2026_update.zip",
-      "sha256": "EEEDFD09879FEA72C1F0BFFA6F0EC9FC99346B4180B190D264041FBA16F3AE9C",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.23/HB_BIM_Tools_v2.8.23_Revit2026_update.zip",
+      "sha256": "BCB450BDBCF8DF14D0BC3F48E5CCF0FA47609F550E49B6C6EA2B8B259170505B",
       "minLoader": 1
     }
   }
