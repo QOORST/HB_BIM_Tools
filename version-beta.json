@@ -1,25 +1,25 @@
 {
-  "version": "2.8.24",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.24/HB_BIM_Tools_v2.8.24_CAD2024_2026_RC1_20261120_Setup.exe",
-  "releaseNotes": "2.8.24（測試版）：圖模自檢新增「碰撞檢討報告」，依階段＋版次比對、固定編號跨版沿用，輸出 PDF（含 3D 截圖）與 Excel。",
-  "releaseDate": "2026-11-25T10:30:00+08:00",
+  "version": "2.8.25",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.25/HB_BIM_Tools_v2.8.25_CAD2024_2026_RC1_20261120_Setup.exe",
+  "releaseNotes": "2.8.25（測試版）：碰撞檢討報告截圖改為白底特寫、衝突構件紅綠標示，加元素 ID，截圖有進度可取消、沿用前版；機電定位尺寸會抓柱邊。",
+  "releaseDate": "2026-11-25T11:45:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "70C98106FEFCD895B95EAF22B9C262FAC8106FFC039B7A1A2AFC73701CBD1B63",
+  "sha256": "B40116637F4944C3CDE22BBEFFBDE97B1CA6B3DB9F03C4E9B3E8380FB5B7F9C4",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.24/HB_BIM_Tools_v2.8.24_Revit2024_update.zip",
-      "sha256": "4731B4D3D5A4A32EA17124EA2734E999CD8285961E0DDDB4C61ED03DE1265ADB",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.25/HB_BIM_Tools_v2.8.25_Revit2024_update.zip",
+      "sha256": "7325E2FB7541D072D6176314E3FD08EC310B550FD300C9133E00A37012F9E4E2",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.24/HB_BIM_Tools_v2.8.24_Revit2025_update.zip",
-      "sha256": "E560CD0F4AB4203BD6990C04BB904FBD97B0CB55B41DCC0835FCF1F138120A19",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.25/HB_BIM_Tools_v2.8.25_Revit2025_update.zip",
+      "sha256": "80FA9878492E50B989021298F9EBC5C85B101D80BB4E21E2449F84FB54687E74",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.24/HB_BIM_Tools_v2.8.24_Revit2026_update.zip",
-      "sha256": "9F6B1CFFB6EF1E9C0FB739AF31CCEC3039E17E060AD3378BF49FB62E561D4686",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.25/HB_BIM_Tools_v2.8.25_Revit2026_update.zip",
+      "sha256": "DFED171659A6922B4237BC15F4A8899A200B76F7DDE834CAD6E39C116BF9F452",
       "minLoader": 1
     }
   },
