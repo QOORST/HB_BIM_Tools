@@ -1,25 +1,25 @@
 {
-  "version": "2.8.23",
-  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.23/HB_BIM_Tools_v2.8.23_CAD2024_2026_RC1_20261120_Setup.exe",
-  "releaseNotes": "2.8.23：立管上下行改依樓板判斷，可指定上一樓層；管排清單標註會讀電線參數（盤體、電纜類型、線徑）。",
-  "releaseDate": "2026-11-24T20:45:00+08:00",
+  "version": "2.8.25",
+  "downloadUrl": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.25/HB_BIM_Tools_v2.8.25_CAD2024_2026_RC1_20261120_Setup.exe",
+  "releaseNotes": "2.8.25：圖模自檢新增「碰撞檢討報告」（階段＋版次比對、固定編號、PDF 含 3D 特寫截圖與元素 ID、Excel）；機電定位尺寸會抓柱邊。",
+  "releaseDate": "2026-11-25T11:45:00+08:00",
   "isCritical": false,
   "minimumVersion": "2.0.0",
-  "sha256": "A273D505950E21B96643C11F6CC9930B8878A85DF0AF855975D6F19AEFED1EB9",
+  "sha256": "B40116637F4944C3CDE22BBEFFBDE97B1CA6B3DB9F03C4E9B3E8380FB5B7F9C4",
   "packages": {
     "2024": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.23/HB_BIM_Tools_v2.8.23_Revit2024_update.zip",
-      "sha256": "46C85CBA838A87BE4B8826FF1AF61DA4B73804EB021BD146AE4272CBC69EBB72",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.25/HB_BIM_Tools_v2.8.25_Revit2024_update.zip",
+      "sha256": "7325E2FB7541D072D6176314E3FD08EC310B550FD300C9133E00A37012F9E4E2",
       "minLoader": 1
     },
     "2025": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.23/HB_BIM_Tools_v2.8.23_Revit2025_update.zip",
-      "sha256": "6C286FD9ABE2F6623BE304739C63A2FE5F16584117ED00C4D58EA735CACEAB0A",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.25/HB_BIM_Tools_v2.8.25_Revit2025_update.zip",
+      "sha256": "80FA9878492E50B989021298F9EBC5C85B101D80BB4E21E2449F84FB54687E74",
       "minLoader": 1
     },
     "2026": {
-      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.23/HB_BIM_Tools_v2.8.23_Revit2026_update.zip",
-      "sha256": "BCB450BDBCF8DF14D0BC3F48E5CCF0FA47609F550E49B6C6EA2B8B259170505B",
+      "url": "https://github.com/QOORST/HB_BIM_Tools/releases/download/v2.8.25/HB_BIM_Tools_v2.8.25_Revit2026_update.zip",
+      "sha256": "DFED171659A6922B4237BC15F4A8899A200B76F7DDE834CAD6E39C116BF9F452",
       "minLoader": 1
     }
   }
